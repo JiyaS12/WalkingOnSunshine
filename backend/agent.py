@@ -157,6 +157,163 @@ def generate_summary(
     return result
 
 
+_SYNTHESIS_SYSTEM_PROMPT = (
+    "You are a clinical decision-support assistant writing for a physician. "
+    "Given a patient's subjective phone-survey responses and objective gait "
+    "telemetry, write a concise clinical synthesis (4–6 sentences, plain "
+    "clinical English, no bullet points): (1) state whether the reported "
+    "symptoms are concordant or discordant with the measured gait changes "
+    "and why, (2) name the specific metrics that support this, (3) flag any "
+    "red flags for fall risk, (4) end with one suggested next step. Do not "
+    "invent data not provided."
+)
+
+
+def _synthesis_key(record: dict) -> str:
+    survey = record["surveys"][-1]
+    sessions = record["gait_sessions"]
+    blob = json.dumps(
+        [
+            survey,
+            _round_metrics(sessions[-1]["metrics"]),
+            _round_metrics(sessions[0]["metrics"]),
+            record["patient_id"],
+        ],
+        sort_keys=True,
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _synthesis_prompt(record: dict) -> str:
+    survey = record["surveys"][-1]
+    sessions = record["gait_sessions"]
+    falls = survey.get("fall_history") or {}
+    notes = survey.get("dizziness_notes") or ""
+    latest = sessions[-1]
+    first = sessions[0]
+    gait = f'Latest session "{latest["label"]}": {_round_metrics(latest["metrics"])}.'
+    if len(sessions) > 1:
+        gait = (
+            f'first session "{first["label"]}": '
+            f'{_round_metrics(first["metrics"])}. ' + gait
+        )
+    return (
+        f"Patient {record['patient_id']} ({record.get('name')}, "
+        f"{record.get('age')}). "
+        f"Latest survey ({survey.get('recorded_at')}): "
+        f"pain {survey.get('pain_scale')}/10; "
+        f"falls in last 6 months: {falls.get('falls_last_6_months', 0)} "
+        f"(injured: {bool(falls.get('injured'))}); "
+        f"dizziness: {'yes' if survey.get('dizziness') else 'no'} {notes}; "
+        f"complaints: {', '.join(survey.get('primary_complaints', []))}. "
+        f"Gait telemetry — {gait}"
+    )
+
+
+def _template_synthesis(record: dict) -> str:
+    survey = record["surveys"][-1]
+    sessions = record["gait_sessions"]
+    latest = sessions[-1]["metrics"]
+    falls = survey.get("fall_history") or {}
+    pain = survey.get("pain_scale", 0)
+    n_falls = falls.get("falls_last_6_months", 0)
+    dizzy = bool(survey.get("dizziness"))
+    risk = latest["fall_risk_score"]
+    if len(sessions) > 1:
+        first_risk = sessions[0]["metrics"]["fall_risk_score"]
+        trend = (
+            "up from" if risk > first_risk else "down from"
+        ) + f" {first_risk:.2f}"
+    else:
+        trend = "single session"
+    subjective_flag = pain >= 6 or n_falls >= 1 or dizzy
+    if subjective_flag and risk >= 0.5:
+        verdict, reason = (
+            "concordant",
+            "reported symptoms and elevated objective fall risk agree",
+        )
+    elif not subjective_flag and risk < 0.3:
+        verdict, reason = (
+            "concordant",
+            "mild symptoms match the low objective fall risk",
+        )
+    elif subjective_flag:
+        verdict, reason = (
+            "discordant",
+            "patient reports significant symptoms despite low measured "
+            "fall risk — consider non-gait contributors (vestibular, "
+            "orthostatic)",
+        )
+    else:
+        verdict, reason = (
+            "discordant",
+            "elevated measured fall risk despite few reported symptoms — "
+            "patient may underestimate their risk",
+        )
+    return (
+        f"Subjective: {record.get('name')} reports pain {pain}/10, "
+        f"{n_falls} fall(s) in 6 months, dizziness "
+        f"{'present' if dizzy else 'absent'}; primary complaints: "
+        f"{', '.join(survey.get('primary_complaints', []))}. "
+        f"Objective: fall-risk score {risk:.2f} ({trend}), "
+        f"asymmetry {latest['asymmetry_pct']:.1f}%, "
+        f"stride {latest['stride_length_m']:.2f} m, "
+        f"cadence {latest['cadence_steps_per_min']:.0f} steps/min. "
+        f"Correlation: {verdict} — {reason}."
+    )
+
+
+def generate_synthesis(record: dict) -> dict:
+    cache = _load_cache()
+    key = _synthesis_key(record)
+    if key in cache:
+        entry = dict(cache[key])
+        if entry["source"] == "openai":
+            saved = (len(_synthesis_prompt(record)) + len(entry["summary"])) // 4
+            _stats["estimated_tokens_saved"] += saved
+            entry["estimated_tokens_saved"] = _stats["estimated_tokens_saved"]
+        else:
+            entry["estimated_tokens_saved"] = 0
+        _stats["cache_hits"] += 1
+        entry["cached"] = True
+        return entry
+
+    prompt = _synthesis_prompt(record)
+    summary = None
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            client = OpenAI()
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=300,
+            )
+            summary = resp.choices[0].message.content.strip()
+            source = "openai"
+        except Exception:
+            summary = None
+            source = "template"
+    else:
+        source = "template"
+
+    if summary is None:
+        summary = _template_synthesis(record)
+        source = "template"
+
+    result = {
+        "summary": summary,
+        "source": source,
+        "cached": False,
+        "estimated_tokens_saved": _stats["estimated_tokens_saved"],
+    }
+    cache[key] = {"summary": summary, "source": source}
+    _persist_cache()
+    return result
+
+
 def cache_stats() -> dict:
     return {
         "entries": len(_load_cache()),
