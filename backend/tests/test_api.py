@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -81,6 +82,26 @@ def test_process_frame_with_leg_length():
 def test_process_frame_too_few():
     resp = client.post("/api/process-frame", json={"frames": []})
     assert resp.status_code == 422
+
+
+def test_process_frame_survives_dropped_landmarks():
+    """A dropped landmark must not mask a high-risk reading."""
+    frames = json.loads(json.dumps(load_cohort()["sessions"]["day_1"]["frames"][:120]))
+    clean = client.post(
+        "/api/process-frame", json={"frames": frames, "fps": 30}
+    ).json()
+    assert clean["gait_detected"] is True
+
+    for i in (3, 4, 41):
+        frames[i]["left_ankle"][1] = float("nan")
+    resp = client.post("/api/process-frame",
+                       content=json.dumps({"frames": frames, "fps": 30}),
+                       headers={"content-type": "application/json"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["gait_detected"] is True
+    assert body["dropped_frame_pct"] > 0
+    assert abs(body["fall_risk_score"] - clean["fall_risk_score"]) < 0.1
 
 
 def test_generate_summary(monkeypatch, tmp_path):
