@@ -110,9 +110,10 @@ def get_patient(pid: str) -> dict:
 def upsert_survey(survey: dict) -> dict:
     patients = _load()
     pid = survey["patient_id"]
-    for field in _TEXT_FIELDS:
-        if isinstance(survey.get(field), str):
-            survey[field] = survey[field].strip()[:_MAX_TEXT]
+    for holder in (survey, survey.get("fall_history") or {}):
+        for field in _TEXT_FIELDS:
+            if isinstance(holder.get(field), str):
+                holder[field] = holder[field].strip()[:_MAX_TEXT]
     if survey.get("recorded_at") is None:
         survey["recorded_at"] = datetime.now(timezone.utc).isoformat()
     record = patients.get(pid)
