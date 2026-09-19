@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, FlaskConical, AlertTriangle } from "lucide-react";
+import { Camera, FlaskConical, AlertTriangle, RefreshCw } from "lucide-react";
 import {
   fetchSimulation,
   processFrames,
   JointFrame,
   SimulationSession,
 } from "../lib/api";
+import { computeLiveGait, LiveGaitMetrics } from "../lib/gait";
 import type { MediaPipeCamera, Pose, PoseResults } from "../types/mediapipe";
 
 // MediaPipe pose landmark indices -> backend joint names
@@ -20,8 +21,9 @@ const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
   28: "right_ankle",
 };
 
-const LEG_JOINT_INDICES = new Set(
-  Object.keys(LANDMARK_JOINTS).map(Number)
+// lower-body landmarks including heels (29/30) and foot indices (31/32)
+const LOWER_BODY_INDICES = new Set(
+  [23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
 );
 
 // POSE_CONNECTIONS-like pairs (upper body + legs) for skeleton drawing
@@ -38,6 +40,12 @@ const SKELETON_PAIRS: [number, number][] = [
   [25, 27],
   [24, 26],
   [26, 28],
+  [27, 29],
+  [29, 31],
+  [27, 31],
+  [28, 30],
+  [30, 32],
+  [28, 32],
 ];
 
 // joint key -> indices for the simulated skeleton (order in JointFrame)
@@ -126,6 +134,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("idle");
   const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [cameraBlocked, setCameraBlocked] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [liveGait, setLiveGait] = useState<LiveGaitMetrics | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -139,6 +150,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const timesRef = useRef<number[]>([]);
   const sendingRef = useRef(false);
   const generationRef = useRef(0);
+  const gaitEmaRef = useRef<LiveGaitMetrics | null>(null);
+  const lastGaitUpdateRef = useRef(0);
   const onMetricsRef = useRef(onMetrics);
   onMetricsRef.current = onMetrics;
 
@@ -203,7 +216,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
     drawn.forEach((idx) => {
       const p = lm[idx];
       if (!p) return;
-      const isLeg = LEG_JOINT_INDICES.has(idx);
+      const isLeg = LOWER_BODY_INDICES.has(idx);
       ctx.fillStyle = isLeg ? "#f472b6" : "#f8fafc";
       ctx.beginPath();
       ctx.arc(
@@ -227,6 +240,28 @@ export default function WebcamFeed({ onMetrics }: Props) {
       setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
       const world = results.poseWorldLandmarks;
       if (!world || world.length < 29) return;
+
+      const raw = computeLiveGait(world);
+      if (raw) {
+        const ema = gaitEmaRef.current;
+        const alpha = 0.2;
+        gaitEmaRef.current = ema
+          ? {
+              leftKneeAngle: ema.leftKneeAngle + alpha * (raw.leftKneeAngle - ema.leftKneeAngle),
+              rightKneeAngle: ema.rightKneeAngle + alpha * (raw.rightKneeAngle - ema.rightKneeAngle),
+              kneeAsymmetryPct: ema.kneeAsymmetryPct + alpha * (raw.kneeAsymmetryPct - ema.kneeAsymmetryPct),
+              strideAngleDeg: ema.strideAngleDeg + alpha * (raw.strideAngleDeg - ema.strideAngleDeg),
+              leftAnkleFootAngle: ema.leftAnkleFootAngle + alpha * (raw.leftAnkleFootAngle - ema.leftAnkleFootAngle),
+              rightAnkleFootAngle: ema.rightAnkleFootAngle + alpha * (raw.rightAnkleFootAngle - ema.rightAnkleFootAngle),
+            }
+          : raw;
+        const now = performance.now();
+        if (now - lastGaitUpdateRef.current >= 250) {
+          lastGaitUpdateRef.current = now;
+          setLiveGait({ ...gaitEmaRef.current });
+        }
+      }
+
       const frame: JointFrame = {};
       for (const [idx, joint] of Object.entries(LANDMARK_JOINTS)) {
         const p = world[Number(idx)];
@@ -269,11 +304,35 @@ export default function WebcamFeed({ onMetrics }: Props) {
         throw new Error("MediaPipe camera_utils unavailable");
 
       setTrackingStatus("requesting-camera");
-      const stream = await withTimeout(
-        navigator.mediaDevices.getUserMedia({ video: true }),
-        30_000,
-        "Camera permission"
-      );
+      let stream: MediaStream;
+      try {
+        stream = await withTimeout(
+          navigator.mediaDevices.getUserMedia({ video: true }),
+          30_000,
+          "Camera permission"
+        );
+      } catch (err) {
+        if (isStale()) return;
+        const name = err instanceof DOMException ? err.name : "";
+        let msg: string;
+        if (name === "NotAllowedError") {
+          msg =
+            "Camera permission was denied. Click the camera icon in the address bar to allow access, then Retry.";
+        } else if (name === "NotFoundError") {
+          msg = "No camera detected on this device.";
+        } else if (name === "NotReadableError" || name === "AbortError") {
+          msg = "Camera is in use by another app.";
+        } else if (name === "SecurityError" || !window.isSecureContext) {
+          msg =
+            "Camera requires HTTPS or localhost in a top-level tab (embedded previews block it).";
+        } else {
+          msg = err instanceof Error ? err.message : String(err);
+        }
+        stopAll();
+        setCameraBlocked(msg);
+        setTrackingStatus("idle");
+        return;
+      }
       if (isStale()) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -373,7 +432,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         }. Switched to Simulated Trial Mode.`
       );
     }
-  }, [failToSimulated, handleResults]);
+  }, [failToSimulated, handleResults, stopAll]);
 
   const startSimulated = useCallback(async () => {
     const gen = generationRef.current;
@@ -437,6 +496,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
 
   useEffect(() => {
     stopAll();
+    setCameraBlocked(null);
     if (simulated) {
       setTrackingStatus("idle");
       startSimulated().catch((err) =>
@@ -450,7 +510,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       void startLive();
     }
     return stopAll;
-  }, [simulated, day, startLive, startSimulated, stopAll]);
+  }, [simulated, day, retryNonce, startLive, startSimulated, stopAll]);
 
   const statusDot =
     trackingStatus === "tracking"
@@ -570,6 +630,32 @@ export default function WebcamFeed({ onMetrics }: Props) {
           muted
           playsInline
         />
+        {!simulated && cameraBlocked && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+            <div className="max-w-sm rounded-lg border border-amber-600/60 bg-amber-900/40 p-4 text-center">
+              <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-amber-300" />
+              <p className="text-xs text-amber-100">{cameraBlocked}</p>
+              <div className="mt-3 flex justify-center gap-2">
+                <button
+                  onClick={() => {
+                    setCameraBlocked(null);
+                    setRetryNonce((n) => n + 1);
+                  }}
+                  className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Retry camera
+                </button>
+                <button
+                  onClick={() => setSimulated(true)}
+                  className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+                >
+                  Use Simulated Trial Mode
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           width={640}
@@ -588,6 +674,37 @@ export default function WebcamFeed({ onMetrics }: Props) {
           </span>
         )}
       </div>
+
+      {!simulated && (
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">
+              Knee asym %
+            </p>
+            <p className="text-sm font-semibold text-slate-100">
+              {liveGait ? liveGait.kneeAsymmetryPct.toFixed(1) : "—"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">
+              Stride angle °
+            </p>
+            <p className="text-sm font-semibold text-slate-100">
+              {liveGait ? liveGait.strideAngleDeg.toFixed(1) : "—"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">
+              L/R knee °
+            </p>
+            <p className="text-sm font-semibold text-slate-100">
+              {liveGait
+                ? `${liveGait.leftKneeAngle.toFixed(0)}/${liveGait.rightKneeAngle.toFixed(0)}`
+                : "—"}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
