@@ -28,6 +28,7 @@ _lock = threading.Lock()
 
 
 def _persist() -> None:
+    _cache_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _cache_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(_patients))
     os.replace(tmp, _cache_path)
