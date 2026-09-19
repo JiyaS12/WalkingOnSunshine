@@ -29,10 +29,10 @@ import {
 } from "../lib/api";
 
 function riskLevel(score: number): { label: string; classes: string } {
-  if (score < 0.33)
+  if (score < 0.3)
     return { label: "LOW", classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40" };
-  if (score < 0.66)
-    return { label: "MEDIUM", classes: "bg-amber-600/20 text-amber-300 border-amber-500/40" };
+  if (score < 0.5)
+    return { label: "MODERATE", classes: "bg-amber-600/20 text-amber-300 border-amber-500/40" };
   return { label: "HIGH", classes: "bg-rose-600/20 text-rose-300 border-rose-500/40" };
 }
 

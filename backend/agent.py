@@ -62,6 +62,8 @@ def _round_metrics(m: dict) -> dict:
 def _cache_key(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
     blob = json.dumps(
         [
+            "summary-v2",
+            metrics_day1 is metrics_day14,
             _round_metrics(metrics_day1),
             _round_metrics(metrics_day14),
             patient_id,
