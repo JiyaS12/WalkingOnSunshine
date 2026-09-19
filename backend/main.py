@@ -24,6 +24,7 @@ app.add_middleware(
 class ProcessFrameRequest(BaseModel):
     frames: list[dict[str, list[float]]]
     fps: float = 30.0
+    leg_length_m: float | None = None
 
 
 class SummaryRequest(BaseModel):
@@ -40,7 +41,9 @@ def health() -> dict:
 @app.post("/api/process-frame", response_model=GaitMetrics)
 def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
     try:
-        return GaitProcessor(body.frames, fps=body.fps).compute()
+        return GaitProcessor(
+            body.frames, fps=body.fps, leg_length_m=body.leg_length_m
+        ).compute()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

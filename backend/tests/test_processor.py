@@ -43,6 +43,31 @@ def test_day1_worse_than_day14():
     assert d1["stride_length_m"] < d14["stride_length_m"]
 
 
+def test_normal_symmetric_gait_is_low_risk():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
+    import generate_mock_cohort as gen
+
+    session = gen.generate_session(
+        14, step_amp=0.3375, flex_amp_l=55, flex_amp_r=55,
+        lift_bias_r=0.0, speed_decay=0.0, seed=7,
+    )
+    frames = session["frames"][:150]
+    metrics = GaitProcessor(frames, fps=session["fps"]).compute()
+    assert metrics.gait_detected is True
+    assert metrics.fall_risk_score < 0.3
+
+
+def test_standing_still_not_flagged():
+    metrics = GaitProcessor(_flat_frames(90)).compute()
+    assert metrics.gait_detected is False
+    assert metrics.fall_risk_score < 0.2
+
+
+def test_leg_length_override_used():
+    metrics = GaitProcessor(_flat_frames(90), leg_length_m=0.9).compute()
+    assert metrics.leg_length_m == 0.9
+
+
 def test_cohort_structure():
     cohort = load_cohort()
     assert cohort["patient_id"] == "RGN-0417"

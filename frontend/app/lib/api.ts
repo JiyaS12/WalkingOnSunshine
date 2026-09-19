@@ -8,6 +8,11 @@ export interface GaitMetrics {
   fall_risk_score: number;
   cadence_steps_per_min: number;
   frame_count: number;
+  leg_length_m: number;
+  stride_ratio: number;
+  knee_flexion_rom_deg: number;
+  peak_ankle_speed_mps: number;
+  gait_detected: boolean;
 }
 
 export type JointFrame = Record<string, number[]>;
@@ -54,12 +59,17 @@ export async function fetchSimulation(
 
 export async function processFrames(
   frames: JointFrame[],
-  fps: number
+  fps: number,
+  legLengthM?: number
 ): Promise<GaitMetrics> {
   return request<GaitMetrics>("/api/process-frame", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ frames, fps }),
+    body: JSON.stringify({
+      frames,
+      fps,
+      ...(legLengthM !== undefined ? { leg_length_m: legLengthM } : {}),
+    }),
   });
 }
 

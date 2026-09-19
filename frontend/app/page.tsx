@@ -35,9 +35,10 @@ interface CardProps {
   value: string;
   icon: React.ReactNode;
   badge?: { label: string; classes: string };
+  sub?: string;
 }
 
-function MetricCard({ title, value, icon, badge }: CardProps) {
+function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
       <div className="flex items-center justify-between">
@@ -56,6 +57,7 @@ function MetricCard({ title, value, icon, badge }: CardProps) {
           </span>
         )}
       </div>
+      {sub && <p className="mt-1 text-[10px] text-slate-500">{sub}</p>}
     </div>
   );
 }
@@ -170,6 +172,11 @@ export default function Home() {
               title="Stride Length"
               value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
               icon={<Footprints className="h-4 w-4" />}
+              sub={
+                metrics?.stride_ratio
+                  ? `×${metrics.stride_ratio.toFixed(2)} leg`
+                  : undefined
+              }
             />
             <MetricCard
               title="Asymmetry"

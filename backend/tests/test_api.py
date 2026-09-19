@@ -59,6 +59,25 @@ def test_process_frame_matches_simulator():
         assert value == expected[key]
 
 
+def test_process_frame_with_leg_length():
+    frames = load_cohort()["sessions"]["day_14"]["frames"][:100]
+    resp = client.post(
+        "/api/process-frame",
+        json={"frames": frames, "fps": 30, "leg_length_m": 0.9},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    for key in (
+        "leg_length_m",
+        "stride_ratio",
+        "knee_flexion_rom_deg",
+        "peak_ankle_speed_mps",
+        "gait_detected",
+    ):
+        assert key in body
+    assert body["leg_length_m"] == 0.9
+
+
 def test_process_frame_too_few():
     resp = client.post("/api/process-frame", json={"frames": []})
     assert resp.status_code == 422

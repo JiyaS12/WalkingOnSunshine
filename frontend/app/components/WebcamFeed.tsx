@@ -14,8 +14,17 @@ import {
   JointFrame,
   SimulationSession,
 } from "../lib/api";
-import { computeLiveGait, LiveGaitMetrics } from "../lib/gait";
-import type { MediaPipeCamera, Pose, PoseResults } from "../types/mediapipe";
+import {
+  computeLiveGait,
+  legLengthFrom,
+  LiveGaitMetrics,
+} from "../lib/gait";
+import type {
+  MediaPipeCamera,
+  NormalizedLandmark,
+  Pose,
+  PoseResults,
+} from "../types/mediapipe";
 
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
@@ -147,6 +156,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const [retryNonce, setRetryNonce] = useState(0);
   const [liveGait, setLiveGait] = useState<LiveGaitMetrics | null>(null);
   const [embedded, setEmbedded] = useState(false);
+  const [legLengthM, setLegLengthM] = useState<number | null>(null);
+  const [calibrationCount, setCalibrationCount] = useState(0);
 
   useEffect(() => {
     setEmbedded(window.self !== window.top);
@@ -166,6 +177,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const generationRef = useRef(0);
   const gaitEmaRef = useRef<LiveGaitMetrics | null>(null);
   const lastGaitUpdateRef = useRef(0);
+  const prevWorldRef = useRef<NormalizedLandmark[] | null>(null);
+  const prevTimeRef = useRef(0);
+  const calibrationRef = useRef<number[]>([]);
+  const legLengthRef = useRef<number | null>(null);
   const onMetricsRef = useRef(onMetrics);
   onMetricsRef.current = onMetrics;
 
@@ -195,6 +210,15 @@ export default function WebcamFeed({ onMetrics }: Props) {
     bufferRef.current = [];
     timesRef.current = [];
     sendingRef.current = false;
+    gaitEmaRef.current = null;
+    lastGaitUpdateRef.current = 0;
+    prevWorldRef.current = null;
+    prevTimeRef.current = 0;
+    calibrationRef.current = [];
+    legLengthRef.current = null;
+    setLegLengthM(null);
+    setCalibrationCount(0);
+    setLiveGait(null);
   }, []);
 
   const failToSimulated = useCallback(
@@ -257,23 +281,43 @@ export default function WebcamFeed({ onMetrics }: Props) {
       const world = results.poseWorldLandmarks;
       if (!world || world.length < 29) return;
 
-      const raw = computeLiveGait(world);
+      const nowMs = performance.now();
+      const dt =
+        prevTimeRef.current > 0 ? (nowMs - prevTimeRef.current) / 1000 : 0;
+      const raw = computeLiveGait(world, prevWorldRef.current, dt);
+      prevWorldRef.current = world;
+      prevTimeRef.current = nowMs;
+
+      // calibration: collect leg length over the first 60 world frames
+      if (legLengthRef.current === null) {
+        const len = legLengthFrom(world);
+        if (len > 0) {
+          calibrationRef.current.push(len);
+          const n = calibrationRef.current.length;
+          setCalibrationCount(n);
+          if (n >= 60) {
+            const sorted = [...calibrationRef.current].sort((a, b) => a - b);
+            const median = sorted[Math.floor(sorted.length / 2)];
+            legLengthRef.current = median;
+            setLegLengthM(median);
+          }
+        }
+      }
+
       if (raw) {
         const ema = gaitEmaRef.current;
         const alpha = 0.2;
         gaitEmaRef.current = ema
-          ? {
-              leftKneeAngle: ema.leftKneeAngle + alpha * (raw.leftKneeAngle - ema.leftKneeAngle),
-              rightKneeAngle: ema.rightKneeAngle + alpha * (raw.rightKneeAngle - ema.rightKneeAngle),
-              kneeAsymmetryPct: ema.kneeAsymmetryPct + alpha * (raw.kneeAsymmetryPct - ema.kneeAsymmetryPct),
-              strideAngleDeg: ema.strideAngleDeg + alpha * (raw.strideAngleDeg - ema.strideAngleDeg),
-              leftAnkleFootAngle: ema.leftAnkleFootAngle + alpha * (raw.leftAnkleFootAngle - ema.leftAnkleFootAngle),
-              rightAnkleFootAngle: ema.rightAnkleFootAngle + alpha * (raw.rightAnkleFootAngle - ema.rightAnkleFootAngle),
-            }
+          ? (Object.fromEntries(
+              Object.entries(raw).map(([k, v]) => [
+                k,
+                (ema as unknown as Record<string, number>)[k] +
+                  alpha * (v - (ema as unknown as Record<string, number>)[k]),
+              ])
+            ) as unknown as LiveGaitMetrics)
           : raw;
-        const now = performance.now();
-        if (now - lastGaitUpdateRef.current >= 250) {
-          lastGaitUpdateRef.current = now;
+        if (nowMs - lastGaitUpdateRef.current >= 250) {
+          lastGaitUpdateRef.current = nowMs;
           setLiveGait({ ...gaitEmaRef.current });
         }
       }
@@ -443,7 +487,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
             fps = Math.min(60, Math.max(5, measured));
           }
         }
-        processFrames(batch, fps)
+        processFrames(batch, fps, legLengthRef.current ?? undefined)
           .then((m) => {
             onMetricsRef.current(m, "live");
             setLastSyncAt(new Date());
@@ -562,6 +606,18 @@ export default function WebcamFeed({ onMetrics }: Props) {
                 ? "Camera blocked"
                 : "Starting camera…";
 
+  const statusDetail =
+    trackingStatus === "tracking" || trackingStatus === "no-person"
+      ? legLengthM
+        ? `Calibrated · leg ${legLengthM.toFixed(2)} m · ` +
+          (lastSyncAt
+            ? `Last sync: ${lastSyncAt.toLocaleTimeString("en-GB", { hour12: false })}`
+            : "waiting for frames")
+        : `Calibrating baseline… ${calibrationCount}/60`
+      : lastSyncAt
+        ? `Last sync: ${lastSyncAt.toLocaleTimeString("en-GB", { hour12: false })}`
+        : "waiting for frames";
+
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
       <div className="mb-3">
@@ -614,11 +670,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
               <span className={`h-2 w-2 rounded-full ${statusDot}`} />
               {statusText}
             </span>
-            <span className="text-slate-500">
-              {lastSyncAt
-                ? `Last sync: ${lastSyncAt.toLocaleTimeString("en-GB", { hour12: false })}`
-                : "waiting for frames"}
-            </span>
+            <span className="text-slate-500">{statusDetail}</span>
           </div>
         )}
       </div>
@@ -718,7 +770,17 @@ export default function WebcamFeed({ onMetrics }: Props) {
       </div>
 
       {!simulated && (
-        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+          <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">
+              Knee flex L/R °
+            </p>
+            <p className="text-sm font-semibold text-slate-100">
+              {liveGait
+                ? `${liveGait.leftKneeFlexion.toFixed(0)}/${liveGait.rightKneeFlexion.toFixed(0)}`
+                : "—"}
+            </p>
+          </div>
           <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
             <p className="text-[10px] uppercase tracking-wide text-slate-500">
               Knee asym %
@@ -737,11 +799,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
           </div>
           <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
             <p className="text-[10px] uppercase tracking-wide text-slate-500">
-              L/R knee °
+              Ankle speed L/R m/s
             </p>
             <p className="text-sm font-semibold text-slate-100">
               {liveGait
-                ? `${liveGait.leftKneeAngle.toFixed(0)}/${liveGait.rightKneeAngle.toFixed(0)}`
+                ? `${liveGait.leftAnkleSpeed.toFixed(1)}/${liveGait.rightAnkleSpeed.toFixed(1)}`
                 : "—"}
             </p>
           </div>
