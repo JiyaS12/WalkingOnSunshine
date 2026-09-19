@@ -24,6 +24,9 @@ _LANDMARK_JOINTS = {
 
 Frame = dict[str, list[float]]
 
+# lowest sample rate the gait metrics stay meaningful at (steps reach ~4/s)
+_MIN_ANALYSIS_FPS = 15.0
+
 
 def _fill_gaps(detections: list[tuple[int, Frame]]) -> list[Frame]:
     """Drop leading/trailing undetected slots and linearly interpolate
@@ -73,6 +76,11 @@ def extract_frames(
         fps = 30.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     step = max(1, math.ceil(total / max_frames)) if total > 0 else 1
+    # Decimating a long clip to fit max_frames can drop the sample rate below
+    # what gait timing needs (~4 steps/s), which aliases stride and cadence.
+    # Keep the rate above the floor and analyse a bounded window instead.
+    if fps / step < _MIN_ANALYSIS_FPS:
+        step = max(1, int(fps // _MIN_ANALYSIS_FPS))
     effective_fps = fps / step
 
     detections: list[tuple[int, Frame]] = []

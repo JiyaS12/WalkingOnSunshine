@@ -14,8 +14,17 @@ from starlette.concurrency import run_in_threadpool
 import agent
 import simulator
 import store
-import video
 from processor import GaitMetrics, GaitProcessor
+
+# cv2/mediapipe are heavy native deps; a broken install (a non-headless
+# OpenCV without libGL, say) must not take the rest of the API down with it
+try:
+    import video
+except ImportError as exc:
+    video = None
+    _VIDEO_IMPORT_ERROR: str | None = str(exc)
+else:
+    _VIDEO_IMPORT_ERROR = None
 
 app = FastAPI(title="GaitGuard AI")
 
@@ -89,8 +98,23 @@ _VIDEO_SUFFIXES = {".mp4", ".mov", ".webm"}
 _MAX_VIDEO_BYTES = 100 * 1024 * 1024
 
 
-@app.post("/api/process-video")
+class VideoAnalysis(BaseModel):
+    metrics: GaitMetrics
+    frames: list[dict[str, list[float]]]
+    fps: float
+    frames_processed: int
+    frames_total: int
+    filename: str
+
+
+@app.post("/api/process-video", response_model=VideoAnalysis)
 async def process_video(file: UploadFile = File(...)) -> dict:
+    if video is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"video analysis is unavailable: {_VIDEO_IMPORT_ERROR}",
+        )
+
     name = file.filename or ""
     suffix = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
     if suffix not in _VIDEO_SUFFIXES:
@@ -132,7 +156,7 @@ async def process_video(file: UploadFile = File(...)) -> dict:
         "fps": effective_fps,
         "frames_processed": len(frames),
         "frames_total": total,
-        "filename": file.filename,
+        "filename": name,
     }
 
 
