@@ -6,7 +6,7 @@ This document is the persistent execution plan for the hackathon MVP. GitHub iss
 
 Deliver a judge-ready longitudinal gait monitoring demo that:
 
-- captures or simulates a walking session;
+- captures a walking session (live camera or video upload);
 - reports gait speed and supporting gait measurements;
 - compares a valid session with a three-session personal baseline;
 - rejects or clearly labels poor-quality recordings;
@@ -160,14 +160,14 @@ Cut or simplify in this order while retaining a coherent demo:
 4. Keep only three quality states and the most actionable reason codes.
 5. Demonstrate one patient and a fixed three-session baseline.
 
-Never cut input validation, quality gating, simulated fallback, consent, or the non-diagnostic wording.
+Never cut input validation, quality gating, consent, or the non-diagnostic wording.
 
 ## Definition of done
 
 - All twelve issues meet their acceptance criteria or have an explicitly documented, judge-safe scope cut.
 - CI is green from a clean checkout.
 - A real camera session works on the target machine.
-- Simulated mode works with the camera, network, and OpenAI unavailable.
+- The video-upload path works with the camera and OpenAI unavailable.
 - Poor-quality sessions do not update or produce a misleading trend.
 - The demo uses gait speed and within-person change as its primary story.
 - No UI or summary claims diagnosis, validated fall prediction, or regulatory compliance.

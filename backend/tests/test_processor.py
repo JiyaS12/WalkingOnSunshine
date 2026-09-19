@@ -8,9 +8,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import simulator
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import gait_gen
 from processor import GaitMetrics, GaitProcessor
-from simulator import get_comparison, get_simulation, load_cohort
 
 
 def _flat_frames(n):
@@ -57,22 +58,20 @@ def test_raises_on_too_few_frames():
         GaitProcessor([]).compute()
 
 
-def test_day1_worse_than_day14():
-    comparison = get_comparison()
-    d1, d14 = comparison["day_1"], comparison["day_14"]
-    assert d1["fall_risk_score"] > d14["fall_risk_score"]
-    assert d1["asymmetry_pct"] > d14["asymmetry_pct"]
-    assert d1["stride_length_m"] < d14["stride_length_m"]
+def test_impaired_worse_than_recovered():
+    d1 = GaitProcessor(
+        gait_gen.impaired_session()["frames"], fps=30.0
+    ).compute()
+    d14 = GaitProcessor(
+        gait_gen.recovered_session()["frames"], fps=30.0
+    ).compute()
+    assert d1.fall_risk_score > d14.fall_risk_score
+    assert d1.asymmetry_pct > d14.asymmetry_pct
+    assert d1.stride_length_m < d14.stride_length_m
 
 
 def test_normal_symmetric_gait_is_low_risk():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
-    import generate_mock_cohort as gen
-
-    session = gen.generate_session(
-        14, step_amp=0.3375, flex_amp_l=55, flex_amp_r=55,
-        lift_bias_r=0.0, speed_decay=0.0, seed=7,
-    )
+    session = gait_gen.recovered_session(seed=7)
     frames = session["frames"][:150]
     metrics = GaitProcessor(frames, fps=session["fps"]).compute()
     assert metrics.gait_detected is True
@@ -102,14 +101,7 @@ def test_leg_length_override_used():
 
 
 def _symmetric_gait_frames(n=150, seed=7):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
-    import generate_mock_cohort as gen
-
-    session = gen.generate_session(
-        14, step_amp=0.3375, flex_amp_l=55, flex_amp_r=55,
-        lift_bias_r=0.0, speed_decay=0.0, seed=seed,
-    )
-    return session["frames"][:n]
+    return gait_gen.recovered_session(seed=seed)["frames"][:n]
 
 
 def _hip_centre(frames):
@@ -140,19 +132,6 @@ def test_hip_centred_slowdown_detected():
     stretched = frames[:75] + [f for f in frames[75:] for _ in range(2)]
     metrics = GaitProcessor(_hip_centre(stretched), fps=30.0).compute()
     assert metrics.velocity_degradation_pct > 20
-
-
-def test_cohort_structure():
-    cohort = load_cohort()
-    assert cohort["patient_id"] == "RGN-0417"
-    assert set(cohort["sessions"]) == {"day_1", "day_14"}
-    for session in cohort["sessions"].values():
-        assert session["fps"] == 30
-        assert len(session["frames"]) == 300
-        for joint in ("left_hip", "right_hip", "left_knee", "right_knee",
-                      "left_ankle", "right_ankle"):
-            assert joint in session["frames"][0]
-            assert len(session["frames"][0][joint]) == 3
 
 
 def test_missing_joint_raises():
@@ -195,7 +174,7 @@ def test_dropped_landmark_at_clip_edges(position):
 
 def test_dropped_landmarks_do_not_mask_risk():
     """The bug this guards: one NaN used to read as a healthy patient."""
-    frames = copy.deepcopy(load_cohort()["sessions"]["day_1"]["frames"][:120])
+    frames = copy.deepcopy(gait_gen.impaired_session()["frames"][:120])
     clean = GaitProcessor(frames, fps=30.0).compute()
     assert clean.gait_detected is True
     assert clean.fall_risk_score > 0.3
@@ -254,17 +233,4 @@ def test_asymmetry_detects_static_foot():
     assert metrics.asymmetry_pct > 20.0
 
 
-def test_load_cohort_caches_per_path(tmp_path):
-    alt = json.loads(simulator.DATA_PATH.read_text())
-    alt["patient_id"] = "ALT-0001"
-    alt_path = tmp_path / "alt_cohort.json"
-    alt_path.write_text(json.dumps(alt))
 
-    assert load_cohort(alt_path)["patient_id"] == "ALT-0001"
-    assert load_cohort()["patient_id"] == "RGN-0417"
-
-
-def test_simulation_frames_are_detached_from_cache():
-    original = load_cohort()["sessions"]["day_1"]["frames"][0]["left_hip"][0]
-    get_simulation(1)["frames"][0]["left_hip"][0] = 999.0
-    assert load_cohort()["sessions"]["day_1"]["frames"][0]["left_hip"][0] == original

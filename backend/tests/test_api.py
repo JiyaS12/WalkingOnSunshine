@@ -2,15 +2,25 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import agent
+import gait_gen
+import store
 from main import app
-from simulator import load_cohort, get_simulation
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolated_store(tmp_path):
+    store.reset_for_tests(tmp_path / "patients.json")
+    yield
+    store.reset_for_tests(store.CACHE_PATH)
 
 
 def _use_tmp_cache(monkeypatch, tmp_path):
@@ -21,47 +31,64 @@ def _use_tmp_cache(monkeypatch, tmp_path):
     )
 
 
+def _metrics(**kw):
+    base = {
+        "stride_length_m": 1.0,
+        "asymmetry_pct": 5.0,
+        "velocity_degradation_pct": 2.0,
+        "fall_risk_score": 0.4,
+        "cadence_steps_per_min": 100.0,
+        "frame_count": 100,
+        "leg_length_m": 0.9,
+        "stride_ratio": 1.1,
+        "knee_flexion_rom_deg": 40.0,
+        "peak_ankle_speed_mps": 3.0,
+        "gait_detected": True,
+        "dropped_frame_pct": 0.0,
+    }
+    base.update(kw)
+    return base
+
+
+def _survey(pid="RGN-0999", **kw):
+    base = {
+        "patient_id": pid,
+        "patient_name": "Test Patient",
+        "pain_scale": 5,
+        "fall_history": {"falls_last_6_months": 1, "injured": False},
+        "dizziness": False,
+        "primary_complaints": ["knee pain"],
+    }
+    base.update(kw)
+    return base
+
+
+def _patient_with_session(pid="RGN-0999"):
+    client.post("/api/submit-survey", json=_survey(pid))
+    client.post(
+        f"/api/patients/{pid}/sessions",
+        json={"label": "S1", "source": "live", "metrics": _metrics()},
+    )
+
+
 def test_health():
     resp = client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
 
-def test_get_simulation_day1():
-    resp = client.get("/api/get-simulation", params={"day": 1})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["day"] == 1
-    for key in ("fps", "frame_count", "metrics", "frames"):
-        assert key in body
-    assert "fall_risk_score" in body["metrics"]
-
-
-def test_get_simulation_comparison():
-    resp = client.get("/api/get-simulation")
-    assert resp.status_code == 200
-    body = resp.json()
-    for key in ("patient_id", "day_1", "day_14", "deltas"):
-        assert key in body
-
-
-def test_get_simulation_bad_day():
-    resp = client.get("/api/get-simulation", params={"day": 99})
-    assert resp.status_code == 404
-
-
-def test_process_frame_matches_simulator():
-    frames = load_cohort()["sessions"]["day_14"]["frames"]
+def test_process_frame():
+    frames = gait_gen.recovered_session()["frames"]
     resp = client.post("/api/process-frame",
                        json={"frames": frames, "fps": 30})
     assert resp.status_code == 200
-    expected = get_simulation(14)["metrics"]
-    for key, value in resp.json().items():
-        assert value == expected[key]
+    body = resp.json()
+    assert "fall_risk_score" in body
+    assert body["gait_detected"] is True
 
 
 def test_process_frame_with_leg_length():
-    frames = load_cohort()["sessions"]["day_14"]["frames"][:100]
+    frames = gait_gen.recovered_session()["frames"][:100]
     resp = client.post(
         "/api/process-frame",
         json={"frames": frames, "fps": 30, "leg_length_m": 0.9},
@@ -86,7 +113,7 @@ def test_process_frame_too_few():
 
 def test_process_frame_survives_dropped_landmarks():
     """A dropped landmark must not mask a high-risk reading."""
-    frames = json.loads(json.dumps(load_cohort()["sessions"]["day_1"]["frames"][:120]))
+    frames = json.loads(json.dumps(gait_gen.impaired_session()["frames"][:120]))
     clean = client.post(
         "/api/process-frame", json={"frames": frames, "fps": 30}
     ).json()
@@ -104,14 +131,28 @@ def test_process_frame_survives_dropped_landmarks():
     assert abs(body["fall_risk_score"] - clean["fall_risk_score"]) < 0.1
 
 
-def test_generate_summary(monkeypatch, tmp_path):
+def test_generate_summary_for_patient(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
-    resp = client.post("/api/generate-summary", json={})
+    _patient_with_session()
+    resp = client.post("/api/generate-summary", json={"patient_id": "RGN-0999"})
     assert resp.status_code == 200
     body = resp.json()
-    assert "summary" in body
+    assert isinstance(body["summary"], str)
     assert body["source"] in ("template", "openai")
     assert body["cached"] is False
+
+
+def test_generate_summary_unknown_patient_404(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    resp = client.post("/api/generate-summary", json={"patient_id": "NOPE"})
+    assert resp.status_code == 404
+
+
+def test_generate_summary_no_sessions_422(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    client.post("/api/submit-survey", json=_survey())
+    resp = client.post("/api/generate-summary", json={"patient_id": "RGN-0999"})
+    assert resp.status_code == 422
 
 
 def _mark_cache_openai():
@@ -123,10 +164,12 @@ def _mark_cache_openai():
 
 def test_generate_summary_cached_on_second_call(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
-    first = client.post("/api/generate-summary", json={}).json()
+    _patient_with_session()
+    payload = {"patient_id": "RGN-0999"}
+    first = client.post("/api/generate-summary", json=payload).json()
     assert first["cached"] is False
     _mark_cache_openai()
-    second = client.post("/api/generate-summary", json={}).json()
+    second = client.post("/api/generate-summary", json=payload).json()
     assert second["cached"] is True
     assert second["summary"] == first["summary"]
     assert second["estimated_tokens_saved"] > 0
@@ -134,8 +177,10 @@ def test_generate_summary_cached_on_second_call(monkeypatch, tmp_path):
 
 def test_template_cache_hit_saves_nothing(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
-    client.post("/api/generate-summary", json={})
-    hit = client.post("/api/generate-summary", json={}).json()
+    _patient_with_session()
+    payload = {"patient_id": "RGN-0999"}
+    client.post("/api/generate-summary", json=payload)
+    hit = client.post("/api/generate-summary", json=payload).json()
     assert hit["cached"] is True
     assert hit["source"] == "template"
     assert hit["estimated_tokens_saved"] == 0
@@ -143,6 +188,7 @@ def test_template_cache_hit_saves_nothing(monkeypatch, tmp_path):
 
 def test_summary_cache_stats(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
+    _patient_with_session()
     resp = client.get("/api/summary-cache-stats")
     assert resp.status_code == 200
     assert resp.json() == {
@@ -150,9 +196,10 @@ def test_summary_cache_stats(monkeypatch, tmp_path):
         "cache_hits": 0,
         "estimated_tokens_saved": 0,
     }
-    client.post("/api/generate-summary", json={})
+    payload = {"patient_id": "RGN-0999"}
+    client.post("/api/generate-summary", json=payload)
     _mark_cache_openai()
-    client.post("/api/generate-summary", json={})
+    client.post("/api/generate-summary", json=payload)
     stats = client.get("/api/summary-cache-stats").json()
     assert stats["entries"] == 1
     assert stats["cache_hits"] == 1

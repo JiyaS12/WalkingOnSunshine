@@ -74,8 +74,8 @@ def _cache_key(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
 def _build_prompt(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
     return (
         f"Patient: {patient_id}. "
-        f"Day 1 metrics: {json.dumps(metrics_day1)}. "
-        f"Day 14 metrics: {json.dumps(metrics_day14)}. "
+        f"Baseline metrics: {json.dumps(metrics_day1)}. "
+        f"Latest metrics: {json.dumps(metrics_day14)}. "
         "Focus on stride length, asymmetry, velocity degradation, "
         "and fall risk trend."
     )
@@ -91,8 +91,8 @@ def _template_summary(metrics_day1: dict, metrics_day14: dict, patient_id: str) 
     trend = "improved" if risk_delta < 0 else "worsened"
     return (
         f"Patient {patient_id}: fall risk {trend} from "
-        f"{metrics_day1['fall_risk_score']:.3f} (day 1) to "
-        f"{metrics_day14['fall_risk_score']:.3f} (day 14). "
+        f"{metrics_day1['fall_risk_score']:.3f} (baseline) to "
+        f"{metrics_day14['fall_risk_score']:.3f} (latest). "
         f"Stride length changed {stride_delta:+.2f} m "
         f"({metrics_day1['stride_length_m']:.2f} -> "
         f"{metrics_day14['stride_length_m']:.2f}). "
