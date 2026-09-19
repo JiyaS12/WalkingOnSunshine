@@ -54,3 +54,8 @@ def test_cohort_structure():
                       "left_ankle", "right_ankle"):
             assert joint in session["frames"][0]
             assert len(session["frames"][0][joint]) == 3
+
+
+def test_missing_joint_raises():
+    with pytest.raises(ValueError):
+        GaitProcessor([{}, {}], fps=30.0)

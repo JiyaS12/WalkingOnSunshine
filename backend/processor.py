@@ -39,6 +39,13 @@ class GaitProcessor:
             raise ValueError("at least 2 frames are required")
         if fps <= 0:
             raise ValueError("fps must be positive")
+        for i, frame in enumerate(frames):
+            for joint in JOINTS:
+                coords = frame.get(joint)
+                if coords is None or len(coords) != 3:
+                    raise ValueError(
+                        f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
+                    )
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
