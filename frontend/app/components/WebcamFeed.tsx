@@ -65,19 +65,27 @@ function loadScript(src: string): Promise<void> {
   const cached = scriptPromises.get(src);
   if (cached) return cached;
   const promise = new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      scriptPromises.delete(src);
+      document.querySelector(`script[src="${src}"]`)?.remove();
+    };
     const existing = document.querySelector(`script[src="${src}"]`);
     if (existing) {
       existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () =>
-        reject(new Error(`failed to load ${src}`))
-      );
+      existing.addEventListener("error", () => {
+        cleanup();
+        reject(new Error(`failed to load ${src}`));
+      });
       return;
     }
     const script = document.createElement("script");
     script.src = src;
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`failed to load ${src}`));
+    script.onerror = () => {
+      cleanup();
+      reject(new Error(`failed to load ${src}`));
+    };
     document.head.appendChild(script);
   });
   scriptPromises.set(src, promise);
@@ -108,11 +116,14 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const rafRef = useRef<number>(0);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bufferRef = useRef<JointFrame[]>([]);
+  const timesRef = useRef<number[]>([]);
   const sendingRef = useRef(false);
+  const generationRef = useRef(0);
   const onMetricsRef = useRef(onMetrics);
   onMetricsRef.current = onMetrics;
 
   const stopAll = useCallback(() => {
+    generationRef.current += 1;
     cancelAnimationFrame(rafRef.current);
     if (syncIntervalRef.current !== null) {
       clearInterval(syncIntervalRef.current);
@@ -129,6 +140,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
     void poseRef.current?.close().catch(() => undefined);
     poseRef.current = null;
     bufferRef.current = [];
+    timesRef.current = [];
     sendingRef.current = false;
   }, []);
 
@@ -195,26 +207,37 @@ export default function WebcamFeed({ onMetrics }: Props) {
       }
       const buf = bufferRef.current;
       buf.push(frame);
+      timesRef.current.push(performance.now());
       if (buf.length > BUFFER_MAX) buf.splice(0, buf.length - BUFFER_MAX);
+      if (timesRef.current.length > BUFFER_MAX)
+        timesRef.current.splice(0, timesRef.current.length - BUFFER_MAX);
     },
     [drawPoseLandmarks]
   );
 
   const startLive = useCallback(async () => {
+    const gen = ++generationRef.current;
+    const isStale = () => gen !== generationRef.current;
     setTrackingStatus("loading");
     try {
       await Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]);
+      if (isStale()) return;
       if (!window.Pose) throw new Error("MediaPipe Pose unavailable");
       if (!window.Camera)
         throw new Error("MediaPipe camera_utils unavailable");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
       });
+      if (isStale()) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       const video = videoRef.current;
       if (!video) throw new Error("video element missing");
       video.srcObject = stream;
       await video.play();
+      if (isStale()) return;
 
       const pose = new window.Pose({
         locateFile: (file) => `${POSE_FILES}/${file}`,
@@ -226,6 +249,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
         minTrackingConfidence: 0.5,
       });
       pose.onResults(handleResults);
+      if (isStale()) {
+        void pose.close().catch(() => undefined);
+        return;
+      }
       poseRef.current = pose;
 
       const canvas = canvasRef.current;
@@ -247,15 +274,33 @@ export default function WebcamFeed({ onMetrics }: Props) {
         width: 640,
         height: 480,
       });
-      cameraRef.current = camera;
       await camera.start();
+      if (isStale()) {
+        try {
+          camera.stop();
+        } catch {
+          // not started
+        }
+        return;
+      }
+      cameraRef.current = camera;
 
       syncIntervalRef.current = setInterval(() => {
         const buf = bufferRef.current;
         if (buf.length < SYNC_MIN_FRAMES || sendingRef.current) return;
         sendingRef.current = true;
         const batch = buf.slice(-SYNC_BATCH);
-        processFrames(batch, 30)
+        const times = timesRef.current.slice(-SYNC_BATCH);
+        let fps = 30;
+        if (times.length >= 2) {
+          const span =
+            (times[times.length - 1] - times[0]) / 1000;
+          const measured = (times.length - 1) / span;
+          if (Number.isFinite(measured) && measured > 0) {
+            fps = Math.min(60, Math.max(5, measured));
+          }
+        }
+        processFrames(batch, fps)
           .then((m) => {
             onMetricsRef.current(m, "live");
             setLastSyncAt(new Date());
@@ -275,7 +320,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
   }, [failToSimulated, handleResults]);
 
   const startSimulated = useCallback(async () => {
+    const gen = generationRef.current;
     const session = (await fetchSimulation(day)) as SimulationSession;
+    if (gen !== generationRef.current) return;
     onMetricsRef.current(session.metrics, "simulated");
     const canvas = canvasRef.current;
     if (canvas) {
