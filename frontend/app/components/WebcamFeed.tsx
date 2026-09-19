@@ -172,7 +172,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const rafRef = useRef<number>(0);
   const inFlightRef = useRef(false);
   const loopActiveRef = useRef(false);
-  const sendStartRef = useRef(0);
   const sendFailedRef = useRef(false);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,7 +204,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
     }
     loopActiveRef.current = false;
     inFlightRef.current = false;
-    sendStartRef.current = 0;
     sendFailedRef.current = false;
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
@@ -474,7 +472,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
           if (!loopActiveRef.current || isStale()) return;
           if (video.readyState >= 2 && !inFlightRef.current) {
             inFlightRef.current = true;
-            sendStartRef.current = performance.now();
             try {
               await pose.send({ image: video });
             } catch (err) {
@@ -491,22 +488,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
               }
             } finally {
               inFlightRef.current = false;
-              sendStartRef.current = 0;
             }
-          }
-          // hung send: in-flight for >20s
-          if (
-            sendStartRef.current > 0 &&
-            performance.now() - sendStartRef.current > 20_000 &&
-            !sendFailedRef.current
-          ) {
-            sendFailedRef.current = true;
-            loopActiveRef.current = false;
-            console.error("[GaitGuard] pose.send hung");
-            failToSimulated(
-              "MediaPipe inference hung: pose.send did not resolve within 20s"
-            );
-            return;
           }
           schedule();
         };
