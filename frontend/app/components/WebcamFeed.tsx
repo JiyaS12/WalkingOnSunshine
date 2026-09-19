@@ -439,15 +439,27 @@ export default function WebcamFeed({ onMetrics }: Props) {
       poseRef.current = pose;
 
       setTrackingStatus("loading-model");
+      const initPromise = pose.initialize();
+      // close only once initialization has settled, so late-created WASM/WebGL
+      // resources are actually released
+      const closeAfterInit = () => {
+        void initPromise
+          .catch(() => undefined)
+          .then(() => pose.close())
+          .catch(() => undefined);
+      };
       try {
-        await withTimeout(pose.initialize(), 90_000, "Model download");
+        await withTimeout(initPromise, 90_000, "Model download");
       } catch (err) {
-        void pose.close().catch(() => undefined);
+        closeAfterInit();
         throw new Error(
           `Model download: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-      if (isStale()) return;
+      if (isStale()) {
+        closeAfterInit();
+        return;
+      }
       setTrackingStatus("starting-model");
 
       const canvas = canvasRef.current;
