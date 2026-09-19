@@ -219,7 +219,7 @@ class GaitProcessor:
         rom_asym = abs(rom_l - rom_r) / max((rom_l + rom_r) / 2.0, _EPS) * 100.0
         asymmetry = (stance_asym + rom_asym) / 2.0 if gait_detected else 0.0
 
-        vel_deg = self._velocity_degradation_pct()
+        vel_deg = self._velocity_degradation_pct() if gait_detected else 0.0
 
         duration_min = self.frame_count / self.fps / 60.0
         cadence = len(peaks) / duration_min if duration_min > 0 else 0.0
@@ -234,7 +234,7 @@ class GaitProcessor:
 
         z = (
             1.5 * (asymmetry / 20.0)
-            + 1.2 * (vel_deg / 15.0)
+            + 1.2 * float(np.clip(vel_deg / 15.0, 0.0, 1.5))
             + 1.5 * stride_deficit
             + 1.0 * knee_deficit
             - 3.0

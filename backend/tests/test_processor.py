@@ -63,6 +63,17 @@ def test_standing_still_not_flagged():
     assert metrics.fall_risk_score < 0.2
 
 
+def test_settle_then_stand_still_not_flagged():
+    frames = _flat_frames(90)
+    for i in range(30):
+        shift = 0.3 * (1 - i / 30)
+        frames[i] = {k: [v[0] + shift, v[1], v[2]] for k, v in frames[i].items()}
+    metrics = GaitProcessor(frames).compute()
+    assert metrics.gait_detected is False
+    assert metrics.velocity_degradation_pct == 0.0
+    assert metrics.fall_risk_score < 0.2
+
+
 def test_leg_length_override_used():
     metrics = GaitProcessor(_flat_frames(90), leg_length_m=0.9).compute()
     assert metrics.leg_length_m == 0.9
