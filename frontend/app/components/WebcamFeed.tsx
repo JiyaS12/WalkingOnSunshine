@@ -168,7 +168,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const poseRef = useRef<Pose | null>(null);
+  const closePoseRef = useRef<(() => void) | null>(null);
   const rafRef = useRef<number>(0);
   const inFlightRef = useRef(false);
   const loopActiveRef = useRef(false);
@@ -209,8 +209,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    void poseRef.current?.close().catch(() => undefined);
-    poseRef.current = null;
+    closePoseRef.current?.();
+    closePoseRef.current = null;
     bufferRef.current = [];
     timesRef.current = [];
     sendingRef.current = false;
@@ -436,30 +436,26 @@ export default function WebcamFeed({ onMetrics }: Props) {
         void pose.close().catch(() => undefined);
         return;
       }
-      poseRef.current = pose;
-
       setTrackingStatus("loading-model");
       const initPromise = pose.initialize();
-      // close only once initialization has settled, so late-created WASM/WebGL
-      // resources are actually released
+      // single close path: defer until initialization has settled so
+      // late-created WASM/WebGL resources are actually released
       const closeAfterInit = () => {
         void initPromise
           .catch(() => undefined)
           .then(() => pose.close())
           .catch(() => undefined);
       };
+      closePoseRef.current = closeAfterInit;
       try {
         await withTimeout(initPromise, 90_000, "Model download");
       } catch (err) {
-        closeAfterInit();
+        // stopAll (via failToSimulated) runs closePoseRef
         throw new Error(
           `Model download: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-      if (isStale()) {
-        closeAfterInit();
-        return;
-      }
+      if (isStale()) return;
       setTrackingStatus("starting-model");
 
       const canvas = canvasRef.current;
