@@ -22,6 +22,7 @@ import {
   JointFrame,
   PatientRecord,
   SummaryResponse,
+  ApiError,
   addPatientSession,
   fetchPatient,
   generateSummary,
@@ -105,8 +106,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       );
     } catch (err) {
       if (gen !== patientGenRef.current) return;
-      // fetchPatient throws a plain Error whose message includes the status
-      if (err instanceof Error && err.message.includes("404")) {
+      if (err instanceof ApiError && err.status === 404) {
         setNotFound(true);
       } else {
         setLoadError(err instanceof Error ? err.message : String(err));

@@ -66,8 +66,8 @@ export default function DoctorPortal() {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const loadList = useCallback((q: string) => {
-    setLoadingList(true);
+  const loadList = useCallback((q: string, showSpinner = true) => {
+    if (showSpinner) setLoadingList(true);
     fetchPatients(q || undefined)
       .then((rows) => {
         setPatients(rows);
@@ -112,7 +112,7 @@ export default function DoctorPortal() {
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState !== "visible") return;
-      loadList(queryRef.current);
+      loadList(queryRef.current, false);
       const id = selectedIdStateRef.current;
       if (id) loadDetail(id, false);
     };
