@@ -15,7 +15,9 @@ client = TestClient(app)
 def _use_tmp_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "CACHE_PATH", tmp_path / "summaries.json")
     monkeypatch.setattr(agent, "_cache", None)
-    monkeypatch.setattr(agent, "_stats", {"estimated_tokens_saved": 0})
+    monkeypatch.setattr(
+        agent, "_stats", {"estimated_tokens_saved": 0, "cache_hits": 0}
+    )
 
 
 def test_health():
@@ -86,9 +88,14 @@ def test_summary_cache_stats(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
     resp = client.get("/api/summary-cache-stats")
     assert resp.status_code == 200
-    assert resp.json() == {"entries": 0, "estimated_tokens_saved": 0}
+    assert resp.json() == {
+        "entries": 0,
+        "cache_hits": 0,
+        "estimated_tokens_saved": 0,
+    }
     client.post("/api/generate-summary", json={})
     client.post("/api/generate-summary", json={})
     stats = client.get("/api/summary-cache-stats").json()
     assert stats["entries"] == 1
+    assert stats["cache_hits"] == 1
     assert stats["estimated_tokens_saved"] > 0

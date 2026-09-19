@@ -17,7 +17,7 @@ from openai import OpenAI
 CACHE_PATH = Path(__file__).resolve().parent / ".cache" / "summaries.json"
 
 _cache: dict | None = None
-_stats = {"estimated_tokens_saved": 0}
+_stats = {"estimated_tokens_saved": 0, "cache_hits": 0}
 
 _SYSTEM_PROMPT = (
     "You are a clinical mobility assistant; write plain-language summaries "
@@ -108,6 +108,7 @@ def generate_summary(
         saved = (len(_build_prompt(metrics_day1, metrics_day14, patient_id))
                  + len(entry["summary"])) // 4
         _stats["estimated_tokens_saved"] += saved
+        _stats["cache_hits"] += 1
         entry["cached"] = True
         entry["estimated_tokens_saved"] = _stats["estimated_tokens_saved"]
         return entry
@@ -149,5 +150,6 @@ def generate_summary(
 def cache_stats() -> dict:
     return {
         "entries": len(_load_cache()),
+        "cache_hits": _stats["cache_hits"],
         "estimated_tokens_saved": _stats["estimated_tokens_saved"],
     }

@@ -54,6 +54,18 @@ npm run dev
 Dashboard runs at http://localhost:3000 and expects the backend on
 `NEXT_PUBLIC_API_URL`.
 
+## Demo script for the pitch
+
+1. `cd backend && .venv/bin/uvicorn main:app --port 8000`
+2. `cd frontend && npm run dev`
+3. Open http://localhost:3000 — the header shows the patient chip and a
+   "Backend: connected" status pill.
+4. In Simulated Trial Mode, flip Day 1 → Day 14 to show rehab progress on the
+   metrics cards and trend chart.
+5. Click **Generate Patient Summary** twice — the second call is served from
+   the heuristic cache (watch the Token Efficiency panel's "Cache hit" badge
+   and tokens-saved counter).
+
 ## Test
 
 ```bash

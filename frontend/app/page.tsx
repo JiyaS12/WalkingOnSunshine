@@ -8,10 +8,13 @@ import {
   Gauge,
   Sparkles,
   TrendingDown,
+  User,
 } from "lucide-react";
 import WebcamFeed from "./components/WebcamFeed";
 import TrendGraph, { TrendSession } from "./components/TrendGraph";
+import TokenEfficiency from "./components/TokenEfficiency";
 import {
+  API_URL,
   Comparison,
   GaitMetrics,
   SummaryResponse,
@@ -64,6 +67,14 @@ export default function Home() {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryCount, setSummaryCount] = useState(0);
+  const [backendUp, setBackendUp] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/health`)
+      .then((r) => setBackendUp(r.ok))
+      .catch(() => setBackendUp(false));
+  }, []);
 
   useEffect(() => {
     fetchSimulation()
@@ -111,6 +122,7 @@ export default function Home() {
     setSummaryError(null);
     try {
       setSummary(await generateSummary(patientId || undefined));
+      setSummaryCount((c) => c + 1);
     } catch (err) {
       setSummaryError(
         err instanceof Error ? err.message : "summary request failed"
@@ -122,13 +134,30 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <header className="mb-6 flex items-center gap-3">
-        <Activity className="h-8 w-8 text-emerald-400" />
-        <div>
-          <h1 className="text-2xl font-bold">GaitGuard AI</h1>
-          <p className="text-xs text-slate-400">
-            Clinical mobility monitoring{patientId ? ` — ${patientId}` : ""}
-          </p>
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <Activity className="h-8 w-8 text-emerald-400" />
+          <div>
+            <h1 className="text-2xl font-bold">GaitGuard AI</h1>
+            <p className="text-xs text-slate-400">
+              Clinical gait monitoring & fall-risk analytics
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
+            <User className="h-3.5 w-3.5 text-slate-400" />
+            RGN-0417 · 78 y/o · Geriatric Mobility Trial
+          </span>
+          <span
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              backendUp
+                ? "border-emerald-500/40 bg-emerald-600/20 text-emerald-300"
+                : "border-rose-500/40 bg-rose-600/20 text-rose-300"
+            }`}
+          >
+            Backend: {backendUp === null ? "checking…" : backendUp ? "connected" : "offline"}
+          </span>
         </div>
       </header>
 
@@ -171,7 +200,15 @@ export default function Home() {
 
           <TrendGraph sessions={sessions} />
 
+          <TokenEfficiency refresh={summaryCount} lastResult={summary} />
+
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+            <h2 className="text-sm font-medium text-slate-200">
+              AI Patient Summary
+            </h2>
+            <p className="mb-3 text-xs text-slate-400">
+              Plain-language clinical summary for patients & care teams
+            </p>
             <button
               onClick={handleSummary}
               disabled={summaryLoading}
@@ -194,7 +231,7 @@ export default function Home() {
                   </span>
                   {summary.cached && (
                     <span className="rounded-full border border-sky-500/40 bg-sky-600/20 px-2 py-0.5 uppercase text-sky-300">
-                      cached
+                      served from cache
                     </span>
                   )}
                   {summary.estimated_tokens_saved > 0 && (

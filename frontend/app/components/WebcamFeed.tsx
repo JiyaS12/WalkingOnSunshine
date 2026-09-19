@@ -279,40 +279,52 @@ export default function WebcamFeed({ onMetrics }: Props) {
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="mb-3">
+        <div
+          role="radiogroup"
+          aria-label="Input mode"
+          className="grid grid-cols-2 gap-2"
+        >
           <button
-            role="switch"
-            aria-checked={simulated}
-            aria-label="Toggle simulated trial mode"
+            role="radio"
+            aria-checked={!simulated}
             onClick={() => {
               setError(null);
-              setSimulated((s) => !s);
+              setSimulated(false);
             }}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              simulated ? "bg-emerald-500" : "bg-slate-600"
+            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+              !simulated
+                ? "border-emerald-500 bg-emerald-600 text-white"
+                : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                simulated ? "translate-x-6" : "translate-x-1"
-              }`}
-            />
+            <Camera className="h-4 w-4" />
+            Live Camera (MediaPipe Pose)
           </button>
-          <span className="flex items-center gap-2 text-sm text-slate-200">
-            {simulated ? (
-              <>
-                <FlaskConical className="h-4 w-4 text-emerald-400" />
-                Simulated Trial Mode
-              </>
-            ) : (
-              <>
-                <Camera className="h-4 w-4 text-sky-400" />
-                Live Camera
-              </>
-            )}
-          </span>
+          <button
+            role="radio"
+            aria-checked={simulated}
+            onClick={() => {
+              setError(null);
+              setSimulated(true);
+            }}
+            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+              simulated
+                ? "border-emerald-500 bg-emerald-600 text-white"
+                : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            <FlaskConical className="h-4 w-4" />
+            Simulated Trial Mode
+          </button>
         </div>
+        <p className="mt-2 text-xs text-slate-400">
+          {simulated
+            ? "Pre-computed geriatric trial telemetry — patient RGN-0417, Regeneron mobility arm"
+            : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
+        </p>
+      </div>
+      <div className="mb-3 flex items-center justify-end gap-4">
         {simulated && (
           <div className="flex gap-1 rounded-lg bg-slate-800 p-1 text-xs">
             {([1, 14] as const).map((d) => (
