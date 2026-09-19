@@ -118,16 +118,18 @@ export default function Home() {
     (m: GaitMetrics, source: "live" | "simulated" | "upload") => {
       setMetrics(m);
       setMetricsSource(source);
-      if (source !== "live") return;
+      if (source === "simulated") return;
+      const label = source === "upload" ? "Upload" : "Live";
       setSessions((prev) => {
-        const live: TrendSession = {
-          label: "Live",
+        const rest = prev.filter((s) => s.label !== label);
+        if (source === "upload" && !m.gait_detected) return rest;
+        const point: TrendSession = {
+          label,
           asymmetry_pct: m.asymmetry_pct,
           fall_risk_score: m.fall_risk_score,
           stride_length_m: m.stride_length_m,
         };
-        const rest = prev.filter((s) => s.label !== "Live");
-        return [...rest, live];
+        return [...rest, point];
       });
     },
     []

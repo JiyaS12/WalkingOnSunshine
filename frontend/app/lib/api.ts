@@ -77,6 +77,39 @@ export async function processFrames(
   });
 }
 
+export interface VideoAnalysis {
+  metrics: GaitMetrics;
+  frames: JointFrame[];
+  fps: number;
+  frames_processed: number;
+  frames_total: number;
+  filename: string;
+}
+
+export async function processVideo(
+  file: File,
+  signal?: AbortSignal
+): Promise<VideoAnalysis> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/process-video`, {
+    method: "POST",
+    body: form,
+    signal,
+  });
+  if (!res.ok) {
+    let detail = `API /api/process-video failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* keep generic detail */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<VideoAnalysis>;
+}
+
 export interface Survey {
   patient_id: string;
   patient_name?: string | null;
