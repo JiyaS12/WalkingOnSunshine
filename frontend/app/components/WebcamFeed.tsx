@@ -465,7 +465,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
           ref={canvasRef}
           width={640}
           height={360}
-          className={`h-full w-full ${simulated ? "" : "-scale-x-100"}`}
+          className={`h-full w-full ${
+            simulated ? "" : "absolute inset-0 -scale-x-100 object-cover"
+          }`}
         />
         {simulated ? (
           <span className="absolute right-2 top-2 rounded bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
