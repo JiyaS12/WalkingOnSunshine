@@ -21,7 +21,6 @@ import {
 } from "../lib/gait";
 import type {
   NormalizedLandmark,
-  Pose,
   PoseResults,
 } from "../types/mediapipe";
 
