@@ -8,7 +8,7 @@ import {
   JointFrame,
   SimulationSession,
 } from "../lib/api";
-import type { Pose, PoseResults } from "../types/mediapipe";
+import type { MediaPipeCamera, Pose, PoseResults } from "../types/mediapipe";
 
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
@@ -19,6 +19,10 @@ const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
   27: "left_ankle",
   28: "right_ankle",
 };
+
+const LEG_JOINT_INDICES = new Set(
+  Object.keys(LANDMARK_JOINTS).map(Number)
+);
 
 // POSE_CONNECTIONS-like pairs (upper body + legs) for skeleton drawing
 const SKELETON_PAIRS: [number, number][] = [
@@ -46,29 +50,41 @@ const SIM_PAIRS: [string, string][] = [
 ];
 
 const POSE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js";
+const CAMERA_CDN =
+  "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
 const POSE_FILES = "https://cdn.jsdelivr.net/npm/@mediapipe/pose";
 
-const BUFFER_FLUSH = 90;
 const BUFFER_MAX = 300;
+const SYNC_INTERVAL_MS = 2000;
+const SYNC_MIN_FRAMES = 30;
+const SYNC_BATCH = 90;
 
-let poseScriptPromise: Promise<void> | null = null;
+const scriptPromises = new Map<string, Promise<void>>();
 
-function loadPoseScript(): Promise<void> {
-  if (typeof window !== "undefined" && window.Pose) {
-    return Promise.resolve();
-  }
-  if (!poseScriptPromise) {
-    poseScriptPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = POSE_CDN;
-      script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("failed to load MediaPipe Pose"));
-      document.head.appendChild(script);
-    });
-  }
-  return poseScriptPromise;
+function loadScript(src: string): Promise<void> {
+  const cached = scriptPromises.get(src);
+  if (cached) return cached;
+  const promise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () =>
+        reject(new Error(`failed to load ${src}`))
+      );
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`failed to load ${src}`));
+    document.head.appendChild(script);
+  });
+  scriptPromises.set(src, promise);
+  return promise;
 }
+
+type TrackingStatus = "idle" | "loading" | "tracking" | "no-person";
 
 interface Props {
   onMetrics: (
@@ -81,12 +97,16 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const [simulated, setSimulated] = useState(true);
   const [day, setDay] = useState<1 | 14>(1);
   const [error, setError] = useState<string | null>(null);
+  const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("idle");
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const poseRef = useRef<Pose | null>(null);
+  const cameraRef = useRef<MediaPipeCamera | null>(null);
   const rafRef = useRef<number>(0);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bufferRef = useRef<JointFrame[]>([]);
   const sendingRef = useRef(false);
   const onMetricsRef = useRef(onMetrics);
@@ -94,11 +114,22 @@ export default function WebcamFeed({ onMetrics }: Props) {
 
   const stopAll = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    if (syncIntervalRef.current !== null) {
+      clearInterval(syncIntervalRef.current);
+      syncIntervalRef.current = null;
+    }
+    try {
+      cameraRef.current?.stop();
+    } catch {
+      // camera_utils stop may throw if never started
+    }
+    cameraRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     void poseRef.current?.close().catch(() => undefined);
     poseRef.current = null;
     bufferRef.current = [];
+    sendingRef.current = false;
   }, []);
 
   const failToSimulated = useCallback(
@@ -128,19 +159,32 @@ export default function WebcamFeed({ onMetrics }: Props) {
       ctx.lineTo(pb.x * canvas.width, pb.y * canvas.height);
       ctx.stroke();
     }
-    ctx.fillStyle = "#f472b6";
-    for (const idx of Object.keys(LANDMARK_JOINTS).map(Number)) {
-      const p = lm[idx];
-      if (!p) continue;
-      ctx.beginPath();
-      ctx.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 2 * Math.PI);
-      ctx.fill();
+    const drawn = new Set<number>();
+    for (const [a, b] of SKELETON_PAIRS) {
+      drawn.add(a);
+      drawn.add(b);
     }
+    drawn.forEach((idx) => {
+      const p = lm[idx];
+      if (!p) return;
+      const isLeg = LEG_JOINT_INDICES.has(idx);
+      ctx.fillStyle = isLeg ? "#f472b6" : "#f8fafc";
+      ctx.beginPath();
+      ctx.arc(
+        p.x * canvas.width,
+        p.y * canvas.height,
+        isLeg ? 4 : 2.5,
+        0,
+        2 * Math.PI
+      );
+      ctx.fill();
+    });
   }, []);
 
   const handleResults = useCallback(
     (results: PoseResults) => {
       drawPoseLandmarks(results);
+      setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
       const world = results.poseWorldLandmarks;
       if (!world || world.length < 29) return;
       const frame: JointFrame = {};
@@ -152,26 +196,19 @@ export default function WebcamFeed({ onMetrics }: Props) {
       const buf = bufferRef.current;
       buf.push(frame);
       if (buf.length > BUFFER_MAX) buf.splice(0, buf.length - BUFFER_MAX);
-      if (buf.length >= BUFFER_FLUSH && !sendingRef.current) {
-        sendingRef.current = true;
-        const batch = buf.slice(-BUFFER_FLUSH);
-        processFrames(batch, 30)
-          .then((m) => onMetricsRef.current(m, "live"))
-          .catch(() => undefined)
-          .finally(() => {
-            sendingRef.current = false;
-          });
-      }
     },
     [drawPoseLandmarks]
   );
 
   const startLive = useCallback(async () => {
+    setTrackingStatus("loading");
     try {
-      await loadPoseScript();
+      await Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]);
       if (!window.Pose) throw new Error("MediaPipe Pose unavailable");
+      if (!window.Camera)
+        throw new Error("MediaPipe camera_utils unavailable");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
+        video: true,
       });
       streamRef.current = stream;
       const video = videoRef.current;
@@ -191,13 +228,43 @@ export default function WebcamFeed({ onMetrics }: Props) {
       pose.onResults(handleResults);
       poseRef.current = pose;
 
-      const loop = async () => {
-        if (poseRef.current && video.readyState >= 2) {
-          await poseRef.current.send({ image: video }).catch(() => undefined);
+      const canvas = canvasRef.current;
+      video.onloadedmetadata = () => {
+        if (canvas && video.videoWidth && video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
         }
-        rafRef.current = requestAnimationFrame(loop);
       };
-      rafRef.current = requestAnimationFrame(loop);
+      if (canvas && video.videoWidth && video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+
+      const camera = new window.Camera(video, {
+        onFrame: async () => {
+          await pose.send({ image: video });
+        },
+        width: 640,
+        height: 480,
+      });
+      cameraRef.current = camera;
+      await camera.start();
+
+      syncIntervalRef.current = setInterval(() => {
+        const buf = bufferRef.current;
+        if (buf.length < SYNC_MIN_FRAMES || sendingRef.current) return;
+        sendingRef.current = true;
+        const batch = buf.slice(-SYNC_BATCH);
+        processFrames(batch, 30)
+          .then((m) => {
+            onMetricsRef.current(m, "live");
+            setLastSyncAt(new Date());
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            sendingRef.current = false;
+          });
+      }, SYNC_INTERVAL_MS);
     } catch (err) {
       failToSimulated(
         `Live camera unavailable: ${
@@ -211,6 +278,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
     const session = (await fetchSimulation(day)) as SimulationSession;
     onMetricsRef.current(session.metrics, "simulated");
     const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = 640;
+      canvas.height = 360;
+    }
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
 
@@ -264,6 +335,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
   useEffect(() => {
     stopAll();
     if (simulated) {
+      setTrackingStatus("idle");
       startSimulated().catch((err) =>
         setError(
           `Simulation failed: ${
@@ -276,6 +348,19 @@ export default function WebcamFeed({ onMetrics }: Props) {
     }
     return stopAll;
   }, [simulated, day, startLive, startSimulated, stopAll]);
+
+  const statusDot =
+    trackingStatus === "tracking"
+      ? "bg-emerald-400"
+      : trackingStatus === "no-person"
+        ? "bg-amber-400"
+        : "bg-slate-500";
+  const statusText =
+    trackingStatus === "tracking"
+      ? "Tracking pose"
+      : trackingStatus === "no-person"
+        ? "No person detected"
+        : "Starting camera…";
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
@@ -323,6 +408,19 @@ export default function WebcamFeed({ onMetrics }: Props) {
             ? "Pre-computed geriatric trial telemetry — patient RGN-0417, Regeneron mobility arm"
             : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
         </p>
+        {!simulated && (
+          <div className="mt-2 flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <span className={`h-2 w-2 rounded-full ${statusDot}`} />
+              {statusText}
+            </span>
+            <span className="text-slate-500">
+              {lastSyncAt
+                ? `Last sync: ${lastSyncAt.toLocaleTimeString("en-GB", { hour12: false })}`
+                : "waiting for frames"}
+            </span>
+          </div>
+        )}
       </div>
       <div className="mb-3 flex items-center justify-end gap-4">
         {simulated && (
@@ -357,16 +455,25 @@ export default function WebcamFeed({ onMetrics }: Props) {
       <div className="relative aspect-video overflow-hidden rounded-lg bg-slate-950">
         <video
           ref={videoRef}
-          className={`absolute inset-0 h-full w-full object-cover ${
+          className={`absolute inset-0 h-full w-full -scale-x-100 object-cover ${
             simulated ? "hidden" : ""
           }`}
           muted
           playsInline
         />
-        <canvas ref={canvasRef} width={640} height={360} className="h-full w-full" />
-        {simulated && (
+        <canvas
+          ref={canvasRef}
+          width={640}
+          height={360}
+          className={`h-full w-full ${simulated ? "" : "-scale-x-100"}`}
+        />
+        {simulated ? (
           <span className="absolute right-2 top-2 rounded bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
             SIMULATED
+          </span>
+        ) : (
+          <span className="absolute right-2 top-2 rounded bg-rose-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
+            LIVE
           </span>
         )}
       </div>
