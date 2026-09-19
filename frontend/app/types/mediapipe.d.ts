@@ -23,6 +23,7 @@ export interface Pose {
   setOptions(options: PoseConfig): void;
   onResults(callback: (results: PoseResults) => void): void;
   send(input: { image: CanvasImageSource }): Promise<void>;
+  initialize(): Promise<void>;
   close(): Promise<void>;
 }
 

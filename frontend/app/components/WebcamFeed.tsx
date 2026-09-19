@@ -75,8 +75,9 @@ const SIM_PAIRS: [string, string][] = [
   ["right_knee", "right_ankle"],
 ];
 
-const POSE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js";
-const POSE_FILES = "https://cdn.jsdelivr.net/npm/@mediapipe/pose";
+const POSE_VERSION = "0.5.1675469404";
+const POSE_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/pose@${POSE_VERSION}/pose.js`;
+const POSE_FILES = `https://cdn.jsdelivr.net/npm/@mediapipe/pose@${POSE_VERSION}`;
 
 const EMBEDDED_BLOCKED_MSG =
   "Camera access is blocked inside the embedded preview. Open the dashboard in its own browser tab to use Live Camera.";
@@ -135,6 +136,7 @@ type TrackingStatus =
   | "idle"
   | "loading-scripts"
   | "requesting-camera"
+  | "loading-model"
   | "starting-model"
   | "tracking"
   | "no-person";
@@ -170,6 +172,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const rafRef = useRef<number>(0);
   const inFlightRef = useRef(false);
   const loopActiveRef = useRef(false);
+  const sendStartRef = useRef(0);
+  const sendFailedRef = useRef(false);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -201,6 +205,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
     }
     loopActiveRef.current = false;
     inFlightRef.current = false;
+    sendStartRef.current = 0;
+    sendFailedRef.current = false;
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -434,6 +440,18 @@ export default function WebcamFeed({ onMetrics }: Props) {
       }
       poseRef.current = pose;
 
+      setTrackingStatus("loading-model");
+      try {
+        await withTimeout(pose.initialize(), 90_000, "Model download");
+      } catch (err) {
+        void pose.close().catch(() => undefined);
+        throw new Error(
+          `Model download: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      if (isStale()) return;
+      setTrackingStatus("starting-model");
+
       const canvas = canvasRef.current;
       if (canvas && video.videoWidth && video.videoHeight) {
         canvas.width = video.videoWidth;
@@ -456,13 +474,39 @@ export default function WebcamFeed({ onMetrics }: Props) {
           if (!loopActiveRef.current || isStale()) return;
           if (video.readyState >= 2 && !inFlightRef.current) {
             inFlightRef.current = true;
+            sendStartRef.current = performance.now();
             try {
               await pose.send({ image: video });
-            } catch {
-              // transient inference failure; keep looping
+            } catch (err) {
+              if (!sendFailedRef.current && !isStale()) {
+                sendFailedRef.current = true;
+                loopActiveRef.current = false;
+                console.error("[GaitGuard] pose.send failed", err);
+                failToSimulated(
+                  `MediaPipe inference failed: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+                return;
+              }
             } finally {
               inFlightRef.current = false;
+              sendStartRef.current = 0;
             }
+          }
+          // hung send: in-flight for >20s
+          if (
+            sendStartRef.current > 0 &&
+            performance.now() - sendStartRef.current > 20_000 &&
+            !sendFailedRef.current
+          ) {
+            sendFailedRef.current = true;
+            loopActiveRef.current = false;
+            console.error("[GaitGuard] pose.send hung");
+            failToSimulated(
+              "MediaPipe inference hung: pose.send did not resolve within 20s"
+            );
+            return;
           }
           schedule();
         };
@@ -480,12 +524,13 @@ export default function WebcamFeed({ onMetrics }: Props) {
         };
       }
 
+      // arm watchdog only after the model is loaded and the loop is running
       resultsTimerRef.current = setTimeout(() => {
         if (isStale()) return;
         failToSimulated(
-          "MediaPipe model did not start — check network access to cdn.jsdelivr.net"
+          "Pose model loaded but produced no results — try reloading the page"
         );
-      }, 20_000);
+      }, 15_000);
 
       syncIntervalRef.current = setInterval(() => {
         const buf = bufferRef.current;
@@ -626,6 +671,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
           ? "Loading MediaPipe…"
           : trackingStatus === "requesting-camera"
             ? "Requesting camera permission…"
+            : trackingStatus === "loading-model"
+              ? "Downloading pose model (≈10 MB, first run only)…"
             : trackingStatus === "starting-model"
               ? "Starting pose model…"
               : trackingStatus === "idle" && cameraBlocked
