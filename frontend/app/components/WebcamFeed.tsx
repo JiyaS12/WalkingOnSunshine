@@ -92,7 +92,26 @@ function loadScript(src: string): Promise<void> {
   return promise;
 }
 
-type TrackingStatus = "idle" | "loading" | "tracking" | "no-person";
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out`)), ms)
+    ),
+  ]);
+}
+
+type TrackingStatus =
+  | "idle"
+  | "loading-scripts"
+  | "requesting-camera"
+  | "starting-model"
+  | "tracking"
+  | "no-person";
 
 interface Props {
   onMetrics: (
@@ -115,6 +134,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const cameraRef = useRef<MediaPipeCamera | null>(null);
   const rafRef = useRef<number>(0);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bufferRef = useRef<JointFrame[]>([]);
   const timesRef = useRef<number[]>([]);
   const sendingRef = useRef(false);
@@ -128,6 +148,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
     if (syncIntervalRef.current !== null) {
       clearInterval(syncIntervalRef.current);
       syncIntervalRef.current = null;
+    }
+    if (resultsTimerRef.current !== null) {
+      clearTimeout(resultsTimerRef.current);
+      resultsTimerRef.current = null;
     }
     try {
       cameraRef.current?.stop();
@@ -195,6 +219,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
 
   const handleResults = useCallback(
     (results: PoseResults) => {
+      if (resultsTimerRef.current !== null) {
+        clearTimeout(resultsTimerRef.current);
+        resultsTimerRef.current = null;
+      }
       drawPoseLandmarks(results);
       setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
       const world = results.poseWorldLandmarks;
@@ -218,16 +246,34 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const startLive = useCallback(async () => {
     const gen = ++generationRef.current;
     const isStale = () => gen !== generationRef.current;
-    setTrackingStatus("loading");
+    setTrackingStatus("loading-scripts");
     try {
-      await Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]);
+      if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+      ) {
+        throw new Error(
+          `Camera API unavailable (needs HTTPS or localhost, and a top-level tab — embedded previews block camera access)${
+            window.isSecureContext ? "" : "; page is not a secure context"
+          }`
+        );
+      }
+      await withTimeout(
+        Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]),
+        15_000,
+        "MediaPipe script load"
+      );
       if (isStale()) return;
       if (!window.Pose) throw new Error("MediaPipe Pose unavailable");
       if (!window.Camera)
         throw new Error("MediaPipe camera_utils unavailable");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-      });
+
+      setTrackingStatus("requesting-camera");
+      const stream = await withTimeout(
+        navigator.mediaDevices.getUserMedia({ video: true }),
+        30_000,
+        "Camera permission"
+      );
       if (isStale()) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -236,8 +282,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
       const video = videoRef.current;
       if (!video) throw new Error("video element missing");
       video.srcObject = stream;
-      await video.play();
+      await withTimeout(video.play(), 10_000, "Video playback");
       if (isStale()) return;
+
+      setTrackingStatus("starting-model");
 
       const pose = new window.Pose({
         locateFile: (file) => `${POSE_FILES}/${file}`,
@@ -274,7 +322,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         width: 640,
         height: 480,
       });
-      await camera.start();
+      await withTimeout(camera.start(), 20_000, "Camera start");
       if (isStale()) {
         try {
           camera.stop();
@@ -284,6 +332,13 @@ export default function WebcamFeed({ onMetrics }: Props) {
         return;
       }
       cameraRef.current = camera;
+
+      resultsTimerRef.current = setTimeout(() => {
+        if (isStale()) return;
+        failToSimulated(
+          "MediaPipe model did not start — check network access to cdn.jsdelivr.net"
+        );
+      }, 20_000);
 
       syncIntervalRef.current = setInterval(() => {
         const buf = bufferRef.current;
@@ -311,6 +366,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
           });
       }, SYNC_INTERVAL_MS);
     } catch (err) {
+      console.error("[GaitGuard live]", err);
       failToSimulated(
         `Live camera unavailable: ${
           err instanceof Error ? err.message : String(err)
@@ -407,7 +463,13 @@ export default function WebcamFeed({ onMetrics }: Props) {
       ? "Tracking pose"
       : trackingStatus === "no-person"
         ? "No person detected"
-        : "Starting camera…";
+        : trackingStatus === "loading-scripts"
+          ? "Loading MediaPipe…"
+          : trackingStatus === "requesting-camera"
+            ? "Requesting camera permission…"
+            : trackingStatus === "starting-model"
+              ? "Starting pose model…"
+              : "Starting camera…";
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
