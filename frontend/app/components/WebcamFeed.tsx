@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, FlaskConical, AlertTriangle, RefreshCw } from "lucide-react";
+import {
+  Camera,
+  FlaskConical,
+  AlertTriangle,
+  RefreshCw,
+  ExternalLink,
+} from "lucide-react";
 import {
   fetchSimulation,
   processFrames,
@@ -61,6 +67,9 @@ const POSE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js";
 const CAMERA_CDN =
   "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
 const POSE_FILES = "https://cdn.jsdelivr.net/npm/@mediapipe/pose";
+
+const EMBEDDED_BLOCKED_MSG =
+  "Camera access is blocked inside the embedded preview. Open the dashboard in its own browser tab to use Live Camera.";
 
 const BUFFER_MAX = 300;
 const SYNC_INTERVAL_MS = 2000;
@@ -137,6 +146,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const [cameraBlocked, setCameraBlocked] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [liveGait, setLiveGait] = useState<LiveGaitMetrics | null>(null);
+  const [embedded, setEmbedded] = useState(false);
+
+  useEffect(() => {
+    setEmbedded(window.self !== window.top);
+  }, []);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -172,6 +186,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
       // camera_utils stop may throw if never started
     }
     cameraRef.current = null;
+    const canvas = canvasRef.current;
+    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     void poseRef.current?.close().catch(() => undefined);
@@ -303,6 +319,18 @@ export default function WebcamFeed({ onMetrics }: Props) {
       if (!window.Camera)
         throw new Error("MediaPipe camera_utils unavailable");
 
+      if (embedded) {
+        stopAll();
+        setCameraBlocked(EMBEDDED_BLOCKED_MSG);
+        setTrackingStatus("idle");
+        return;
+      }
+
+      const canvasEl = canvasRef.current;
+      canvasEl
+        ?.getContext("2d")
+        ?.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
       setTrackingStatus("requesting-camera");
       let stream: MediaStream;
       try {
@@ -316,8 +344,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
         const name = err instanceof DOMException ? err.name : "";
         let msg: string;
         if (name === "NotAllowedError") {
-          msg =
-            "Camera permission was denied. Click the camera icon in the address bar to allow access, then Retry.";
+          msg = embedded
+            ? EMBEDDED_BLOCKED_MSG
+            : "Camera permission was denied. Click the camera icon in the address bar to allow access, then Retry.";
         } else if (name === "NotFoundError") {
           msg = "No camera detected on this device.";
         } else if (name === "NotReadableError" || name === "AbortError") {
@@ -432,7 +461,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         }. Switched to Simulated Trial Mode.`
       );
     }
-  }, [failToSimulated, handleResults, stopAll]);
+  }, [failToSimulated, handleResults, stopAll, embedded]);
 
   const startSimulated = useCallback(async () => {
     const gen = generationRef.current;
@@ -515,7 +544,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const statusDot =
     trackingStatus === "tracking"
       ? "bg-emerald-400"
-      : trackingStatus === "no-person"
+      : trackingStatus === "no-person" || (trackingStatus === "idle" && cameraBlocked)
         ? "bg-amber-400"
         : "bg-slate-500";
   const statusText =
@@ -529,7 +558,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
             ? "Requesting camera permission…"
             : trackingStatus === "starting-model"
               ? "Starting pose model…"
-              : "Starting camera…";
+              : trackingStatus === "idle" && cameraBlocked
+                ? "Camera blocked"
+                : "Starting camera…";
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
@@ -635,7 +666,18 @@ export default function WebcamFeed({ onMetrics }: Props) {
             <div className="max-w-sm rounded-lg border border-amber-600/60 bg-amber-900/40 p-4 text-center">
               <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-amber-300" />
               <p className="text-xs text-amber-100">{cameraBlocked}</p>
-              <div className="mt-3 flex justify-center gap-2">
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {embedded && (
+                  <button
+                    onClick={() =>
+                      window.open(window.location.href, "_blank", "noopener")
+                    }
+                    className="flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open in new tab
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setCameraBlocked(null);
