@@ -1,4 +1,5 @@
 import copy
+import json
 import math
 import sys
 from pathlib import Path
@@ -7,8 +8,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import simulator
 from processor import GaitMetrics, GaitProcessor
-from simulator import get_comparison, load_cohort
+from simulator import get_comparison, get_simulation, load_cohort
 
 
 def _flat_frames(n):
@@ -250,3 +252,19 @@ def test_asymmetry_scales_with_swing_deficit():
 def test_asymmetry_detects_static_foot():
     metrics = GaitProcessor(_walking_frames(right_lift=0.0)).compute()
     assert metrics.asymmetry_pct > 20.0
+
+
+def test_load_cohort_caches_per_path(tmp_path):
+    alt = json.loads(simulator.DATA_PATH.read_text())
+    alt["patient_id"] = "ALT-0001"
+    alt_path = tmp_path / "alt_cohort.json"
+    alt_path.write_text(json.dumps(alt))
+
+    assert load_cohort(alt_path)["patient_id"] == "ALT-0001"
+    assert load_cohort()["patient_id"] == "RGN-0417"
+
+
+def test_simulation_frames_are_detached_from_cache():
+    original = load_cohort()["sessions"]["day_1"]["frames"][0]["left_hip"][0]
+    get_simulation(1)["frames"][0]["left_hip"][0] = 999.0
+    assert load_cohort()["sessions"]["day_1"]["frames"][0]["left_hip"][0] == original
