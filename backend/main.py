@@ -24,10 +24,13 @@ app.add_middleware(
 class ProcessFrameRequest(BaseModel):
     frames: list[dict[str, list[float]]]
     fps: float = 30.0
+    leg_length_m: float | None = None
 
 
 class SummaryRequest(BaseModel):
     patient_id: str | None = None
+    metrics_day1: GaitMetrics | None = None
+    metrics_day14: GaitMetrics | None = None
 
 
 @app.get("/api/health")
@@ -38,7 +41,9 @@ def health() -> dict:
 @app.post("/api/process-frame", response_model=GaitMetrics)
 def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
     try:
-        return GaitProcessor(body.frames, fps=body.fps).compute()
+        return GaitProcessor(
+            body.frames, fps=body.fps, leg_length_m=body.leg_length_m
+        ).compute()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -57,6 +62,17 @@ def get_simulation(day: int | None = None) -> dict:
 def generate_summary(body: SummaryRequest | None = None) -> dict:
     comparison = simulator.get_comparison()
     patient_id = (body.patient_id if body else None) or comparison["patient_id"]
-    return agent.generate_summary(
-        comparison["day_1"], comparison["day_14"], patient_id
+    day1 = (
+        body.metrics_day1.model_dump() if body and body.metrics_day1
+        else comparison["day_1"]
     )
+    day14 = (
+        body.metrics_day14.model_dump() if body and body.metrics_day14
+        else comparison["day_14"]
+    )
+    return agent.generate_summary(day1, day14, patient_id)
+
+
+@app.get("/api/summary-cache-stats")
+def summary_cache_stats() -> dict:
+    return agent.cache_stats()
