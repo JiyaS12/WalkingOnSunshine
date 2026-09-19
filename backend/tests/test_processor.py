@@ -18,6 +18,25 @@ def _flat_frames(n):
     return [dict(joint) for _ in range(n)]
 
 
+def _walking_frames(n=300, fps=30.0, left_lift=0.30, right_lift=0.30, floor=0.05):
+    """Two ankles swinging in antiphase, each clearing the floor by its lift."""
+    frames = []
+    for i in range(n):
+        phase = 2 * math.pi * (i / fps)
+        frames.append({
+            "left_hip": [0.01 * i, 1.0, -0.09],
+            "right_hip": [0.01 * i, 1.0, 0.09],
+            "left_knee": [0.01 * i, 0.5, -0.09],
+            "right_knee": [0.01 * i, 0.5, 0.09],
+            "left_ankle": [0.01 * i,
+                           floor + left_lift * max(0.0, math.sin(phase)), -0.09],
+            "right_ankle": [0.01 * i,
+                            floor + right_lift * max(0.0, math.sin(phase + math.pi)),
+                            0.09],
+        })
+    return frames
+
+
 def test_compute_returns_valid_metrics():
     metrics = GaitProcessor(_flat_frames(60)).compute()
     assert isinstance(metrics, GaitMetrics)
@@ -205,3 +224,29 @@ def test_mostly_dropped_clip_raises():
         frame["right_knee"] = [float("nan"), 0.5, 0.0]
     with pytest.raises(ValueError, match="too sparse"):
         GaitProcessor(frames, fps=30.0)
+
+
+def test_symmetric_gait_has_near_zero_asymmetry():
+    metrics = GaitProcessor(_walking_frames()).compute()
+    assert metrics.asymmetry_pct < 1.0
+
+
+def test_asymmetry_detects_reduced_swing_height():
+    """A foot that barely clears the floor must not be rescaled away."""
+    metrics = GaitProcessor(
+        _walking_frames(left_lift=0.30, right_lift=0.002)
+    ).compute()
+    assert metrics.asymmetry_pct > 20.0
+
+
+def test_asymmetry_scales_with_swing_deficit():
+    deficits = [
+        GaitProcessor(_walking_frames(right_lift=lift)).compute().asymmetry_pct
+        for lift in (0.30, 0.15, 0.05)
+    ]
+    assert deficits[0] < deficits[1] < deficits[2]
+
+
+def test_asymmetry_detects_static_foot():
+    metrics = GaitProcessor(_walking_frames(right_lift=0.0)).compute()
+    assert metrics.asymmetry_pct > 20.0

@@ -186,15 +186,21 @@ class GaitProcessor:
         return np.array(peaks, dtype=int)
 
     def _stance_asymmetry(self) -> float:
-        fractions = []
-        for joint in ("left_ankle", "right_ankle"):
-            y = self._joint_array(joint)[:, 1]
-            ymin, ymax = float(np.min(y)), float(np.max(y))
-            rng = ymax - ymin
-            threshold = ymin + 0.15 * rng
-            stance = np.sum(y <= threshold) / len(y)
-            fractions.append(stance)
-        left, right = fractions
+        """Difference in stance-phase fraction between the two feet.
+
+        The stance threshold is derived once from both ankles together, so a
+        foot with reduced swing height is measured against the same floor as
+        the healthy foot. Thresholding each foot against its own range would
+        rescale the impaired side and report zero asymmetry.
+        """
+        left_y = self._joint_array("left_ankle")[:, 1]
+        right_y = self._joint_array("right_ankle")[:, 1]
+        both = np.concatenate((left_y, right_y))
+        floor = float(np.min(both))
+        threshold = floor + 0.15 * (float(np.max(both)) - floor)
+
+        left = float(np.sum(left_y <= threshold)) / len(left_y)
+        right = float(np.sum(right_y <= threshold)) / len(right_y)
         mean = (left + right) / 2.0
         return abs(left - right) / max(mean, _EPS) * 100.0
 
