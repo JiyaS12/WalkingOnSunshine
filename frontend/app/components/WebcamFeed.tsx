@@ -71,7 +71,10 @@ function loadPoseScript(): Promise<void> {
 }
 
 interface Props {
-  onMetrics: (metrics: import("../lib/api").GaitMetrics) => void;
+  onMetrics: (
+    metrics: import("../lib/api").GaitMetrics,
+    source: "live" | "simulated"
+  ) => void;
 }
 
 export default function WebcamFeed({ onMetrics }: Props) {
@@ -153,7 +156,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         sendingRef.current = true;
         const batch = buf.slice(-BUFFER_FLUSH);
         processFrames(batch, 30)
-          .then((m) => onMetricsRef.current(m))
+          .then((m) => onMetricsRef.current(m, "live"))
           .catch(() => undefined)
           .finally(() => {
             sendingRef.current = false;
@@ -206,29 +209,21 @@ export default function WebcamFeed({ onMetrics }: Props) {
 
   const startSimulated = useCallback(async () => {
     const session = (await fetchSimulation(day)) as SimulationSession;
-    onMetricsRef.current(session.metrics);
+    onMetricsRef.current(session.metrics, "simulated");
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
 
     const frames = session.frames;
-    // bounds for scaling x/z top-down-ish view
-    const xs = frames.flatMap((f) =>
-      Object.values(f).map((v) => v[0])
-    );
+    // bounds for vertical scaling; x is centered on each frame's hip midpoint
     const ys = frames.flatMap((f) =>
       Object.values(f).map((v) => v[1])
     );
-    const xMin = Math.min(...xs);
-    const xMax = Math.max(...xs);
     const yMin = Math.min(...ys);
     const yMax = Math.max(...ys);
     const pad = 20;
-    const scale = Math.min(
-      (canvas.width - 2 * pad) / Math.max(xMax - xMin, 0.01),
-      (canvas.height - 2 * pad) / Math.max(yMax - yMin, 0.01)
-    );
-    const toX = (x: number) => pad + (x - xMin) * scale;
+    const scale =
+      ((canvas.height - 2 * pad) / Math.max(yMax - yMin, 0.01)) * 0.9;
     const toY = (y: number) => canvas.height - pad - (y - yMin) * scale;
 
     let i = 0;
@@ -239,6 +234,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
         last = ts;
         const f = frames[i % frames.length];
         i += 1;
+        const hipMidX = (f.left_hip[0] + f.right_hip[0]) / 2;
+        const toX = (x: number) =>
+          canvas.width / 2 + (x - hipMidX) * scale;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.strokeStyle = "#60a5fa";
         ctx.lineWidth = 2;
@@ -264,7 +262,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
   }, [day]);
 
   useEffect(() => {
-    setError(null);
     stopAll();
     if (simulated) {
       startSimulated().catch((err) =>
@@ -288,7 +285,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
             role="switch"
             aria-checked={simulated}
             aria-label="Toggle simulated trial mode"
-            onClick={() => setSimulated((s) => !s)}
+            onClick={() => {
+              setError(null);
+              setSimulated((s) => !s);
+            }}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
               simulated ? "bg-emerald-500" : "bg-slate-600"
             }`}
@@ -318,7 +318,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
             {([1, 14] as const).map((d) => (
               <button
                 key={d}
-                onClick={() => setDay(d)}
+                onClick={() => {
+                  setError(null);
+                  setDay(d);
+                }}
                 className={`rounded px-2 py-1 ${
                   day === d
                     ? "bg-emerald-600 text-white"
@@ -348,7 +351,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
           muted
           playsInline
         />
-        <canvas ref={canvasRef} width={640} height={480} className="h-full w-full" />
+        <canvas ref={canvasRef} width={640} height={360} className="h-full w-full" />
         {simulated && (
           <span className="absolute right-2 top-2 rounded bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
             SIMULATED
