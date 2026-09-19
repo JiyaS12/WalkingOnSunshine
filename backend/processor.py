@@ -71,8 +71,8 @@ class GaitProcessor:
                         f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
                     )
         if leg_length_m is not None:
-            if leg_length_m <= 0:
-                raise ValueError("leg_length_m must be positive")
+            if not np.isfinite(leg_length_m) or leg_length_m <= 0:
+                raise ValueError("leg_length_m must be finite and positive")
             self.leg_length_m = float(leg_length_m)
         else:
             self.leg_length_m = self._leg_length()
@@ -229,6 +229,9 @@ class GaitProcessor:
         knee_deficit = float(np.clip((40.0 - knee_rom) / 30.0, 0.0, 1.0))
         if not gait_detected:
             asymmetry = 0.0
+            stride = 0.0
+            stride_ratio = 0.0
+            cadence = 0.0
             stride_deficit = 0.0
             knee_deficit = 0.0
 
