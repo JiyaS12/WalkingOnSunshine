@@ -19,20 +19,12 @@ export interface GaitMetrics {
 
 export type JointFrame = Record<string, number[]>;
 
-export interface SimulationSession {
-  day: number;
-  fps: number;
-  frame_count: number;
-  metrics: GaitMetrics;
-  frames: JointFrame[];
-}
-
-export interface Comparison {
-  patient_id: string;
-  cohort: string;
-  day_1: GaitMetrics;
-  day_14: GaitMetrics;
-  deltas: Record<string, number>;
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 export interface SummaryResponse {
@@ -45,18 +37,16 @@ export interface SummaryResponse {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status}`);
+    let detail = `API ${path} failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* keep generic detail */
+    }
+    throw new ApiError(detail || res.statusText, res.status);
   }
   return res.json() as Promise<T>;
-}
-
-export async function fetchSimulation(
-  day?: 1 | 14
-): Promise<SimulationSession | Comparison> {
-  if (day === undefined) {
-    return request<Comparison>("/api/get-simulation");
-  }
-  return request<SimulationSession>(`/api/get-simulation?day=${day}`);
 }
 
 export async function processFrames(
@@ -105,7 +95,7 @@ export async function processVideo(
     } catch {
       /* keep generic detail */
     }
-    throw new Error(detail);
+    throw new ApiError(detail, res.status);
   }
   return res.json() as Promise<VideoAnalysis>;
 }
@@ -196,11 +186,11 @@ export async function generateSynthesis(
 }
 
 export async function generateSummary(
-  patientId?: string
+  patientId: string
 ): Promise<SummaryResponse> {
   return request<SummaryResponse>("/api/generate-summary", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patientId ? { patient_id: patientId } : {}),
+    body: JSON.stringify({ patient_id: patientId }),
   });
 }

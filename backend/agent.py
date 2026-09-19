@@ -62,6 +62,8 @@ def _round_metrics(m: dict) -> dict:
 def _cache_key(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
     blob = json.dumps(
         [
+            "summary-v2",
+            metrics_day1 is metrics_day14,
             _round_metrics(metrics_day1),
             _round_metrics(metrics_day14),
             patient_id,
@@ -74,25 +76,47 @@ def _cache_key(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
 def _build_prompt(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
     return (
         f"Patient: {patient_id}. "
-        f"Day 1 metrics: {json.dumps(metrics_day1)}. "
-        f"Day 14 metrics: {json.dumps(metrics_day14)}. "
+        f"Baseline metrics: {json.dumps(metrics_day1)}. "
+        f"Latest metrics: {json.dumps(metrics_day14)}. "
         "Focus on stride length, asymmetry, velocity degradation, "
         "and fall risk trend."
     )
 
 
+def _risk_band(score: float) -> str:
+    if score >= 0.5:
+        return "high"
+    if score >= 0.3:
+        return "moderate"
+    return "low"
+
+
 def _template_summary(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
+    if metrics_day1 is metrics_day14:
+        m = metrics_day14
+        return (
+            f"Patient {patient_id}: based on the latest walk, fall risk is "
+            f"{m['fall_risk_score']:.3f} ({_risk_band(m['fall_risk_score'])}). "
+            f"Stride length {m['stride_length_m']:.2f} m, "
+            f"asymmetry {m['asymmetry_pct']:.1f}%, "
+            f"velocity degradation {m['velocity_degradation_pct']:.1f}%."
+        )
     stride_delta = (
         metrics_day14["stride_length_m"] - metrics_day1["stride_length_m"]
     )
     risk_delta = (
         metrics_day14["fall_risk_score"] - metrics_day1["fall_risk_score"]
     )
-    trend = "improved" if risk_delta < 0 else "worsened"
+    if abs(risk_delta) < 1e-9:
+        trend = "unchanged"
+    elif risk_delta < 0:
+        trend = "improved"
+    else:
+        trend = "worsened"
     return (
         f"Patient {patient_id}: fall risk {trend} from "
-        f"{metrics_day1['fall_risk_score']:.3f} (day 1) to "
-        f"{metrics_day14['fall_risk_score']:.3f} (day 14). "
+        f"{metrics_day1['fall_risk_score']:.3f} (baseline) to "
+        f"{metrics_day14['fall_risk_score']:.3f} (latest). "
         f"Stride length changed {stride_delta:+.2f} m "
         f"({metrics_day1['stride_length_m']:.2f} -> "
         f"{metrics_day14['stride_length_m']:.2f}). "

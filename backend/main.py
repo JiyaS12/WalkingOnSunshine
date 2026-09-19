@@ -13,7 +13,6 @@ from starlette.concurrency import run_in_threadpool
 from typing_extensions import Annotated
 
 import agent
-import simulator
 import store
 from processor import GaitMetrics, GaitProcessor, validate_frames
 
@@ -45,9 +44,7 @@ class ProcessFrameRequest(BaseModel):
 
 
 class SummaryRequest(BaseModel):
-    patient_id: str | None = None
-    metrics_day1: GaitMetrics | None = None
-    metrics_day14: GaitMetrics | None = None
+    patient_id: str
 
 
 @app.get("/api/health")
@@ -65,29 +62,22 @@ def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-@app.get("/api/get-simulation")
-def get_simulation(day: int | None = None) -> dict:
+@app.post("/api/generate-summary")
+def generate_summary(body: SummaryRequest) -> dict:
     try:
-        if day is None:
-            return simulator.get_comparison()
-        return simulator.get_simulation(day)
+        record = store.get_patient(body.patient_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-
-
-@app.post("/api/generate-summary")
-def generate_summary(body: SummaryRequest | None = None) -> dict:
-    comparison = simulator.get_comparison()
-    patient_id = (body.patient_id if body else None) or comparison["patient_id"]
-    day1 = (
-        body.metrics_day1.model_dump() if body and body.metrics_day1
-        else comparison["day_1"]
+    sessions = record.get("gait_sessions") or []
+    if not sessions:
+        raise HTTPException(
+            status_code=422, detail="patient has no gait sessions yet"
+        )
+    return agent.generate_summary(
+        sessions[0]["metrics"],
+        sessions[-1]["metrics"],
+        body.patient_id,
     )
-    day14 = (
-        body.metrics_day14.model_dump() if body and body.metrics_day14
-        else comparison["day_14"]
-    )
-    return agent.generate_summary(day1, day14, patient_id)
 
 
 @app.get("/api/summary-cache-stats")

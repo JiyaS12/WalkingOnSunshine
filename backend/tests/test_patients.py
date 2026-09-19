@@ -188,11 +188,11 @@ def test_persist_failure_rolls_back(monkeypatch):
     assert len(after["surveys"]) == n_surveys
 
 
-def test_rgn0417_detail_includes_frames():
+def test_rgn0417_detail_includes_metrics():
     resp = client.get("/api/patients/RGN-0417")
     assert resp.status_code == 200
     sessions = resp.json()["gait_sessions"]
     assert len(sessions) == 2
     for s in sessions:
-        assert s["frames"] and len(s["frames"]) > 0
         assert s["metrics"]["gait_detected"] is True
+        assert s["metrics"]["fall_risk_score"] > 0

@@ -18,7 +18,7 @@ interface Props {
   height?: number;
 }
 
-// Same hip-centred scaling / drawing as the dashboard's simulated replay.
+// Same hip-centred scaling / drawing as the dashboard's skeleton replay.
 export default function SkeletonReplay({
   frames,
   fps,

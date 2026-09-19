@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  Copy,
   Loader2,
   Search,
   Sparkles,
@@ -58,14 +59,21 @@ export default function DoctorPortal() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detailGenRef = useRef(0);
   const synthGenRef = useRef(0);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const selectedIdStateRef = useRef<string | null>(null);
+  selectedIdStateRef.current = selectedId;
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  const loadList = useCallback((q: string) => {
-    setLoadingList(true);
+  const loadList = useCallback((q: string, showSpinner = true) => {
+    if (showSpinner) setLoadingList(true);
     fetchPatients(q || undefined)
       .then((rows) => {
         setPatients(rows);
         setListError(null);
         setSelectedId((prev) => prev ?? (rows[0]?.patient_id ?? null));
+        setLastSyncedAt(new Date());
       })
       .catch((err) =>
         setListError(err instanceof Error ? err.message : String(err))
@@ -73,7 +81,49 @@ export default function DoctorPortal() {
       .finally(() => setLoadingList(false));
   }, []);
 
+  const loadDetail = useCallback((id: string, reset = true) => {
+    const gen = ++detailGenRef.current;
+    if (reset) {
+      synthGenRef.current += 1;
+      setSynthLoading(false);
+      setRecord(null);
+      setDetailError(null);
+      setSynthesis(null);
+      setSynthError(null);
+    }
+    fetchPatient(id)
+      .then((r) => {
+        if (gen === detailGenRef.current) {
+          setRecord(r);
+          setDetailError(null);
+          setLastSyncedAt(new Date());
+        }
+      })
+      .catch((err) => {
+        if (gen === detailGenRef.current)
+          setDetailError(
+            err instanceof Error ? err.message : String(err)
+          );
+      });
+  }, []);
+
   useEffect(() => loadList(""), [loadList]);
+
+  // live sync: poll list + selected record every 5 s while the tab is visible
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      loadList(queryRef.current, false);
+      const id = selectedIdStateRef.current;
+      if (id) loadDetail(id, false);
+    };
+    const interval = setInterval(tick, 5000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [loadList, loadDetail]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -84,25 +134,8 @@ export default function DoctorPortal() {
   }, [query, loadList]);
 
   useEffect(() => {
-    if (!selectedId) return;
-    const gen = ++detailGenRef.current;
-    synthGenRef.current += 1;
-    setSynthLoading(false);
-    setRecord(null);
-    setDetailError(null);
-    setSynthesis(null);
-    setSynthError(null);
-    fetchPatient(selectedId)
-      .then((r) => {
-        if (gen === detailGenRef.current) setRecord(r);
-      })
-      .catch((err) => {
-        if (gen === detailGenRef.current)
-          setDetailError(
-            err instanceof Error ? err.message : String(err)
-          );
-      });
-  }, [selectedId]);
+    if (selectedId) loadDetail(selectedId);
+  }, [selectedId, loadDetail]);
 
   const filtered = useMemo(
     () =>
@@ -316,15 +349,40 @@ export default function DoctorPortal() {
           <h2 className="mb-1 text-sm font-medium text-slate-200">
             Unified Clinical Synthesis Report
           </h2>
-          <p className="mb-4 text-xs text-slate-400">
-            {record
-              ? `${record.name ?? record.patient_id} · ${record.patient_id}${
-                  record.age ? ` · ${record.age} y/o` : ""
-                }`
-              : selectedId
-                ? "Loading…"
-                : "Select a patient"}
-          </p>
+          <div className="mb-4 flex items-center justify-between text-xs">
+            <p className="text-slate-400">
+              {record
+                ? `${record.name ?? record.patient_id} · ${record.patient_id}${
+                    record.age ? ` · ${record.age} y/o` : ""
+                  }`
+                : selectedId
+                  ? "Loading…"
+                  : "Select a patient"}
+            </p>
+            {record && (
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(
+                    `${window.location.origin}/patient/${encodeURIComponent(record.patient_id)}`
+                  );
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
+              >
+                <Copy className="h-3 w-3" />
+                {copied ? "Copied" : "Copy patient link"}
+              </button>
+            )}
+            {lastSyncedAt && (
+              <span className="flex items-center gap-1.5 text-slate-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                Live · updated{" "}
+                {lastSyncedAt.toLocaleTimeString("en-GB", { hour12: false })}
+              </span>
+            )}
+          </div>
           {detailError && (
             <p className="text-xs text-rose-300">{detailError}</p>
           )}

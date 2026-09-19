@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Camera,
-  FlaskConical,
   AlertTriangle,
   RefreshCw,
   ExternalLink,
@@ -11,11 +10,11 @@ import {
   Upload,
 } from "lucide-react";
 import {
-  fetchSimulation,
+  ApiError,
+  GaitMetrics,
   processFrames,
   processVideo,
   JointFrame,
-  SimulationSession,
   VideoAnalysis,
 } from "../lib/api";
 import {
@@ -65,7 +64,7 @@ const SKELETON_PAIRS: [number, number][] = [
   [28, 32],
 ];
 
-// joint key -> indices for the simulated skeleton (order in JointFrame)
+// joint key -> pairs for replaying backend joint frames on the canvas
 const SIM_PAIRS: [string, string][] = [
   ["left_hip", "right_hip"],
   ["left_hip", "left_knee"],
@@ -142,16 +141,20 @@ type TrackingStatus =
 
 interface Props {
   onMetrics: (
-    metrics: import("../lib/api").GaitMetrics,
-    source: "live" | "simulated" | "upload"
+    metrics: GaitMetrics,
+    source: "live" | "upload",
+    frames?: JointFrame[]
   ) => void;
+  onProcessingChange?: (busy: boolean) => void;
 }
 
-type Mode = "live" | "simulated" | "upload";
+type Mode = "live" | "upload";
 
-export default function WebcamFeed({ onMetrics }: Props) {
-  const [mode, setMode] = useState<Mode>("simulated");
-  const [day, setDay] = useState<1 | 14>(1);
+export default function WebcamFeed({
+  onMetrics,
+  onProcessingChange,
+}: Props) {
+  const [mode, setMode] = useState<Mode>("live");
   const [error, setError] = useState<string | null>(null);
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("idle");
   const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
@@ -199,6 +202,12 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const [uploadCaption, setUploadCaption] = useState<string | null>(null);
   const onMetricsRef = useRef(onMetrics);
   onMetricsRef.current = onMetrics;
+  const onProcessingChangeRef = useRef(onProcessingChange);
+  onProcessingChangeRef.current = onProcessingChange;
+  const setBusy = useCallback((v: boolean) => {
+    setUploading(v);
+    onProcessingChangeRef.current?.(v);
+  }, []);
 
   const stopAll = useCallback(() => {
     generationRef.current += 1;
@@ -228,7 +237,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     uploadAbortRef.current?.abort();
     uploadAbortRef.current = null;
-    setUploading(false);
+    setBusy(false);
     setUploadName(null);
     setUploadCaption(null);
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -247,13 +256,16 @@ export default function WebcamFeed({ onMetrics }: Props) {
     setLegLengthM(null);
     setCalibrationCount(0);
     setLiveGait(null);
-  }, []);
+  }, [setBusy]);
 
-  const failToSimulated = useCallback(
+  // live startup/inference failures stay in live mode: the blocked panel
+  // offers Retry camera and Use Upload Video instead
+  const failLive = useCallback(
     (message: string) => {
       setError(message);
       stopAll();
-      setMode("simulated");
+      setCameraBlocked(message);
+      setTrackingStatus("idle");
     },
     [stopAll]
   );
@@ -476,7 +488,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       try {
         await withTimeout(initPromise, 90_000, "Model download");
       } catch (err) {
-        // stopAll (via failToSimulated) runs closePoseRef
+        // stopAll (via failLive) runs closePoseRef
         throw new Error(
           `Model download: ${err instanceof Error ? err.message : String(err)}`
         );
@@ -546,7 +558,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
                 sendFailedRef.current = true;
                 loopActiveRef.current = false;
                 console.error("[GaitGuard] pose.send failed", err);
-                failToSimulated(
+                failLive(
                   `MediaPipe inference failed: ${
                     err instanceof Error ? err.message : String(err)
                   }`
@@ -567,7 +579,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
           sendFailedRef.current = true;
           loopActiveRef.current = false;
           console.error("[GaitGuard] pose.send hung");
-          failToSimulated(
+          failLive(
             "MediaPipe inference hung: pose.send did not resolve within 20s"
           );
           return;
@@ -579,7 +591,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       // arm watchdog only after the model is loaded and the loop is running
       resultsTimerRef.current = setTimeout(() => {
         if (isStale()) return;
-        failToSimulated(
+        failLive(
           `Pose model loaded but produced no results in 15 s — ${diagSnapshot()}`
         );
       }, 15_000);
@@ -608,7 +620,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         )
           .then((m) => {
             if (sendGen !== generationRef.current) return;
-            onMetricsRef.current(m, "live");
+            onMetricsRef.current(m, "live", batch.slice(-300));
             setLastSyncAt(new Date());
           })
           .catch((err) => {
@@ -622,16 +634,15 @@ export default function WebcamFeed({ onMetrics }: Props) {
       }, SYNC_INTERVAL_MS);
     } catch (err) {
       console.error("[GaitGuard live]", err);
-      failToSimulated(
+      failLive(
         `Live camera unavailable: ${
           err instanceof Error ? err.message : String(err)
-        }. Switched to Simulated Trial Mode.`
+        }`
       );
     }
-  }, [failToSimulated, handleResults, stopAll, embedded, drawSkeleton]);
+  }, [failLive, handleResults, stopAll, embedded, drawSkeleton]);
 
-  // shared skeleton replay for simulated trial frames and the joint
-  // frames returned by /api/process-video
+  // skeleton replay for the joint frames returned by /api/process-video
   const playFrames = useCallback(
     (
       canvas: HTMLCanvasElement,
@@ -693,21 +704,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
     []
   );
 
-  const startSimulated = useCallback(async () => {
-    const gen = generationRef.current;
-    const session = (await fetchSimulation(day)) as SimulationSession;
-    if (gen !== generationRef.current) return;
-    onMetricsRef.current(session.metrics, "simulated");
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.width = 640;
-      canvas.height = 360;
-    }
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    playFrames(canvas, ctx, session.frames, session.fps);
-  }, [day, playFrames]);
-
   const analyzeVideo = useCallback(
     async (file: File) => {
       if (!/\.(mp4|mov|webm)$/i.test(file.name)) {
@@ -719,7 +715,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       const controller = new AbortController();
       uploadAbortRef.current = controller;
       cancelAnimationFrame(rafRef.current);
-      setUploading(true);
+      setBusy(true);
       setUploadName(file.name);
       setUploadCaption(null);
       setError(null);
@@ -751,7 +747,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
             `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
           );
         }
-        onMetricsRef.current(analysis.metrics, "upload");
+        onMetricsRef.current(
+          analysis.metrics,
+          "upload",
+          analysis.frames.slice(-300)
+        );
       } catch (err) {
         if (
           (err instanceof DOMException && err.name === "AbortError") ||
@@ -759,40 +759,38 @@ export default function WebcamFeed({ onMetrics }: Props) {
           uploadAbortRef.current !== controller
         )
           return;
-        setError(
-          `Video analysis failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
+        const status = err instanceof ApiError ? err.status : 0;
+        let msg =
+          err instanceof Error ? err.message : String(err);
+        if (status === 415) {
+          msg =
+            "Unsupported format — please upload .mp4, .mov or .webm";
+        } else if (status === 413) {
+          msg = "Video is too large — the limit is 100 MB";
+        } else if (status === 503) {
+          msg = "Video analysis is unavailable on this server";
+        }
+        setError(`Video analysis failed: ${msg}`);
       } finally {
         if (uploadAbortRef.current === controller) {
           uploadAbortRef.current = null;
-          if (gen === generationRef.current) setUploading(false);
+          if (gen === generationRef.current) setBusy(false);
         }
       }
     },
-    [playFrames]
+    [playFrames, setBusy]
   );
 
   useEffect(() => {
     stopAll();
     setCameraBlocked(null);
-    if (mode === "simulated") {
-      setTrackingStatus("idle");
-      startSimulated().catch((err) =>
-        setError(
-          `Simulation failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        )
-      );
-    } else if (mode === "live") {
+    if (mode === "live") {
       void startLive();
     } else {
       setTrackingStatus("idle");
     }
     return stopAll;
-  }, [mode, day, retryNonce, startLive, startSimulated, stopAll]);
+  }, [mode, retryNonce, startLive, stopAll]);
 
   const statusDot =
     trackingStatus === "tracking"
@@ -835,13 +833,14 @@ export default function WebcamFeed({ onMetrics }: Props) {
         <div
           role="radiogroup"
           aria-label="Input mode"
-          className="grid grid-cols-3 gap-2"
+          className="grid grid-cols-2 gap-2"
         >
           <button
             role="radio"
             aria-checked={mode === "live"}
             onClick={() => {
               setError(null);
+              setCameraBlocked(null);
               setMode("live");
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
@@ -852,22 +851,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
           >
             <Camera className="h-4 w-4" />
             Live Camera (MediaPipe Pose)
-          </button>
-          <button
-            role="radio"
-            aria-checked={mode === "simulated"}
-            onClick={() => {
-              setError(null);
-              setMode("simulated");
-            }}
-            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-              mode === "simulated"
-                ? "border-emerald-500 bg-emerald-600 text-white"
-                : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            <FlaskConical className="h-4 w-4" />
-            Simulated Trial Mode
           </button>
           <button
             role="radio"
@@ -887,11 +870,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
           </button>
         </div>
         <p className="mt-2 text-xs text-slate-400">
-          {mode === "simulated"
-            ? "Pre-computed geriatric trial telemetry — patient RGN-0417, Regeneron mobility arm"
-            : mode === "upload"
-              ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
-              : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
+          {mode === "upload"
+            ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
+            : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
         </p>
         {mode === "live" && (
           <div className="mt-2 flex items-center justify-between text-xs">
@@ -900,28 +881,6 @@ export default function WebcamFeed({ onMetrics }: Props) {
               {statusText}
             </span>
             <span className="text-slate-500">{statusDetail}</span>
-          </div>
-        )}
-      </div>
-      <div className="mb-3 flex items-center justify-end gap-4">
-        {mode === "simulated" && (
-          <div className="flex gap-1 rounded-lg bg-slate-800 p-1 text-xs">
-            {([1, 14] as const).map((d) => (
-              <button
-                key={d}
-                onClick={() => {
-                  setError(null);
-                  setDay(d);
-                }}
-                className={`rounded px-2 py-1 ${
-                  day === d
-                    ? "bg-emerald-600 text-white"
-                    : "text-slate-300 hover:bg-slate-700"
-                }`}
-              >
-                Day {d}
-              </button>
-            ))}
           </div>
         )}
       </div>
@@ -971,10 +930,14 @@ export default function WebcamFeed({ onMetrics }: Props) {
                   Retry camera
                 </button>
                 <button
-                  onClick={() => setMode("simulated")}
+                  onClick={() => {
+                    setCameraBlocked(null);
+                    setError(null);
+                    setMode("upload");
+                  }}
                   className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
                 >
-                  Use Simulated Trial Mode
+                  Use Upload Video instead
                 </button>
               </div>
             </div>
@@ -1014,7 +977,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
         {uploading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-300">
             <Loader2 className="h-8 w-8 animate-spin" />
-            <span className="text-sm">Analyzing video…</span>
+            <span className="text-sm">
+              Analysing video… extracting pose landmarks
+            </span>
           </div>
         )}
         {mode === "upload" && uploadCaption && (
@@ -1035,6 +1000,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
           ref={fileInputRef}
           type="file"
           accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+          disabled={uploading}
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -1042,11 +1008,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
             e.target.value = "";
           }}
         />
-        {mode === "simulated" ? (
-          <span className="absolute right-2 top-2 rounded bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
-            SIMULATED
-          </span>
-        ) : mode === "upload" ? (
+        {mode === "upload" ? (
           <span className="absolute right-2 top-2 rounded bg-sky-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
             UPLOAD
           </span>

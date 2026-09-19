@@ -1,8 +1,7 @@
 """Patient record store for GaitGuard AI.
 
 JSON-persisted at backend/.cache/patients.json; seeded on first load from
-data/mock_patients.json. Session metrics for the seeded cohort patient are
-computed at load time from the simulator (metrics stay null in the JSON).
+data/mock_patients.json.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-import simulator
 
 CACHE_PATH = Path(__file__).resolve().parent / ".cache" / "patients.json"
 SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "mock_patients.json"
@@ -34,17 +32,6 @@ def _persist() -> None:
     os.replace(tmp, _cache_path)
 
 
-def _fill_seed_metrics(record: dict) -> dict:
-    """RGN-0417's seeded sessions carry frames_ref; compute metrics from the
-    cohort simulator once on load."""
-    for session in record.get("gait_sessions", []):
-        ref = session.get("frames_ref")
-        if ref and session.get("metrics") is None:
-            day = simulator.load_cohort()["sessions"][ref]["day"]
-            session["metrics"] = simulator.get_simulation(day)["metrics"]
-    return record
-
-
 def _load() -> dict:
     global _patients
     if _patients is not None:
@@ -53,8 +40,7 @@ def _load() -> dict:
         _patients = json.loads(_cache_path.read_text())
     except Exception:
         _patients = {
-            p["patient_id"]: _fill_seed_metrics(p)
-            for p in json.loads(SEED_PATH.read_text())
+            p["patient_id"]: p for p in json.loads(SEED_PATH.read_text())
         }
         _persist()
     return _patients
@@ -119,13 +105,7 @@ def get_patient(pid: str) -> dict:
         patients = _load()
         if pid not in patients:
             raise KeyError(f"unknown patient: {pid}")
-        record = json.loads(json.dumps(patients[pid]))  # deep copy
-    sessions = simulator.load_cohort()["sessions"]
-    for session in record.get("gait_sessions", []):
-        ref = session.get("frames_ref")
-        if ref and ref in sessions:
-            session["frames"] = sessions[ref]["frames"]
-    return record
+        return json.loads(json.dumps(patients[pid]))  # deep copy
 
 
 def upsert_survey(survey: dict) -> dict:
@@ -176,7 +156,6 @@ def add_session(pid: str, session: dict) -> dict:
             raise ValueError("patient already has 50 sessions")
         if session.get("recorded_at") is None:
             session["recorded_at"] = datetime.now(timezone.utc).isoformat()
-        session.setdefault("frames_ref", None)
         session.setdefault("frames", None)
         new_record = json.loads(json.dumps(old_record))  # deep copy
         new_record["gait_sessions"].append(session)
