@@ -95,6 +95,7 @@ export default function DoctorPortal() {
       .then((r) => {
         if (gen === detailGenRef.current) {
           setRecord(r);
+          setDetailError(null);
           setLastSyncedAt(new Date());
         }
       })

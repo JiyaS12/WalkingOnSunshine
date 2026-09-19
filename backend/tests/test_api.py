@@ -142,6 +142,28 @@ def test_generate_summary_for_patient(monkeypatch, tmp_path):
     assert body["cached"] is False
 
 
+def test_generate_summary_single_session_no_trend(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    _patient_with_session()
+    resp = client.post("/api/generate-summary", json={"patient_id": "RGN-0999"})
+    assert resp.status_code == 200
+    summary = resp.json()["summary"].lower()
+    assert "improved" not in summary
+    assert "worsened" not in summary
+
+
+def test_generate_summary_identical_sessions_unchanged(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    _patient_with_session()
+    client.post(
+        "/api/patients/RGN-0999/sessions",
+        json={"label": "S2", "source": "live", "metrics": _metrics()},
+    )
+    resp = client.post("/api/generate-summary", json={"patient_id": "RGN-0999"})
+    assert resp.status_code == 200
+    assert "unchanged" in resp.json()["summary"].lower()
+
+
 def test_generate_summary_unknown_patient_404(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
     resp = client.post("/api/generate-summary", json={"patient_id": "NOPE"})

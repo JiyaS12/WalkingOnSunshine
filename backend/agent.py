@@ -81,14 +81,36 @@ def _build_prompt(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> s
     )
 
 
+def _risk_band(score: float) -> str:
+    if score >= 0.5:
+        return "high"
+    if score >= 0.3:
+        return "moderate"
+    return "low"
+
+
 def _template_summary(metrics_day1: dict, metrics_day14: dict, patient_id: str) -> str:
+    if metrics_day1 is metrics_day14:
+        m = metrics_day14
+        return (
+            f"Patient {patient_id}: based on the latest walk, fall risk is "
+            f"{m['fall_risk_score']:.3f} ({_risk_band(m['fall_risk_score'])}). "
+            f"Stride length {m['stride_length_m']:.2f} m, "
+            f"asymmetry {m['asymmetry_pct']:.1f}%, "
+            f"velocity degradation {m['velocity_degradation_pct']:.1f}%."
+        )
     stride_delta = (
         metrics_day14["stride_length_m"] - metrics_day1["stride_length_m"]
     )
     risk_delta = (
         metrics_day14["fall_risk_score"] - metrics_day1["fall_risk_score"]
     )
-    trend = "improved" if risk_delta < 0 else "worsened"
+    if abs(risk_delta) < 1e-9:
+        trend = "unchanged"
+    elif risk_delta < 0:
+        trend = "improved"
+    else:
+        trend = "worsened"
     return (
         f"Patient {patient_id}: fall risk {trend} from "
         f"{metrics_day1['fall_risk_score']:.3f} (baseline) to "

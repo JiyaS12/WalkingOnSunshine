@@ -129,6 +129,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       setSessions((prev) => {
         const label = source === "upload" ? "Upload" : "Live";
         const rest = prev.filter((s) => s.label !== label);
+        if (!m.gait_detected) return rest;
         return [
           ...rest,
           {
@@ -333,6 +334,13 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             icon={<Activity className="h-4 w-4" />}
           />
 
+          {metrics && !metrics.gait_detected && (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
+              No walking detected — walk across the frame (or upload a clip
+              with walking) to record a session.
+            </p>
+          )}
+
           {metricsSource === "live" && metrics && (
             <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3">
               <Save className="h-4 w-4 shrink-0 text-slate-400" />
@@ -341,7 +349,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               </span>
               <button
                 onClick={() => void saveSession("live")}
-                disabled={saving}
+                disabled={saving || !metrics.gait_detected}
                 className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
               >
                 {saving ? "Saving…" : "Save this walk"}

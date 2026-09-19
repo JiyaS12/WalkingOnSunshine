@@ -37,7 +37,14 @@ export interface SummaryResponse {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status}`);
+    let detail = `API ${path} failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* keep generic detail */
+    }
+    throw new ApiError(detail || res.statusText, res.status);
   }
   return res.json() as Promise<T>;
 }
