@@ -8,6 +8,8 @@ computed at load time from the simulator (metrics stay null in the JSON).
 from __future__ import annotations
 
 import json
+import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,18 +19,18 @@ CACHE_PATH = Path(__file__).resolve().parent / ".cache" / "patients.json"
 SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "mock_patients.json"
 
 _MAX_TEXT = 500
+_MAX_SESSIONS = 50
 _TEXT_FIELDS = ("patient_name", "last_fall_description", "dizziness_notes")
 
 _patients: dict[str, dict] | None = None
 _cache_path = CACHE_PATH
+_lock = threading.Lock()
 
 
 def _persist() -> None:
-    try:
-        _cache_path.parent.mkdir(parents=True, exist_ok=True)
-        _cache_path.write_text(json.dumps(_patients))
-    except Exception:
-        pass
+    tmp = _cache_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(_patients))
+    os.replace(tmp, _cache_path)
 
 
 def _fill_seed_metrics(record: dict) -> dict:
@@ -57,6 +59,22 @@ def _load() -> dict:
     return _patients
 
 
+def _sort_by_recorded_at(items: list[dict]) -> None:
+    """Sort in place by recorded_at; entries missing/invalid timestamps keep
+    their append position (stable sort past the end)."""
+    def key(item: dict) -> tuple[int, datetime]:
+        raw = item.get("recorded_at")
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (0, dt)
+        except (TypeError, ValueError):
+            return (1, datetime.max.replace(tzinfo=timezone.utc))
+
+    items.sort(key=key)
+
+
 def _summary_row(record: dict) -> dict:
     surveys = record.get("surveys", [])
     sessions = record.get("gait_sessions", [])
@@ -81,7 +99,8 @@ def _summary_row(record: dict) -> dict:
 
 
 def list_patients(q: str | None = None) -> list[dict]:
-    rows = [_summary_row(r) for r in _load().values()]
+    with _lock:
+        rows = [_summary_row(r) for r in _load().values()]
     if q:
         ql = q.lower()
         rows = [
@@ -95,10 +114,11 @@ def list_patients(q: str | None = None) -> list[dict]:
 
 
 def get_patient(pid: str) -> dict:
-    patients = _load()
-    if pid not in patients:
-        raise KeyError(f"unknown patient: {pid}")
-    record = json.loads(json.dumps(patients[pid]))  # deep copy
+    with _lock:
+        patients = _load()
+        if pid not in patients:
+            raise KeyError(f"unknown patient: {pid}")
+        record = json.loads(json.dumps(patients[pid]))  # deep copy
     sessions = simulator.load_cohort()["sessions"]
     for session in record.get("gait_sessions", []):
         ref = session.get("frames_ref")
@@ -108,43 +128,60 @@ def get_patient(pid: str) -> dict:
 
 
 def upsert_survey(survey: dict) -> dict:
-    patients = _load()
     pid = survey["patient_id"]
-    for holder in (survey, survey.get("fall_history") or {}):
-        for field in _TEXT_FIELDS:
-            if isinstance(holder.get(field), str):
-                holder[field] = holder[field].strip()[:_MAX_TEXT]
+    for field in _TEXT_FIELDS:
+        if isinstance(survey.get(field), str):
+            survey[field] = survey[field].strip()[:_MAX_TEXT]
     if survey.get("recorded_at") is None:
         survey["recorded_at"] = datetime.now(timezone.utc).isoformat()
-    record = patients.get(pid)
-    if record is None:
-        record = {
-            "patient_id": pid,
-            "name": survey.get("patient_name") or pid,
-            "age": None,
-            "cohort": None,
-            "surveys": [],
-            "gait_sessions": [],
-        }
-        patients[pid] = record
-    elif survey.get("patient_name"):
-        record["name"] = survey["patient_name"]
-    record["surveys"].append(survey)
-    _persist()
-    return record
+    with _lock:
+        patients = _load()
+        record = patients.get(pid)
+        created = record is None
+        if created:
+            record = {
+                "patient_id": pid,
+                "name": survey.get("patient_name") or pid,
+                "age": None,
+                "cohort": None,
+                "surveys": [],
+                "gait_sessions": [],
+            }
+            patients[pid] = record
+        elif survey.get("patient_name"):
+            record["name"] = survey["patient_name"]
+        record["surveys"].append(survey)
+        _sort_by_recorded_at(record["surveys"])
+        try:
+            _persist()
+        except Exception:
+            record["surveys"].remove(survey)
+            if created:
+                del patients[pid]
+            raise
+        return record
 
 
 def add_session(pid: str, session: dict) -> dict:
-    patients = _load()
-    if pid not in patients:
-        raise KeyError(f"unknown patient: {pid}")
-    if session.get("recorded_at") is None:
-        session["recorded_at"] = datetime.now(timezone.utc).isoformat()
-    session.setdefault("frames_ref", None)
-    session.setdefault("frames", None)
-    patients[pid]["gait_sessions"].append(session)
-    _persist()
-    return patients[pid]
+    with _lock:
+        patients = _load()
+        if pid not in patients:
+            raise KeyError(f"unknown patient: {pid}")
+        sessions = patients[pid]["gait_sessions"]
+        if len(sessions) >= _MAX_SESSIONS:
+            raise ValueError("patient already has 50 sessions")
+        if session.get("recorded_at") is None:
+            session["recorded_at"] = datetime.now(timezone.utc).isoformat()
+        session.setdefault("frames_ref", None)
+        session.setdefault("frames", None)
+        sessions.append(session)
+        _sort_by_recorded_at(sessions)
+        try:
+            _persist()
+        except Exception:
+            sessions.remove(session)
+            raise
+        return patients[pid]
 
 
 def reset_for_tests(path: Path | str) -> None:

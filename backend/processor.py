@@ -43,6 +43,23 @@ class GaitMetrics(BaseModel):
     gait_detected: bool
 
 
+def validate_frames(frames: list[dict[str, list[float]]]) -> None:
+    """Raises ValueError unless every frame has all six JOINTS with exactly
+    3 finite coordinates."""
+    for i, frame in enumerate(frames):
+        for joint in JOINTS:
+            coords = frame.get(joint)
+            if (
+                coords is None
+                or len(coords) != 3
+                or not all(np.isfinite(c) for c in coords)
+            ):
+                raise ValueError(
+                    f"frame {i}: joint '{joint}' must have exactly 3 "
+                    "finite coordinates"
+                )
+
+
 def _sigmoid(z: float) -> float:
     return 1.0 / (1.0 + np.exp(-z))
 
@@ -63,13 +80,7 @@ class GaitProcessor:
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
-        for i, frame in enumerate(frames):
-            for joint in JOINTS:
-                coords = frame.get(joint)
-                if coords is None or len(coords) != 3:
-                    raise ValueError(
-                        f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
-                    )
+        validate_frames(frames)
         if leg_length_m is not None:
             if not np.isfinite(leg_length_m) or leg_length_m <= 0:
                 raise ValueError("leg_length_m must be finite and positive")

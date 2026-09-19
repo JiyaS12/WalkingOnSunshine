@@ -170,14 +170,11 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 
 
 def _synthesis_key(record: dict) -> str:
-    survey = record["surveys"][-1]
-    sessions = record["gait_sessions"]
     blob = json.dumps(
         [
-            survey,
-            _round_metrics(sessions[-1]["metrics"]),
-            _round_metrics(sessions[0]["metrics"]),
-            record["patient_id"],
+            "synthesis-v1",
+            _synthesis_prompt(record),
+            record["gait_sessions"][-1]["metrics"],
         ],
         sort_keys=True,
     )
