@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 
+from openai import OpenAI
+
 _cache: dict[str, dict] = {}
 
 
@@ -52,8 +54,6 @@ def generate_summary(
     result = None
     if os.getenv("OPENAI_API_KEY"):
         try:
-            from openai import OpenAI
-
             client = OpenAI()
             prompt = (
                 "Write a 2-3 sentence clinical mobility summary for a gait "
