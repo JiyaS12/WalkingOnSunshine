@@ -24,10 +24,6 @@ import type {
   PoseResults,
 } from "../types/mediapipe";
 
-type VideoWithRVFC = HTMLVideoElement & {
-  requestVideoFrameCallback?: (cb: () => void) => number;
-};
-
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
   23: "left_hip",
@@ -159,6 +155,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const [embedded, setEmbedded] = useState(false);
   const [legLengthM, setLegLengthM] = useState<number | null>(null);
   const [calibrationCount, setCalibrationCount] = useState(0);
+  const [videoDiag, setVideoDiag] = useState("");
 
   useEffect(() => {
     setEmbedded(window.self !== window.top);
@@ -172,9 +169,13 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const inFlightRef = useRef(false);
   const loopActiveRef = useRef(false);
   const sendFailedRef = useRef(false);
+  const sendStartRef = useRef(0);
+  const lastResultsRef = useRef<PoseResults | null>(null);
+  const mutedSinceRef = useRef(0);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const diagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bufferRef = useRef<JointFrame[]>([]);
   const timesRef = useRef<number[]>([]);
   const sendingRef = useRef(false);
@@ -204,6 +205,14 @@ export default function WebcamFeed({ onMetrics }: Props) {
     loopActiveRef.current = false;
     inFlightRef.current = false;
     sendFailedRef.current = false;
+    sendStartRef.current = 0;
+    lastResultsRef.current = null;
+    mutedSinceRef.current = 0;
+    if (diagIntervalRef.current !== null) {
+      clearInterval(diagIntervalRef.current);
+      diagIntervalRef.current = null;
+    }
+    setVideoDiag("");
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -233,45 +242,47 @@ export default function WebcamFeed({ onMetrics }: Props) {
     [stopAll]
   );
 
-  const drawPoseLandmarks = useCallback((results: PoseResults) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const lm = results.poseLandmarks;
-    if (!lm) return;
-    ctx.strokeStyle = "#34d399";
-    ctx.lineWidth = 2;
-    for (const [a, b] of SKELETON_PAIRS) {
-      const pa = lm[a];
-      const pb = lm[b];
-      if (!pa || !pb) continue;
-      ctx.beginPath();
-      ctx.moveTo(pa.x * canvas.width, pa.y * canvas.height);
-      ctx.lineTo(pb.x * canvas.width, pb.y * canvas.height);
-      ctx.stroke();
-    }
-    const drawn = new Set<number>();
-    for (const [a, b] of SKELETON_PAIRS) {
-      drawn.add(a);
-      drawn.add(b);
-    }
-    drawn.forEach((idx) => {
-      const p = lm[idx];
-      if (!p) return;
-      const isLeg = LOWER_BODY_INDICES.has(idx);
-      ctx.fillStyle = isLeg ? "#f472b6" : "#f8fafc";
-      ctx.beginPath();
-      ctx.arc(
-        p.x * canvas.width,
-        p.y * canvas.height,
-        isLeg ? 4 : 2.5,
-        0,
-        2 * Math.PI
-      );
-      ctx.fill();
-    });
-  }, []);
+  const drawSkeleton = useCallback(
+    (
+      ctx: CanvasRenderingContext2D,
+      canvas: HTMLCanvasElement,
+      lm: PoseResults["poseLandmarks"]
+    ) => {
+      if (!lm) return;
+      ctx.strokeStyle = "#34d399";
+      ctx.lineWidth = 2;
+      for (const [a, b] of SKELETON_PAIRS) {
+        const pa = lm[a];
+        const pb = lm[b];
+        if (!pa || !pb) continue;
+        ctx.beginPath();
+        ctx.moveTo(pa.x * canvas.width, pa.y * canvas.height);
+        ctx.lineTo(pb.x * canvas.width, pb.y * canvas.height);
+        ctx.stroke();
+      }
+      const drawn = new Set<number>();
+      for (const [a, b] of SKELETON_PAIRS) {
+        drawn.add(a);
+        drawn.add(b);
+      }
+      drawn.forEach((idx) => {
+        const p = lm[idx];
+        if (!p) return;
+        const isLeg = LOWER_BODY_INDICES.has(idx);
+        ctx.fillStyle = isLeg ? "#f472b6" : "#f8fafc";
+        ctx.beginPath();
+        ctx.arc(
+          p.x * canvas.width,
+          p.y * canvas.height,
+          isLeg ? 4 : 2.5,
+          0,
+          2 * Math.PI
+        );
+        ctx.fill();
+      });
+    },
+    []
+  );
 
   const handleResults = useCallback(
     (results: PoseResults) => {
@@ -279,7 +290,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         clearTimeout(resultsTimerRef.current);
         resultsTimerRef.current = null;
       }
-      drawPoseLandmarks(results);
+      lastResultsRef.current = results;
       setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
       const world = results.poseWorldLandmarks;
       if (!world || world.length < 29) return;
@@ -338,7 +349,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       if (timesRef.current.length > BUFFER_MAX)
         timesRef.current.splice(0, timesRef.current.length - BUFFER_MAX);
     },
-    [drawPoseLandmarks]
+    []
   );
 
   const startLive = useCallback(async () => {
@@ -463,25 +474,58 @@ export default function WebcamFeed({ onMetrics }: Props) {
         canvas.height = video.videoHeight;
       }
 
-      // own inference loop: rVFC when available, else rAF
-      const startLoop = () => {
-        if (isStale()) return;
-        loopActiveRef.current = true;
-        const v = video as VideoWithRVFC;
-        const schedule = () => {
-          if (v.requestVideoFrameCallback) {
-            v.requestVideoFrameCallback(tick);
-          } else {
-            rafRef.current = requestAnimationFrame(tick);
-          }
+      // diagnostics: report live video/track state, and flag a track that
+      // stays muted >5s while we are not tracking
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        track.onended = () => {
+          setCameraBlocked("Camera stream ended — retry.");
         };
-        const tick = async () => {
-          if (!loopActiveRef.current || isStale()) return;
-          if (video.readyState >= 2 && !inFlightRef.current) {
-            inFlightRef.current = true;
-            try {
-              await pose.send({ image: video });
-            } catch (err) {
+        track.onmute = () => {
+          mutedSinceRef.current = performance.now();
+        };
+        track.onunmute = () => {
+          mutedSinceRef.current = 0;
+        };
+      }
+      const diagSnapshot = () => {
+        const base = `video ${video.videoWidth}×${video.videoHeight} · readyState ${video.readyState} · track ${track?.readyState ?? "none"}${track?.muted ? " (muted: no frames from camera)" : ""}`;
+        const silentFrames =
+          mutedSinceRef.current > 0 &&
+          performance.now() - mutedSinceRef.current > 5_000;
+        return silentFrames
+          ? `${base} — camera is delivering no frames (in use by another app or a virtual camera?)`
+          : base;
+      };
+      diagIntervalRef.current = setInterval(() => {
+        setVideoDiag(diagSnapshot());
+      }, 500);
+
+      // own render+inference loop at display rate via rAF; we paint the video
+      // frame ourselves so rendering never depends on <video> compositing
+      loopActiveRef.current = true;
+      const tick = () => {
+        if (!loopActiveRef.current || isStale()) return;
+        if (canvas) {
+          const cctx = canvas.getContext("2d");
+          if (cctx) {
+            if (video.videoWidth && canvas.width !== video.videoWidth) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+            }
+            cctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (video.readyState >= 2) {
+              cctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            }
+            drawSkeleton(cctx, canvas, lastResultsRef.current?.poseLandmarks);
+          }
+        }
+        if (video.readyState >= 2 && !inFlightRef.current) {
+          inFlightRef.current = true;
+          sendStartRef.current = performance.now();
+          pose
+            .send({ image: video })
+            .catch((err) => {
               if (!sendFailedRef.current && !isStale()) {
                 sendFailedRef.current = true;
                 loopActiveRef.current = false;
@@ -491,33 +535,36 @@ export default function WebcamFeed({ onMetrics }: Props) {
                     err instanceof Error ? err.message : String(err)
                   }`
                 );
-                return;
               }
-            } finally {
+            })
+            .finally(() => {
               inFlightRef.current = false;
-            }
-          }
-          schedule();
-        };
-        schedule();
+              sendStartRef.current = 0;
+            });
+        }
+        // hung send: in-flight for >20s
+        if (
+          sendStartRef.current > 0 &&
+          performance.now() - sendStartRef.current > 20_000 &&
+          !sendFailedRef.current
+        ) {
+          sendFailedRef.current = true;
+          loopActiveRef.current = false;
+          console.error("[GaitGuard] pose.send hung");
+          failToSimulated(
+            "MediaPipe inference hung: pose.send did not resolve within 20s"
+          );
+          return;
+        }
+        rafRef.current = requestAnimationFrame(tick);
       };
-      if (video.readyState >= 1) {
-        startLoop();
-      } else {
-        video.onloadedmetadata = () => {
-          if (canvas && video.videoWidth && video.videoHeight) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-          }
-          startLoop();
-        };
-      }
+      rafRef.current = requestAnimationFrame(tick);
 
       // arm watchdog only after the model is loaded and the loop is running
       resultsTimerRef.current = setTimeout(() => {
         if (isStale()) return;
         failToSimulated(
-          "Pose model loaded but produced no results — try reloading the page"
+          `Pose model loaded but produced no results in 15 s — ${diagSnapshot()}`
         );
       }, 15_000);
 
@@ -565,7 +612,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         }. Switched to Simulated Trial Mode.`
       );
     }
-  }, [failToSimulated, handleResults, stopAll, embedded]);
+  }, [failToSimulated, handleResults, stopAll, embedded, drawSkeleton]);
 
   const startSimulated = useCallback(async () => {
     const gen = generationRef.current;
@@ -670,12 +717,12 @@ export default function WebcamFeed({ onMetrics }: Props) {
 
   const statusDetail =
     trackingStatus === "tracking" || trackingStatus === "no-person"
-      ? legLengthM
+      ? (videoDiag ? `${videoDiag} · ` : "") + (legLengthM
         ? `Calibrated · leg ${legLengthM.toFixed(2)} m · ` +
           (lastSyncAt
             ? `Last sync: ${lastSyncAt.toLocaleTimeString("en-GB", { hour12: false })}`
             : "waiting for frames")
-        : `Calibrating baseline… ${calibrationCount}/60`
+        : `Calibrating baseline… ${calibrationCount}/60`)
       : lastSyncAt
         ? `Last sync: ${lastSyncAt.toLocaleTimeString("en-GB", { hour12: false })}`
         : "waiting for frames";
@@ -772,7 +819,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
           autoPlay
           muted
           playsInline
-          className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+          // hidden from view but still decoding: the canvas paints the frames
+          className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover opacity-0"
           style={{ display: simulated ? "none" : "block" }}
         />
         {!simulated && cameraBlocked && (
