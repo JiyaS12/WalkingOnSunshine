@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
   Footprints,
   Gauge,
+  Save,
   Sparkles,
+  Stethoscope,
   TrendingDown,
   User,
 } from "lucide-react";
@@ -17,7 +20,10 @@ import {
   API_URL,
   Comparison,
   GaitMetrics,
+  PatientSummary,
   SummaryResponse,
+  addPatientSession,
+  fetchPatients,
   fetchSimulation,
   generateSummary,
 } from "./lib/api";
@@ -71,6 +77,13 @@ export default function Home() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [summaryCount, setSummaryCount] = useState(0);
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
+  const [metricsSource, setMetricsSource] = useState<
+    "live" | "simulated" | "upload" | null
+  >(null);
+  const [patients, setPatients] = useState<PatientSummary[]>([]);
+  const [saveTarget, setSaveTarget] = useState<string>("");
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/health`)
@@ -104,6 +117,7 @@ export default function Home() {
   const handleMetrics = useCallback(
     (m: GaitMetrics, source: "live" | "simulated" | "upload") => {
       setMetrics(m);
+      setMetricsSource(source);
       if (source === "simulated") return;
       const label = source === "upload" ? "Upload" : "Live";
       setSessions((prev) => {
@@ -120,6 +134,35 @@ export default function Home() {
     },
     []
   );
+
+  useEffect(() => {
+    fetchPatients()
+      .then((rows) => {
+        setPatients(rows);
+        setSaveTarget((t) => t || (rows[0]?.patient_id ?? ""));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const handleSaveSession = useCallback(async () => {
+    if (!metrics || !saveTarget || !metricsSource) return;
+    setSaving(true);
+    setSaveNote(null);
+    try {
+      await addPatientSession(saveTarget, {
+        label: `${metricsSource === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
+        source: metricsSource,
+        metrics,
+      });
+      setSaveNote(`Saved to ${saveTarget}`);
+    } catch (err) {
+      setSaveNote(
+        `Save failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [metrics, metricsSource, saveTarget]);
 
   const handleSummary = useCallback(async () => {
     setSummaryLoading(true);
@@ -153,6 +196,13 @@ export default function Home() {
             <User className="h-3.5 w-3.5 text-slate-400" />
             RGN-0417 · 78 y/o · Geriatric Mobility Trial
           </span>
+          <Link
+            href="/doctor"
+            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+          >
+            <Stethoscope className="h-3.5 w-3.5 text-slate-400" />
+            Doctor&apos;s Portal
+          </Link>
           <span
             className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
               backendUp
@@ -206,6 +256,50 @@ export default function Home() {
             }
             icon={<Activity className="h-4 w-4" />}
           />
+
+          <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3">
+            <Save className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="text-xs text-slate-400">
+              Save session to patient
+            </span>
+            <select
+              value={saveTarget}
+              onChange={(e) => setSaveTarget(e.target.value)}
+              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
+            >
+              {patients.length === 0 && (
+                <option value="">No patients</option>
+              )}
+              {patients.map((p) => (
+                <option key={p.patient_id} value={p.patient_id}>
+                  {p.patient_id} — {p.name ?? "unknown"}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleSaveSession}
+              disabled={
+                saving ||
+                !metrics ||
+                !saveTarget ||
+                (metricsSource !== "live" && metricsSource !== "upload")
+              }
+              className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            {saveNote && (
+              <span
+                className={`text-[11px] ${
+                  saveNote.startsWith("Save failed")
+                    ? "text-rose-300"
+                    : "text-emerald-300"
+                }`}
+              >
+                {saveNote}
+              </span>
+            )}
+          </div>
 
           <TrendGraph sessions={sessions} />
 

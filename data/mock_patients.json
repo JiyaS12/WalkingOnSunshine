@@ -1,0 +1,243 @@
+[
+  {
+    "patient_id": "RGN-0417",
+    "name": "Margaret Ellison",
+    "age": 78,
+    "cohort": "Regeneron Clinical Trial — Mobility Arm",
+    "surveys": [
+      {
+        "patient_id": "RGN-0417",
+        "patient_name": "Margaret Ellison",
+        "pain_scale": 6,
+        "fall_history": {
+          "falls_last_6_months": 2,
+          "injured": true,
+          "last_fall_description": "Tripped on a rug in the kitchen, bruised left hip."
+        },
+        "dizziness": true,
+        "dizziness_notes": "Light-headed when standing quickly",
+        "primary_complaints": ["hip pain", "unsteadiness", "fear of falling"],
+        "call_id": "CALL-2091",
+        "recorded_at": "2026-09-02T14:22:00+00:00"
+      }
+    ],
+    "gait_sessions": [
+      {
+        "label": "Day 1",
+        "recorded_at": "2026-09-01T10:00:00+00:00",
+        "source": "simulated",
+        "metrics": null,
+        "frames_ref": "day_1",
+        "frames": null
+      },
+      {
+        "label": "Day 14",
+        "recorded_at": "2026-09-15T10:00:00+00:00",
+        "source": "simulated",
+        "metrics": null,
+        "frames_ref": "day_14",
+        "frames": null
+      }
+    ]
+  },
+  {
+    "patient_id": "RGN-0102",
+    "name": "Harold Nguyen",
+    "age": 83,
+    "cohort": "Regeneron Clinical Trial — Mobility Arm",
+    "surveys": [
+      {
+        "patient_id": "RGN-0102",
+        "patient_name": "Harold Nguyen",
+        "pain_scale": 8,
+        "fall_history": {
+          "falls_last_6_months": 3,
+          "injured": true,
+          "last_fall_description": "Fell on stairs, wrist fracture."
+        },
+        "dizziness": true,
+        "dizziness_notes": "Frequent orthostatic drops",
+        "primary_complaints": ["knee pain", "balance problems"],
+        "call_id": "CALL-1844",
+        "recorded_at": "2026-09-05T09:15:00+00:00"
+      }
+    ],
+    "gait_sessions": [
+      {
+        "label": "Baseline",
+        "recorded_at": "2026-09-05T09:40:00+00:00",
+        "source": "live",
+        "metrics": {
+          "stride_length_m": 0.62,
+          "asymmetry_pct": 34.2,
+          "velocity_degradation_pct": 21.5,
+          "fall_risk_score": 0.85,
+          "cadence_steps_per_min": 96.0,
+          "frame_count": 240,
+          "leg_length_m": 0.84,
+          "stride_ratio": 0.74,
+          "knee_flexion_rom_deg": 18.5,
+          "peak_ankle_speed_mps": 1.62,
+          "gait_detected": true
+        },
+        "frames_ref": null,
+        "frames": null
+      }
+    ]
+  },
+  {
+    "patient_id": "RGN-0233",
+    "name": "Rosa Delgado",
+    "age": 68,
+    "cohort": "Regeneron Clinical Trial — Mobility Arm",
+    "surveys": [
+      {
+        "patient_id": "RGN-0233",
+        "patient_name": "Rosa Delgado",
+        "pain_scale": 9,
+        "fall_history": {
+          "falls_last_6_months": 1,
+          "injured": false,
+          "last_fall_description": "Slipped on wet tiles, caught herself."
+        },
+        "dizziness": true,
+        "dizziness_notes": "Vertigo episodes weekly",
+        "primary_complaints": ["hip pain", "vertigo"],
+        "call_id": "CALL-1977",
+        "recorded_at": "2026-09-08T16:05:00+00:00"
+      }
+    ],
+    "gait_sessions": [
+      {
+        "label": "Baseline",
+        "recorded_at": "2026-09-08T16:30:00+00:00",
+        "source": "upload",
+        "metrics": {
+          "stride_length_m": 1.38,
+          "asymmetry_pct": 4.1,
+          "velocity_degradation_pct": 1.8,
+          "fall_risk_score": 0.08,
+          "cadence_steps_per_min": 118.0,
+          "frame_count": 280,
+          "leg_length_m": 0.88,
+          "stride_ratio": 1.57,
+          "knee_flexion_rom_deg": 54.0,
+          "peak_ankle_speed_mps": 4.2,
+          "gait_detected": true
+        },
+        "frames_ref": null,
+        "frames": null
+      }
+    ]
+  },
+  {
+    "patient_id": "RGN-0318",
+    "name": "Samuel Okafor",
+    "age": 76,
+    "cohort": "Regeneron Clinical Trial — Mobility Arm",
+    "surveys": [
+      {
+        "patient_id": "RGN-0318",
+        "patient_name": "Samuel Okafor",
+        "pain_scale": 4,
+        "fall_history": {
+          "falls_last_6_months": 0,
+          "injured": false,
+          "last_fall_description": null
+        },
+        "dizziness": false,
+        "dizziness_notes": null,
+        "primary_complaints": ["stiffness", "short steps"],
+        "call_id": "CALL-2052",
+        "recorded_at": "2026-09-10T11:45:00+00:00"
+      }
+    ],
+    "gait_sessions": [
+      {
+        "label": "Baseline",
+        "recorded_at": "2026-09-10T12:10:00+00:00",
+        "source": "live",
+        "metrics": {
+          "stride_length_m": 1.02,
+          "asymmetry_pct": 11.6,
+          "velocity_degradation_pct": 8.9,
+          "fall_risk_score": 0.38,
+          "cadence_steps_per_min": 104.0,
+          "frame_count": 250,
+          "leg_length_m": 0.91,
+          "stride_ratio": 1.12,
+          "knee_flexion_rom_deg": 39.0,
+          "peak_ankle_speed_mps": 3.1,
+          "gait_detected": true
+        },
+        "frames_ref": null,
+        "frames": null
+      },
+      {
+        "label": "Follow-up",
+        "recorded_at": "2026-09-17T12:05:00+00:00",
+        "source": "live",
+        "metrics": {
+          "stride_length_m": 1.14,
+          "asymmetry_pct": 9.2,
+          "velocity_degradation_pct": 6.1,
+          "fall_risk_score": 0.27,
+          "cadence_steps_per_min": 108.0,
+          "frame_count": 250,
+          "leg_length_m": 0.91,
+          "stride_ratio": 1.25,
+          "knee_flexion_rom_deg": 44.0,
+          "peak_ankle_speed_mps": 3.4,
+          "gait_detected": true
+        },
+        "frames_ref": null,
+        "frames": null
+      }
+    ]
+  },
+  {
+    "patient_id": "RGN-0509",
+    "name": "Ingrid Kowalski",
+    "age": 71,
+    "cohort": "Regeneron Clinical Trial — Mobility Arm",
+    "surveys": [
+      {
+        "patient_id": "RGN-0509",
+        "patient_name": "Ingrid Kowalski",
+        "pain_scale": 7,
+        "fall_history": {
+          "falls_last_6_months": 1,
+          "injured": false,
+          "last_fall_description": "Lost balance reaching for a shelf."
+        },
+        "dizziness": false,
+        "dizziness_notes": null,
+        "primary_complaints": ["back pain", "slow walking"],
+        "call_id": "CALL-2110",
+        "recorded_at": "2026-09-12T13:30:00+00:00"
+      }
+    ],
+    "gait_sessions": [
+      {
+        "label": "Baseline",
+        "recorded_at": "2026-09-12T13:50:00+00:00",
+        "source": "simulated",
+        "metrics": {
+          "stride_length_m": 0.88,
+          "asymmetry_pct": 22.4,
+          "velocity_degradation_pct": 14.0,
+          "fall_risk_score": 0.63,
+          "cadence_steps_per_min": 100.0,
+          "frame_count": 260,
+          "leg_length_m": 0.86,
+          "stride_ratio": 1.02,
+          "knee_flexion_rom_deg": 30.5,
+          "peak_ankle_speed_mps": 2.5,
+          "gait_detected": true
+        },
+        "frames_ref": null,
+        "frames": null
+      }
+    ]
+  }
+]
