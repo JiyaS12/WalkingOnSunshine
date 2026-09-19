@@ -2,4 +2,8 @@
 __pycache__/
 node_modules/
 .env
+.env.*
+!.env.example
+*.key
+PROJECT_LOG.md
 .cache/
