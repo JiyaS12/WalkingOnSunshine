@@ -1,3 +1,4 @@
+import copy
 import math
 import sys
 from pathlib import Path
@@ -136,3 +137,71 @@ def test_cohort_structure():
 def test_missing_joint_raises():
     with pytest.raises(ValueError):
         GaitProcessor([{}, {}], fps=30.0)
+
+
+def _ramp_frames(n):
+    """Every coordinate advances linearly, so interpolation is exact."""
+    frames = []
+    for i in range(n):
+        t = i * 0.01
+        frames.append({
+            "left_hip": [t, 1.0, 0.0], "right_hip": [t + 0.2, 1.0, 0.0],
+            "left_knee": [t, 0.5, 0.0], "right_knee": [t + 0.2, 0.5, 0.0],
+            "left_ankle": [t, 0.1, 0.0], "right_ankle": [t + 0.2, 0.1, 0.0],
+        })
+    return frames
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), None])
+def test_dropped_landmark_is_interpolated(bad):
+    frames = _ramp_frames(30)
+    frames[10]["left_ankle"] = [bad, 0.1, 0.0]
+    processor = GaitProcessor(frames, fps=30.0)
+    assert processor._joint_array("left_ankle")[10, 0] == pytest.approx(0.10)
+
+
+@pytest.mark.parametrize("position", ["first", "last"])
+def test_dropped_landmark_at_clip_edges(position):
+    frames = _ramp_frames(30)
+    i = 0 if position == "first" else 29
+    frames[i]["left_ankle"] = [float("nan"), 0.1, 0.0]
+    processor = GaitProcessor(frames, fps=30.0)
+    # no neighbour on one side, so the nearest valid sample carries over
+    assert processor._joint_array("left_ankle")[i, 0] == pytest.approx(
+        0.01 if position == "first" else 0.28
+    )
+
+
+def test_dropped_landmarks_do_not_mask_risk():
+    """The bug this guards: one NaN used to read as a healthy patient."""
+    frames = copy.deepcopy(load_cohort()["sessions"]["day_1"]["frames"][:120])
+    clean = GaitProcessor(frames, fps=30.0).compute()
+    assert clean.gait_detected is True
+    assert clean.fall_risk_score > 0.3
+
+    for i in (3, 4, 41):
+        frames[i]["left_ankle"][1] = float("nan")
+    repaired = GaitProcessor(frames, fps=30.0).compute()
+    assert repaired.gait_detected is True
+    assert repaired.fall_risk_score == pytest.approx(clean.fall_risk_score, abs=0.1)
+    assert repaired.dropped_frame_pct == pytest.approx(2.5)
+
+
+def test_dropped_frame_pct_is_zero_for_clean_input():
+    assert GaitProcessor(_ramp_frames(30), fps=30.0).compute().dropped_frame_pct == 0.0
+
+
+def test_joint_missing_in_every_frame_raises():
+    frames = _ramp_frames(30)
+    for frame in frames:
+        frame["left_ankle"] = [float("nan")] * 3
+    with pytest.raises(ValueError, match="no usable coordinates"):
+        GaitProcessor(frames, fps=30.0)
+
+
+def test_mostly_dropped_clip_raises():
+    frames = _ramp_frames(30)
+    for frame in frames[:20]:
+        frame["right_knee"] = [float("nan"), 0.5, 0.0]
+    with pytest.raises(ValueError, match="too sparse"):
+        GaitProcessor(frames, fps=30.0)
