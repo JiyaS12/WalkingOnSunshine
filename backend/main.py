@@ -8,13 +8,14 @@ from datetime import datetime
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
+from typing_extensions import Annotated
 
 import agent
 import simulator
 import store
-from processor import GaitMetrics, GaitProcessor
+from processor import GaitMetrics, GaitProcessor, validate_frames
 
 # cv2/mediapipe are heavy native deps; a broken install (a non-headless
 # OpenCV without libGL, say) must not take the rest of the API down with it
@@ -163,26 +164,26 @@ async def process_video(file: UploadFile = File(...)) -> dict:
 class FallHistory(BaseModel):
     falls_last_6_months: int = Field(ge=0)
     injured: bool = False
-    last_fall_description: str | None = None
+    last_fall_description: str | None = Field(default=None, max_length=500)
 
 
 class SurveyPayload(BaseModel):
     patient_id: str = Field(
         min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$"
     )
-    patient_name: str | None = None
+    patient_name: str | None = Field(default=None, max_length=500)
     pain_scale: int = Field(ge=1, le=10)
     fall_history: FallHistory
     dizziness: bool
-    dizziness_notes: str | None = None
-    primary_complaints: list[str] = Field(min_length=1, max_length=10)
-    call_id: str | None = None
+    dizziness_notes: str | None = Field(default=None, max_length=500)
+    primary_complaints: list[Annotated[str, StringConstraints(max_length=120)]] = Field(min_length=1, max_length=10)
+    call_id: str | None = Field(default=None, max_length=64)
     recorded_at: datetime | None = None
 
 
 class SessionPayload(BaseModel):
-    label: str
-    source: str
+    label: str = Field(max_length=64)
+    source: str = Field(max_length=32)
     metrics: GaitMetrics
     frames: list[dict[str, list[float]]] | None = None
     recorded_at: datetime | None = None
@@ -196,10 +197,15 @@ def _check_survey_token(x_survey_token: str | None = Header(default=None)):
 
 @app.post("/api/submit-survey", dependencies=[Depends(_check_survey_token)])
 def submit_survey(body: SurveyPayload) -> dict:
-    return {
-        "status": "stored",
-        "patient": store.upsert_survey(body.model_dump(mode="json")),
-    }
+    try:
+        return {
+            "status": "stored",
+            "patient": store.upsert_survey(body.model_dump(mode="json")),
+        }
+    except (OSError, TypeError) as exc:
+        raise HTTPException(
+            status_code=500, detail="failed to persist patient record"
+        ) from exc
 
 
 @app.get("/api/patients")
@@ -217,10 +223,19 @@ def get_patient(pid: str) -> dict:
 
 @app.post("/api/patients/{pid}/sessions")
 def add_patient_session(pid: str, body: SessionPayload) -> dict:
-    if body.frames is not None and len(body.frames) > 300:
-        raise HTTPException(
-            status_code=422, detail="frames are capped at 300 per session"
-        )
+    if body.frames is not None:
+        if len(body.frames) > 300:
+            raise HTTPException(
+                status_code=422,
+                detail="frames are capped at 300 per session",
+            )
+        try:
+            validate_frames(body.frames)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="each frame needs left/right hip, knee, ankle as [x, y, z]",
+            ) from exc
     try:
         return store.add_session(
             pid,
@@ -238,6 +253,12 @@ def add_patient_session(pid: str, body: SessionPayload) -> dict:
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except (OSError, TypeError) as exc:
+        raise HTTPException(
+            status_code=500, detail="failed to persist patient record"
+        ) from exc
 
 
 @app.post("/api/patients/{pid}/synthesis")

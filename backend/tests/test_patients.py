@@ -134,6 +134,60 @@ def test_synthesis_422_no_survey():
     assert client.post("/api/patients/RGN-1111/synthesis").status_code == 422
 
 
+def test_surveys_sorted_by_recorded_at():
+    client.post(
+        "/api/submit-survey",
+        json=_survey(recorded_at="2026-09-10T00:00:00+00:00", pain_scale=3),
+    )
+    client.post(
+        "/api/submit-survey",
+        json=_survey(recorded_at="2026-09-05T00:00:00+00:00", pain_scale=8),
+    )
+    rows = client.get("/api/patients", params={"q": "RGN-0999"}).json()
+    row = next(r for r in rows if r["patient_id"] == "RGN-0999")
+    # latest by timestamp is the Sep-10 survey -> pain_scale 3
+    assert row["pain_scale"] == 3
+    assert row["latest_survey_at"].startswith("2026-09-10")
+
+
+def test_add_session_malformed_frame_422():
+    client.post("/api/submit-survey", json=_survey())
+    body = {
+        "label": "S1",
+        "source": "live",
+        "metrics": _metrics(),
+        "frames": [{"left_hip": [0, 0, 0]}] * 10,
+    }
+    resp = client.post("/api/patients/RGN-0999/sessions", json=body)
+    assert resp.status_code == 422
+    assert "hip" in resp.json()["detail"]
+
+
+def test_complaint_length_422():
+    resp = client.post(
+        "/api/submit-survey", json=_survey(primary_complaints=["x" * 200])
+    )
+    assert resp.status_code == 422
+
+
+def test_persist_failure_rolls_back(monkeypatch):
+    client.post("/api/submit-survey", json=_survey(patient_name="Original"))
+    before = store.get_patient("RGN-0999")
+    name_before, n_surveys = before["name"], len(before["surveys"])
+
+    monkeypatch.setattr(
+        store, "_persist", lambda: (_ for _ in ()).throw(OSError("disk full"))
+    )
+    resp = client.post(
+        "/api/submit-survey",
+        json=_survey(patient_name="Renamed", pain_scale=9),
+    )
+    assert resp.status_code == 500
+    after = store.get_patient("RGN-0999")
+    assert after["name"] == name_before
+    assert len(after["surveys"]) == n_surveys
+
+
 def test_rgn0417_detail_includes_frames():
     resp = client.get("/api/patients/RGN-0417")
     assert resp.status_code == 200

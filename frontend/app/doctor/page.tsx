@@ -56,6 +56,8 @@ export default function DoctorPortal() {
   const [synthLoading, setSynthLoading] = useState(false);
   const [synthError, setSynthError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detailGenRef = useRef(0);
+  const synthGenRef = useRef(0);
 
   const loadList = useCallback((q: string) => {
     setLoadingList(true);
@@ -83,15 +85,23 @@ export default function DoctorPortal() {
 
   useEffect(() => {
     if (!selectedId) return;
+    const gen = ++detailGenRef.current;
+    synthGenRef.current += 1;
+    setSynthLoading(false);
     setRecord(null);
     setDetailError(null);
     setSynthesis(null);
     setSynthError(null);
     fetchPatient(selectedId)
-      .then(setRecord)
-      .catch((err) =>
-        setDetailError(err instanceof Error ? err.message : String(err))
-      );
+      .then((r) => {
+        if (gen === detailGenRef.current) setRecord(r);
+      })
+      .catch((err) => {
+        if (gen === detailGenRef.current)
+          setDetailError(
+            err instanceof Error ? err.message : String(err)
+          );
+      });
   }, [selectedId]);
 
   const filtered = useMemo(
@@ -137,14 +147,17 @@ export default function DoctorPortal() {
 
   const runSynthesis = async () => {
     if (!selectedId) return;
+    const gen = ++synthGenRef.current;
     setSynthLoading(true);
     setSynthError(null);
     try {
-      setSynthesis(await generateSynthesis(selectedId));
+      const result = await generateSynthesis(selectedId);
+      if (gen === synthGenRef.current) setSynthesis(result);
     } catch (err) {
-      setSynthError(err instanceof Error ? err.message : String(err));
+      if (gen === synthGenRef.current)
+        setSynthError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSynthLoading(false);
+      if (gen === synthGenRef.current) setSynthLoading(false);
     }
   };
 
