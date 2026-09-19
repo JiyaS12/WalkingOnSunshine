@@ -22,6 +22,9 @@ _LANDMARK_JOINTS = {
     28: "right_ankle",
 }
 
+# lowest sample rate the gait metrics stay meaningful at (steps reach ~4/s)
+_MIN_ANALYSIS_FPS = 15.0
+
 
 def extract_frames(
     path: str, max_frames: int = 300
@@ -36,6 +39,11 @@ def extract_frames(
         fps = 30.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     step = max(1, math.ceil(total / max_frames)) if total > 0 else 1
+    # Decimating a long clip to fit max_frames can drop the sample rate below
+    # what gait timing needs (~4 steps/s), which aliases stride and cadence.
+    # Keep the rate above the floor and analyse a bounded window instead.
+    if fps / step < _MIN_ANALYSIS_FPS:
+        step = max(1, int(fps // _MIN_ANALYSIS_FPS))
     effective_fps = fps / step
 
     frames: list[dict[str, list[float]]] = []
@@ -66,6 +74,10 @@ def extract_frames(
                     # flip y so up is positive, matching processor convention
                     frame[joint] = [lm.x, -lm.y, lm.z]
                 frames.append(frame)
+                # hard cap: containers that do not report a frame count give
+                # step == 1, so max_frames must be enforced here as well
+                if len(frames) >= max_frames:
+                    break
     finally:
         cap.release()
 
