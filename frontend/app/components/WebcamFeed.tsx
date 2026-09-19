@@ -711,6 +711,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       uploadAbortRef.current?.abort();
       const controller = new AbortController();
       uploadAbortRef.current = controller;
+      cancelAnimationFrame(rafRef.current);
       setUploading(true);
       setUploadName(file.name);
       setUploadCaption(null);
@@ -996,14 +997,23 @@ export default function WebcamFeed({ onMetrics }: Props) {
           </div>
         )}
         {mode === "upload" && uploadCaption && (
-          <span className="absolute bottom-2 left-2 rounded bg-slate-800/90 px-2 py-0.5 text-[10px] text-slate-200">
-            {uploadCaption}
-          </span>
+          <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
+            <span className="rounded bg-slate-800/90 px-2 py-0.5 text-[10px] text-slate-200">
+              {uploadCaption}
+            </span>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded bg-slate-800/90 px-2 py-0.5 text-[10px] font-medium text-emerald-300 hover:bg-slate-700"
+            >
+              Analyze another video
+            </button>
+          </div>
         )}
         <input
           ref={fileInputRef}
           type="file"
-          accept="video/mp4,video/quicktime,.mp4,.mov"
+          accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];

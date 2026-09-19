@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -119,8 +120,6 @@ async def process_video(file: UploadFile = File(...)) -> dict:
     finally:
         tmp.close()
         try:
-            import os
-
             os.unlink(tmp.name)
         except OSError:
             pass
