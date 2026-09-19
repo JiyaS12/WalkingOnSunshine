@@ -229,6 +229,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
     uploadAbortRef.current?.abort();
     uploadAbortRef.current = null;
     setUploading(false);
+    setUploadName(null);
+    setUploadCaption(null);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     closePoseRef.current?.();
@@ -638,11 +640,16 @@ export default function WebcamFeed({ onMetrics }: Props) {
       fps: number
     ) => {
       // bounds for vertical scaling; x is centered on each frame's hip midpoint
-      const ys = frames.flatMap((f) =>
-        Object.values(f).map((v) => v[1])
-      );
-      const yMin = Math.min(...ys);
-      const yMax = Math.max(...ys);
+      // (accumulated in a loop: spreading thousands of frames into Math.min
+      // overflows the argument list)
+      let yMin = Infinity;
+      let yMax = -Infinity;
+      for (const f of frames) {
+        for (const joint of Object.values(f)) {
+          if (joint[1] < yMin) yMin = joint[1];
+          if (joint[1] > yMax) yMax = joint[1];
+        }
+      }
       const pad = 20;
       const scale =
         ((canvas.height - 2 * pad) / Math.max(yMax - yMin, 0.01)) * 0.9;
