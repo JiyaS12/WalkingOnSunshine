@@ -721,7 +721,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
           file,
           controller.signal
         );
-        if (gen !== generationRef.current) return;
+        if (
+          gen !== generationRef.current ||
+          uploadAbortRef.current !== controller
+        )
+          return;
         const canvas = canvasRef.current;
         if (canvas) {
           canvas.width = 640;
@@ -731,14 +735,21 @@ export default function WebcamFeed({ onMetrics }: Props) {
         if (canvas && ctx) {
           playFrames(canvas, ctx, analysis.frames, analysis.fps);
         }
-        setUploadCaption(
-          `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
-        );
-        onMetricsRef.current(analysis.metrics, "upload");
+        if (analysis.metrics.gait_detected) {
+          setUploadCaption(
+            `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
+          );
+          onMetricsRef.current(analysis.metrics, "upload");
+        } else {
+          setUploadCaption(
+            `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
+          );
+        }
       } catch (err) {
         if (
           (err instanceof DOMException && err.name === "AbortError") ||
-          gen !== generationRef.current
+          gen !== generationRef.current ||
+          uploadAbortRef.current !== controller
         )
           return;
         setError(
@@ -747,7 +758,10 @@ export default function WebcamFeed({ onMetrics }: Props) {
           }`
         );
       } finally {
-        if (gen === generationRef.current) setUploading(false);
+        if (uploadAbortRef.current === controller) {
+          uploadAbortRef.current = null;
+          if (gen === generationRef.current) setUploading(false);
+        }
       }
     },
     [playFrames]

@@ -22,10 +22,47 @@ _LANDMARK_JOINTS = {
     28: "right_ankle",
 }
 
+Frame = dict[str, list[float]]
+
+
+def _fill_gaps(detections: list[tuple[int, Frame]]) -> list[Frame]:
+    """Drop leading/trailing undetected slots and linearly interpolate
+    interior gaps so the result has exactly one frame per sampled slot
+    between the first and last detection."""
+    first, last = detections[0][0], detections[-1][0]
+    by_slot = dict(detections)
+    coverage = len(detections) / (last - first + 1)
+    if coverage < 0.5:
+        raise ValueError(
+            f"pose was only detected in {round(coverage * 100)}% of frames "
+            "— keep the full body in view"
+        )
+    frames: list[Frame] = []
+    i = 0  # index into detections
+    for slot in range(first, last + 1):
+        if slot in by_slot:
+            frames.append(by_slot[slot])
+            while i < len(detections) and detections[i][0] <= slot:
+                i += 1
+            continue
+        prev_slot, prev_frame = detections[i - 1]
+        next_slot, next_frame = detections[i]
+        t = (slot - prev_slot) / (next_slot - prev_slot)
+        frames.append(
+            {
+                joint: [
+                    prev_frame[joint][k] + t * (next_frame[joint][k] - prev_frame[joint][k])
+                    for k in range(3)
+                ]
+                for joint in prev_frame
+            }
+        )
+    return frames
+
 
 def extract_frames(
     path: str, max_frames: int = 300
-) -> tuple[list[dict[str, list[float]]], float, int]:
+) -> tuple[list[Frame], float, int]:
     """Returns (joint_frames, effective_fps, total_frames_read)."""
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
@@ -38,8 +75,9 @@ def extract_frames(
     step = max(1, math.ceil(total / max_frames)) if total > 0 else 1
     effective_fps = fps / step
 
-    frames: list[dict[str, list[float]]] = []
+    detections: list[tuple[int, Frame]] = []
     read = 0
+    sampled = 0
     try:
         with mp.solutions.pose.Pose(
             static_image_mode=False,
@@ -55,24 +93,29 @@ def extract_frames(
                 read += 1
                 if idx % step != 0:
                     continue
+                if sampled >= max_frames:
+                    break
+                slot = sampled
+                sampled += 1
                 rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 results = pose.process(rgb)
                 world = results.pose_world_landmarks
                 if not world:
                     continue
-                frame: dict[str, list[float]] = {}
+                frame: Frame = {}
                 for lm_idx, joint in _LANDMARK_JOINTS.items():
                     lm = world.landmark[lm_idx]
                     # flip y so up is positive, matching processor convention
                     frame[joint] = [lm.x, -lm.y, lm.z]
-                frames.append(frame)
+                detections.append((slot, frame))
     finally:
         cap.release()
 
-    if len(frames) < 2:
+    if len(detections) < 2:
         raise ValueError(
-            f"no pose detected in enough frames (found {len(frames)} "
+            f"no pose detected in enough frames (found {len(detections)} "
             f"of {read} processed) — upload a video with a clearly visible "
             "full body"
         )
+    frames = _fill_gaps(detections)
     return frames, effective_fps, read

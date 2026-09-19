@@ -9,9 +9,42 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from main import app
-from video import extract_frames
+from video import _fill_gaps, extract_frames
 
 client = TestClient(app)
+
+_JOINTS = [
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
+]
+
+
+def _frame(v: float) -> dict:
+    return {j: [v, v + 1, v + 2] for j in _JOINTS}
+
+
+def test_fill_gaps_interpolates_middle():
+    frames = _fill_gaps([(0, _frame(0.0)), (2, _frame(2.0))])
+    assert len(frames) == 3
+    assert frames[1]["left_hip"] == [1.0, 2.0, 3.0]
+    assert frames[0]["left_hip"] == [0.0, 1.0, 2.0]
+    assert frames[2]["left_hip"] == [2.0, 3.0, 4.0]
+
+
+def test_fill_gaps_trims_edges():
+    frames = _fill_gaps([(1, _frame(0.0)), (3, _frame(2.0))])
+    assert len(frames) == 3
+
+
+def test_fill_gaps_low_coverage_raises():
+    # slots 0..9, only 4 detections -> 40% coverage
+    detections = [(s, _frame(float(s))) for s in (0, 3, 6, 9)]
+    with pytest.raises(ValueError, match="only detected in"):
+        _fill_gaps(detections)
 
 
 def _blank_mp4(path: Path, n: int = 20) -> Path:
