@@ -28,6 +28,9 @@ JOINTS = (
 
 _EPS = 1e-9
 
+# above this share of frames missing a joint the clip is too sparse to score
+_MAX_DROPPED_PCT = 50.0
+
 
 class GaitMetrics(BaseModel):
     stride_length_m: float
@@ -41,6 +44,7 @@ class GaitMetrics(BaseModel):
     knee_flexion_rom_deg: float
     peak_ankle_speed_mps: float
     gait_detected: bool
+    dropped_frame_pct: float = 0.0
 
 
 def validate_frames(frames: list[dict[str, list[float]]]) -> None:
@@ -80,7 +84,14 @@ class GaitProcessor:
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
-        validate_frames(frames)
+        for i, frame in enumerate(frames):
+            for joint in JOINTS:
+                coords = frame.get(joint)
+                if not isinstance(coords, (list, tuple)) or len(coords) != 3:
+                    raise ValueError(
+                        f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
+                    )
+        self._joints, self.dropped_frame_pct = self._repair_dropped_landmarks()
         if leg_length_m is not None:
             if not np.isfinite(leg_length_m) or leg_length_m <= 0:
                 raise ValueError("leg_length_m must be finite and positive")
@@ -88,10 +99,48 @@ class GaitProcessor:
         else:
             self.leg_length_m = self._leg_length()
 
+    def _repair_dropped_landmarks(self) -> tuple[dict[str, np.ndarray], float]:
+        """Interpolate landmarks the tracker dropped, per joint, over time.
+
+        MediaPipe reports NaN (and callers send nulls) for joints it loses
+        during a clip. Feeding those straight through poisons every metric: the
+        comparisons behind gait_detected all go false, each deficit term zeroes
+        out and the risk score collapses to the healthy baseline, so a dropped
+        frame reads as a reassuring result. Repair the gaps instead, and report
+        how much of the clip needed it.
+        """
+        joints: dict[str, np.ndarray] = {}
+        dropped = np.zeros(self.frame_count, dtype=bool)
+        index = np.arange(self.frame_count)
+        for joint in JOINTS:
+            # None and NaN both arrive as nan here; a non-numeric coordinate
+            # raises, which is a malformed request rather than lost tracking
+            coords = np.array(
+                [frame[joint] for frame in self.frames], dtype=float
+            )  # (n, 3)
+            valid = np.isfinite(coords).all(axis=1)
+            if not valid.any():
+                raise ValueError(
+                    f"joint '{joint}' has no usable coordinates in any frame"
+                )
+            if not valid.all():
+                dropped |= ~valid
+                for axis in range(3):
+                    coords[:, axis] = np.interp(
+                        index, index[valid], coords[valid, axis]
+                    )
+            joints[joint] = coords
+
+        dropped_pct = float(dropped.sum()) / self.frame_count * 100.0
+        if dropped_pct > _MAX_DROPPED_PCT:
+            raise ValueError(
+                f"{dropped_pct:.0f}% of frames are missing at least one joint "
+                f"(limit {_MAX_DROPPED_PCT:.0f}%) — tracking was too sparse to score"
+            )
+        return joints, dropped_pct
+
     def _joint_array(self, joint: str) -> np.ndarray:
-        return np.array(
-            [frame[joint] for frame in self.frames], dtype=float
-        )  # (n, 3)
+        return self._joints[joint]  # (n, 3), dropped landmarks interpolated
 
     def _leg_length(self) -> float:
         """Mean over frames and both sides of |hip-knee| + |knee-ankle|."""
@@ -154,15 +203,21 @@ class GaitProcessor:
         return np.array(peaks, dtype=int)
 
     def _stance_asymmetry(self) -> float:
-        fractions = []
-        for joint in ("left_ankle", "right_ankle"):
-            y = self._joint_array(joint)[:, 1]
-            ymin, ymax = float(np.min(y)), float(np.max(y))
-            rng = ymax - ymin
-            threshold = ymin + 0.15 * rng
-            stance = np.sum(y <= threshold) / len(y)
-            fractions.append(stance)
-        left, right = fractions
+        """Difference in stance-phase fraction between the two feet.
+
+        The stance threshold is derived once from both ankles together, so a
+        foot with reduced swing height is measured against the same floor as
+        the healthy foot. Thresholding each foot against its own range would
+        rescale the impaired side and report zero asymmetry.
+        """
+        left_y = self._joint_array("left_ankle")[:, 1]
+        right_y = self._joint_array("right_ankle")[:, 1]
+        both = np.concatenate((left_y, right_y))
+        floor = float(np.min(both))
+        threshold = floor + 0.15 * (float(np.max(both)) - floor)
+
+        left = float(np.sum(left_y <= threshold)) / len(left_y)
+        right = float(np.sum(right_y <= threshold)) / len(right_y)
         mean = (left + right) / 2.0
         return abs(left - right) / max(mean, _EPS) * 100.0
 
@@ -267,4 +322,5 @@ class GaitProcessor:
             knee_flexion_rom_deg=round(float(knee_rom), 2),
             peak_ankle_speed_mps=round(peak_ankle_speed, 4),
             gait_detected=gait_detected,
+            dropped_frame_pct=round(self.dropped_frame_pct, 2),
         )

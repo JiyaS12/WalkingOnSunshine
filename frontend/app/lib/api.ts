@@ -13,6 +13,8 @@ export interface GaitMetrics {
   knee_flexion_rom_deg: number;
   peak_ankle_speed_mps: number;
   gait_detected: boolean;
+  /** share of frames where a dropped landmark had to be interpolated */
+  dropped_frame_pct: number;
 }
 
 export type JointFrame = Record<string, number[]>;
@@ -73,6 +75,39 @@ export async function processFrames(
     }),
     signal,
   });
+}
+
+export interface VideoAnalysis {
+  metrics: GaitMetrics;
+  frames: JointFrame[];
+  fps: number;
+  frames_processed: number;
+  frames_total: number;
+  filename: string;
+}
+
+export async function processVideo(
+  file: File,
+  signal?: AbortSignal
+): Promise<VideoAnalysis> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/process-video`, {
+    method: "POST",
+    body: form,
+    signal,
+  });
+  if (!res.ok) {
+    let detail = `API /api/process-video failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* keep generic detail */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<VideoAnalysis>;
 }
 
 export interface Survey {

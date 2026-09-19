@@ -7,12 +7,16 @@ import {
   AlertTriangle,
   RefreshCw,
   ExternalLink,
+  Loader2,
+  Upload,
 } from "lucide-react";
 import {
   fetchSimulation,
   processFrames,
+  processVideo,
   JointFrame,
   SimulationSession,
+  VideoAnalysis,
 } from "../lib/api";
 import {
   computeLiveGait,
@@ -139,12 +143,14 @@ type TrackingStatus =
 interface Props {
   onMetrics: (
     metrics: import("../lib/api").GaitMetrics,
-    source: "live" | "simulated"
+    source: "live" | "simulated" | "upload"
   ) => void;
 }
 
+type Mode = "live" | "simulated" | "upload";
+
 export default function WebcamFeed({ onMetrics }: Props) {
-  const [simulated, setSimulated] = useState(true);
+  const [mode, setMode] = useState<Mode>("simulated");
   const [day, setDay] = useState<1 | 14>(1);
   const [error, setError] = useState<string | null>(null);
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("idle");
@@ -186,6 +192,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const prevTimeRef = useRef(0);
   const calibrationRef = useRef<number[]>([]);
   const legLengthRef = useRef<number | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadName, setUploadName] = useState<string | null>(null);
+  const [uploadCaption, setUploadCaption] = useState<string | null>(null);
   const onMetricsRef = useRef(onMetrics);
   onMetricsRef.current = onMetrics;
 
@@ -215,6 +226,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
     setVideoDiag("");
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = null;
+    setUploading(false);
+    setUploadName(null);
+    setUploadCaption(null);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     closePoseRef.current?.();
@@ -237,7 +253,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
     (message: string) => {
       setError(message);
       stopAll();
-      setSimulated(true);
+      setMode("simulated");
     },
     [stopAll]
   );
@@ -614,6 +630,69 @@ export default function WebcamFeed({ onMetrics }: Props) {
     }
   }, [failToSimulated, handleResults, stopAll, embedded, drawSkeleton]);
 
+  // shared skeleton replay for simulated trial frames and the joint
+  // frames returned by /api/process-video
+  const playFrames = useCallback(
+    (
+      canvas: HTMLCanvasElement,
+      ctx: CanvasRenderingContext2D,
+      frames: JointFrame[],
+      fps: number
+    ) => {
+      // bounds for vertical scaling; x is centered on each frame's hip midpoint
+      // (accumulated in a loop: spreading thousands of frames into Math.min
+      // overflows the argument list)
+      let yMin = Infinity;
+      let yMax = -Infinity;
+      for (const f of frames) {
+        for (const joint of Object.values(f)) {
+          if (joint[1] < yMin) yMin = joint[1];
+          if (joint[1] > yMax) yMax = joint[1];
+        }
+      }
+      const pad = 20;
+      const scale =
+        ((canvas.height - 2 * pad) / Math.max(yMax - yMin, 0.01)) * 0.9;
+      const toY = (y: number) =>
+        canvas.height - pad - (y - yMin) * scale;
+
+      let i = 0;
+      let last = 0;
+      const frameMs = 1000 / fps;
+      const loop = (ts: number) => {
+        if (ts - last >= frameMs) {
+          last = ts;
+          const f = frames[i % frames.length];
+          i += 1;
+          const hipMidX = (f.left_hip[0] + f.right_hip[0]) / 2;
+          const toX = (x: number) =>
+            canvas.width / 2 + (x - hipMidX) * scale;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.strokeStyle = "#60a5fa";
+          ctx.lineWidth = 2;
+          for (const [a, b] of SIM_PAIRS) {
+            const pa = f[a];
+            const pb = f[b];
+            if (!pa || !pb) continue;
+            ctx.beginPath();
+            ctx.moveTo(toX(pa[0]), toY(pa[1]));
+            ctx.lineTo(toX(pb[0]), toY(pb[1]));
+            ctx.stroke();
+          }
+          ctx.fillStyle = "#facc15";
+          for (const joint of Object.values(f)) {
+            ctx.beginPath();
+            ctx.arc(toX(joint[0]), toY(joint[1]), 4, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+        }
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    },
+    []
+  );
+
   const startSimulated = useCallback(async () => {
     const gen = generationRef.current;
     const session = (await fetchSimulation(day)) as SimulationSession;
@@ -626,58 +705,79 @@ export default function WebcamFeed({ onMetrics }: Props) {
     }
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
+    playFrames(canvas, ctx, session.frames, session.fps);
+  }, [day, playFrames]);
 
-    const frames = session.frames;
-    // bounds for vertical scaling; x is centered on each frame's hip midpoint
-    const ys = frames.flatMap((f) =>
-      Object.values(f).map((v) => v[1])
-    );
-    const yMin = Math.min(...ys);
-    const yMax = Math.max(...ys);
-    const pad = 20;
-    const scale =
-      ((canvas.height - 2 * pad) / Math.max(yMax - yMin, 0.01)) * 0.9;
-    const toY = (y: number) => canvas.height - pad - (y - yMin) * scale;
-
-    let i = 0;
-    let last = 0;
-    const frameMs = 1000 / session.fps;
-    const loop = (ts: number) => {
-      if (ts - last >= frameMs) {
-        last = ts;
-        const f = frames[i % frames.length];
-        i += 1;
-        const hipMidX = (f.left_hip[0] + f.right_hip[0]) / 2;
-        const toX = (x: number) =>
-          canvas.width / 2 + (x - hipMidX) * scale;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = "#60a5fa";
-        ctx.lineWidth = 2;
-        for (const [a, b] of SIM_PAIRS) {
-          const pa = f[a];
-          const pb = f[b];
-          if (!pa || !pb) continue;
-          ctx.beginPath();
-          ctx.moveTo(toX(pa[0]), toY(pa[1]));
-          ctx.lineTo(toX(pb[0]), toY(pb[1]));
-          ctx.stroke();
+  const analyzeVideo = useCallback(
+    async (file: File) => {
+      if (!/\.(mp4|mov|webm)$/i.test(file.name)) {
+        setError("Unsupported format — upload a .mp4, .mov, or .webm video");
+        return;
+      }
+      const gen = generationRef.current;
+      uploadAbortRef.current?.abort();
+      const controller = new AbortController();
+      uploadAbortRef.current = controller;
+      cancelAnimationFrame(rafRef.current);
+      setUploading(true);
+      setUploadName(file.name);
+      setUploadCaption(null);
+      setError(null);
+      try {
+        const analysis: VideoAnalysis = await processVideo(
+          file,
+          controller.signal
+        );
+        if (
+          gen !== generationRef.current ||
+          uploadAbortRef.current !== controller
+        )
+          return;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          canvas.width = 640;
+          canvas.height = 360;
         }
-        ctx.fillStyle = "#facc15";
-        for (const joint of Object.values(f)) {
-          ctx.beginPath();
-          ctx.arc(toX(joint[0]), toY(joint[1]), 4, 0, 2 * Math.PI);
-          ctx.fill();
+        const ctx = canvas?.getContext("2d");
+        if (canvas && ctx) {
+          playFrames(canvas, ctx, analysis.frames, analysis.fps);
+        }
+        if (analysis.metrics.gait_detected) {
+          setUploadCaption(
+            `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
+          );
+        } else {
+          setUploadCaption(
+            `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
+          );
+        }
+        onMetricsRef.current(analysis.metrics, "upload");
+      } catch (err) {
+        if (
+          (err instanceof DOMException && err.name === "AbortError") ||
+          gen !== generationRef.current ||
+          uploadAbortRef.current !== controller
+        )
+          return;
+        setError(
+          `Video analysis failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      } finally {
+        if (uploadAbortRef.current === controller) {
+          uploadAbortRef.current = null;
+          if (gen === generationRef.current) setUploading(false);
         }
       }
-      rafRef.current = requestAnimationFrame(loop);
-    };
-    rafRef.current = requestAnimationFrame(loop);
-  }, [day]);
+    },
+    [playFrames]
+  );
 
   useEffect(() => {
     stopAll();
     setCameraBlocked(null);
-    if (simulated) {
+    if (mode === "simulated") {
       setTrackingStatus("idle");
       startSimulated().catch((err) =>
         setError(
@@ -686,11 +786,13 @@ export default function WebcamFeed({ onMetrics }: Props) {
           }`
         )
       );
-    } else {
+    } else if (mode === "live") {
       void startLive();
+    } else {
+      setTrackingStatus("idle");
     }
     return stopAll;
-  }, [simulated, day, retryNonce, startLive, startSimulated, stopAll]);
+  }, [mode, day, retryNonce, startLive, startSimulated, stopAll]);
 
   const statusDot =
     trackingStatus === "tracking"
@@ -733,17 +835,17 @@ export default function WebcamFeed({ onMetrics }: Props) {
         <div
           role="radiogroup"
           aria-label="Input mode"
-          className="grid grid-cols-2 gap-2"
+          className="grid grid-cols-3 gap-2"
         >
           <button
             role="radio"
-            aria-checked={!simulated}
+            aria-checked={mode === "live"}
             onClick={() => {
               setError(null);
-              setSimulated(false);
+              setMode("live");
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-              !simulated
+              mode === "live"
                 ? "border-emerald-500 bg-emerald-600 text-white"
                 : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
@@ -753,13 +855,13 @@ export default function WebcamFeed({ onMetrics }: Props) {
           </button>
           <button
             role="radio"
-            aria-checked={simulated}
+            aria-checked={mode === "simulated"}
             onClick={() => {
               setError(null);
-              setSimulated(true);
+              setMode("simulated");
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-              simulated
+              mode === "simulated"
                 ? "border-emerald-500 bg-emerald-600 text-white"
                 : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
@@ -767,13 +869,31 @@ export default function WebcamFeed({ onMetrics }: Props) {
             <FlaskConical className="h-4 w-4" />
             Simulated Trial Mode
           </button>
+          <button
+            role="radio"
+            aria-checked={mode === "upload"}
+            onClick={() => {
+              setError(null);
+              setMode("upload");
+            }}
+            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+              mode === "upload"
+                ? "border-emerald-500 bg-emerald-600 text-white"
+                : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            <Upload className="h-4 w-4" />
+            Upload Video
+          </button>
         </div>
         <p className="mt-2 text-xs text-slate-400">
-          {simulated
+          {mode === "simulated"
             ? "Pre-computed geriatric trial telemetry — patient RGN-0417, Regeneron mobility arm"
-            : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
+            : mode === "upload"
+              ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
+              : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
         </p>
-        {!simulated && (
+        {mode === "live" && (
           <div className="mt-2 flex items-center justify-between text-xs">
             <span className="flex items-center gap-1.5 text-slate-300">
               <span className={`h-2 w-2 rounded-full ${statusDot}`} />
@@ -784,7 +904,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         )}
       </div>
       <div className="mb-3 flex items-center justify-end gap-4">
-        {simulated && (
+        {mode === "simulated" && (
           <div className="flex gap-1 rounded-lg bg-slate-800 p-1 text-xs">
             {([1, 14] as const).map((d) => (
               <button
@@ -821,9 +941,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
           playsInline
           // hidden from view but still decoding: the canvas paints the frames
           className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover opacity-0"
-          style={{ display: simulated ? "none" : "block" }}
+          style={{ display: mode === "live" ? "block" : "none" }}
         />
-        {!simulated && cameraBlocked && (
+        {mode === "live" && cameraBlocked && (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
             <div className="max-w-sm rounded-lg border border-amber-600/60 bg-amber-900/40 p-4 text-center">
               <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-amber-300" />
@@ -851,7 +971,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
                   Retry camera
                 </button>
                 <button
-                  onClick={() => setSimulated(true)}
+                  onClick={() => setMode("simulated")}
                   className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
                 >
                   Use Simulated Trial Mode
@@ -865,12 +985,70 @@ export default function WebcamFeed({ onMetrics }: Props) {
           width={640}
           height={360}
           className={`pointer-events-none h-full w-full ${
-            simulated ? "" : "absolute inset-0 -scale-x-100 object-cover"
+            mode === "live" ? "absolute inset-0 -scale-x-100 object-cover" : ""
           }`}
         />
-        {simulated ? (
+        {mode === "upload" && !uploading && !uploadCaption && (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files?.[0];
+              if (f) void analyzeVideo(f);
+            }}
+            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-600 text-slate-400 hover:border-emerald-500 hover:text-slate-200"
+          >
+            <Upload className="h-8 w-8" />
+            <span className="text-sm">
+              {uploadName
+                ? uploadName
+                : "Drag a video here or choose a file"}
+            </span>
+            <span className="text-xs text-slate-500">
+              .mp4, .mov, or .webm — up to 100 MB
+            </span>
+          </button>
+        )}
+        {uploading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-300">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <span className="text-sm">Analyzing video…</span>
+          </div>
+        )}
+        {mode === "upload" && uploadCaption && (
+          <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
+            <span className="rounded bg-slate-800/90 px-2 py-0.5 text-[10px] text-slate-200">
+              {uploadCaption}
+            </span>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded bg-slate-800/90 px-2 py-0.5 text-[10px] font-medium text-emerald-300 hover:bg-slate-700"
+            >
+              Analyze another video
+            </button>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void analyzeVideo(f);
+            e.target.value = "";
+          }}
+        />
+        {mode === "simulated" ? (
           <span className="absolute right-2 top-2 rounded bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
             SIMULATED
+          </span>
+        ) : mode === "upload" ? (
+          <span className="absolute right-2 top-2 rounded bg-sky-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
+            UPLOAD
           </span>
         ) : (
           <span className="absolute right-2 top-2 rounded bg-rose-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
@@ -879,7 +1057,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         )}
       </div>
 
-      {!simulated && (
+      {mode === "live" && (
         <div className="mt-3 grid grid-cols-4 gap-2 text-center">
           <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
             <p className="text-[10px] uppercase tracking-wide text-slate-500">

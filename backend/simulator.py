@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -9,15 +10,15 @@ from processor import GaitProcessor
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "mock_cohort.json"
 
-_cohort: dict | None = None
+_cohorts: dict[str, dict] = {}
 
 
 def load_cohort(path: Path | str = DATA_PATH) -> dict:
-    global _cohort
-    if _cohort is None or Path(path) != DATA_PATH:
+    key = str(Path(path).resolve())
+    if key not in _cohorts:
         with open(path) as f:
-            _cohort = json.load(f)
-    return _cohort
+            _cohorts[key] = json.load(f)
+    return _cohorts[key]
 
 
 def _session_result(session: dict) -> dict:
@@ -27,7 +28,7 @@ def _session_result(session: dict) -> dict:
         "fps": session["fps"],
         "frame_count": len(session["frames"]),
         "metrics": metrics.model_dump(),
-        "frames": session["frames"],
+        "frames": copy.deepcopy(session["frames"]),
     }
 
 
