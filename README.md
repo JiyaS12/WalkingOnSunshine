@@ -24,17 +24,26 @@ Current mock cohort results (RGN-0417):
 
 ## Architecture
 
+See [docs/architecture.md](docs/architecture.md) for the full system overview:
+the patient client, voice-agent intake, doctor's portal, the end-to-end data
+workflow, the complete endpoint reference, and which pieces are implemented
+today.
+
 ```
 gaitguard-ai/
   backend/
-    main.py          FastAPI app: /api/health, /api/process-frame,
-                     /api/get-simulation, /api/generate-summary
+    main.py          FastAPI app and route definitions
     processor.py     GaitProcessor: frames -> GaitMetrics
+    video.py         OpenCV + MediaPipe extraction for uploaded video
     simulator.py     mock cohort loading + day-1 vs day-14 comparison
+    store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
-  frontend/          Phase 2 — not yet implemented
+  frontend/
+    app/page.tsx         patient screening (webcam / simulated / upload)
+    app/doctor/page.tsx  clinician dashboard
   data/
-    mock_cohort.json synthetic 10s @30fps gait sessions (day_1, day_14)
+    mock_cohort.json    synthetic 10s @30fps gait sessions (day_1, day_14)
+    mock_patients.json  seed cohort for the doctor's portal
 ```
 
 ## Backend setup
