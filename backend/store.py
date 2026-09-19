@@ -137,10 +137,10 @@ def upsert_survey(survey: dict) -> dict:
         survey["recorded_at"] = datetime.now(timezone.utc).isoformat()
     with _lock:
         patients = _load()
-        record = patients.get(pid)
-        created = record is None
+        old_record = patients.get(pid)
+        created = old_record is None
         if created:
-            record = {
+            new_record = {
                 "patient_id": pid,
                 "name": survey.get("patient_name") or pid,
                 "age": None,
@@ -148,19 +148,22 @@ def upsert_survey(survey: dict) -> dict:
                 "surveys": [],
                 "gait_sessions": [],
             }
-            patients[pid] = record
-        elif survey.get("patient_name"):
-            record["name"] = survey["patient_name"]
-        record["surveys"].append(survey)
-        _sort_by_recorded_at(record["surveys"])
+        else:
+            new_record = json.loads(json.dumps(old_record))  # deep copy
+            if survey.get("patient_name"):
+                new_record["name"] = survey["patient_name"]
+        new_record["surveys"].append(survey)
+        _sort_by_recorded_at(new_record["surveys"])
+        patients[pid] = new_record
         try:
             _persist()
         except Exception:
-            record["surveys"].remove(survey)
             if created:
                 del patients[pid]
+            else:
+                patients[pid] = old_record
             raise
-        return record
+        return new_record
 
 
 def add_session(pid: str, session: dict) -> dict:
@@ -168,21 +171,23 @@ def add_session(pid: str, session: dict) -> dict:
         patients = _load()
         if pid not in patients:
             raise KeyError(f"unknown patient: {pid}")
-        sessions = patients[pid]["gait_sessions"]
-        if len(sessions) >= _MAX_SESSIONS:
+        old_record = patients[pid]
+        if len(old_record["gait_sessions"]) >= _MAX_SESSIONS:
             raise ValueError("patient already has 50 sessions")
         if session.get("recorded_at") is None:
             session["recorded_at"] = datetime.now(timezone.utc).isoformat()
         session.setdefault("frames_ref", None)
         session.setdefault("frames", None)
-        sessions.append(session)
-        _sort_by_recorded_at(sessions)
+        new_record = json.loads(json.dumps(old_record))  # deep copy
+        new_record["gait_sessions"].append(session)
+        _sort_by_recorded_at(new_record["gait_sessions"])
+        patients[pid] = new_record
         try:
             _persist()
         except Exception:
-            sessions.remove(session)
+            patients[pid] = old_record
             raise
-        return patients[pid]
+        return new_record
 
 
 def reset_for_tests(path: Path | str) -> None:

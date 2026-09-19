@@ -56,8 +56,8 @@ export default function DoctorPortal() {
   const [synthLoading, setSynthLoading] = useState(false);
   const [synthError, setSynthError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectedIdRef = useRef<string | null>(null);
-  selectedIdRef.current = selectedId;
+  const detailGenRef = useRef(0);
+  const synthGenRef = useRef(0);
 
   const loadList = useCallback((q: string) => {
     setLoadingList(true);
@@ -85,17 +85,19 @@ export default function DoctorPortal() {
 
   useEffect(() => {
     if (!selectedId) return;
-    const id = selectedId;
+    const gen = ++detailGenRef.current;
+    synthGenRef.current += 1;
+    setSynthLoading(false);
     setRecord(null);
     setDetailError(null);
     setSynthesis(null);
     setSynthError(null);
-    fetchPatient(id)
+    fetchPatient(selectedId)
       .then((r) => {
-        if (id === selectedIdRef.current) setRecord(r);
+        if (gen === detailGenRef.current) setRecord(r);
       })
       .catch((err) => {
-        if (id === selectedIdRef.current)
+        if (gen === detailGenRef.current)
           setDetailError(
             err instanceof Error ? err.message : String(err)
           );
@@ -144,18 +146,18 @@ export default function DoctorPortal() {
       : null;
 
   const runSynthesis = async () => {
-    const id = selectedId;
-    if (!id) return;
+    if (!selectedId) return;
+    const gen = ++synthGenRef.current;
     setSynthLoading(true);
     setSynthError(null);
     try {
-      const result = await generateSynthesis(id);
-      if (id === selectedIdRef.current) setSynthesis(result);
+      const result = await generateSynthesis(selectedId);
+      if (gen === synthGenRef.current) setSynthesis(result);
     } catch (err) {
-      if (id === selectedIdRef.current)
+      if (gen === synthGenRef.current)
         setSynthError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (id === selectedIdRef.current) setSynthLoading(false);
+      if (gen === synthGenRef.current) setSynthLoading(false);
     }
   };
 

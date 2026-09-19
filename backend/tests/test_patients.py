@@ -170,6 +170,24 @@ def test_complaint_length_422():
     assert resp.status_code == 422
 
 
+def test_persist_failure_rolls_back(monkeypatch):
+    client.post("/api/submit-survey", json=_survey(patient_name="Original"))
+    before = store.get_patient("RGN-0999")
+    name_before, n_surveys = before["name"], len(before["surveys"])
+
+    monkeypatch.setattr(
+        store, "_persist", lambda: (_ for _ in ()).throw(OSError("disk full"))
+    )
+    resp = client.post(
+        "/api/submit-survey",
+        json=_survey(patient_name="Renamed", pain_scale=9),
+    )
+    assert resp.status_code == 500
+    after = store.get_patient("RGN-0999")
+    assert after["name"] == name_before
+    assert len(after["surveys"]) == n_surveys
+
+
 def test_rgn0417_detail_includes_frames():
     resp = client.get("/api/patients/RGN-0417")
     assert resp.status_code == 200
