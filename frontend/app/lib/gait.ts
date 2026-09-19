@@ -116,7 +116,7 @@ export function computeLiveGait(
   const rightKneeFlexion = kneeFlexionDeg(rHip, rKnee, rAnkle);
   const mean = (leftKneeFlexion + rightKneeFlexion) / 2;
   const kneeAsymmetryPct =
-    (Math.abs(leftKneeFlexion - rightKneeFlexion) / Math.max(mean, 1)) * 100;
+    (Math.abs(leftKneeFlexion - rightKneeFlexion) / Math.max(mean, 20)) * 100;
 
   const hipMid = {
     x: (lHip.x + rHip.x) / 2,
