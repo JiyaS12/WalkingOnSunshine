@@ -102,18 +102,19 @@ export default function Home() {
   }, []);
 
   const handleMetrics = useCallback(
-    (m: GaitMetrics, source: "live" | "simulated") => {
+    (m: GaitMetrics, source: "live" | "simulated" | "upload") => {
       setMetrics(m);
-      if (source !== "live") return;
+      if (source === "simulated") return;
+      const label = source === "upload" ? "Upload" : "Live";
       setSessions((prev) => {
-        const live: TrendSession = {
-          label: "Live",
+        const point: TrendSession = {
+          label,
           asymmetry_pct: m.asymmetry_pct,
           fall_risk_score: m.fall_risk_score,
           stride_length_m: m.stride_length_m,
         };
-        const rest = prev.filter((s) => s.label !== "Live");
-        return [...rest, live];
+        const rest = prev.filter((s) => s.label !== label);
+        return [...rest, point];
       });
     },
     []
