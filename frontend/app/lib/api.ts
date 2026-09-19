@@ -13,6 +13,8 @@ export interface GaitMetrics {
   knee_flexion_rom_deg: number;
   peak_ankle_speed_mps: number;
   gait_detected: boolean;
+  /** share of frames where a dropped landmark had to be interpolated */
+  dropped_frame_pct: number;
 }
 
 export type JointFrame = Record<string, number[]>;
