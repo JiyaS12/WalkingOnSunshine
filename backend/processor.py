@@ -63,10 +63,13 @@ class GaitProcessor:
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
-        for frame in frames:
-            missing = [j for j in JOINTS if j not in frame]
-            if missing:
-                raise ValueError(f"frame missing joints: {missing}")
+        for i, frame in enumerate(frames):
+            for joint in JOINTS:
+                coords = frame.get(joint)
+                if coords is None or len(coords) != 3:
+                    raise ValueError(
+                        f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
+                    )
         if leg_length_m is not None:
             if leg_length_m <= 0:
                 raise ValueError("leg_length_m must be positive")
