@@ -51,6 +51,11 @@ def _round_metrics(m: dict) -> dict:
         "fall_risk_score": round(m["fall_risk_score"], 2),
         "cadence_steps_per_min": round(m["cadence_steps_per_min"]),
         "frame_count": m["frame_count"],
+        "leg_length_m": round(m.get("leg_length_m", 0.0), 2),
+        "stride_ratio": round(m.get("stride_ratio", 0.0), 2),
+        "knee_flexion_rom_deg": round(m.get("knee_flexion_rom_deg", 0.0)),
+        "peak_ankle_speed_mps": round(m.get("peak_ankle_speed_mps", 0.0), 2),
+        "gait_detected": m.get("gait_detected", True),
     }
 
 

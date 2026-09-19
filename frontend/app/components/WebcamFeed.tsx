@@ -389,7 +389,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
         // stop the tracks if the grant resolves after the timeout/mode change
         gumPromise
           .then((s) => {
-            if (streamRef.current !== s) {
+            if (isStale()) {
               s.getTracks().forEach((t) => t.stop());
             }
           })
