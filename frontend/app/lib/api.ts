@@ -60,7 +60,8 @@ export async function fetchSimulation(
 export async function processFrames(
   frames: JointFrame[],
   fps: number,
-  legLengthM?: number
+  legLengthM?: number,
+  signal?: AbortSignal
 ): Promise<GaitMetrics> {
   return request<GaitMetrics>("/api/process-frame", {
     method: "POST",
@@ -70,6 +71,7 @@ export async function processFrames(
       fps,
       ...(legLengthM !== undefined ? { leg_length_m: legLengthM } : {}),
     }),
+    signal,
   });
 }
 

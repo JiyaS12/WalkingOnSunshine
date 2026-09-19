@@ -93,14 +93,31 @@ def test_generate_summary(monkeypatch, tmp_path):
     assert body["cached"] is False
 
 
+def _mark_cache_openai():
+    # pretend the first summary came from the OpenAI path so token savings
+    # accrue on subsequent hits
+    for entry in agent._cache.values():
+        entry["source"] = "openai"
+
+
 def test_generate_summary_cached_on_second_call(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
     first = client.post("/api/generate-summary", json={}).json()
     assert first["cached"] is False
+    _mark_cache_openai()
     second = client.post("/api/generate-summary", json={}).json()
     assert second["cached"] is True
     assert second["summary"] == first["summary"]
     assert second["estimated_tokens_saved"] > 0
+
+
+def test_template_cache_hit_saves_nothing(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    client.post("/api/generate-summary", json={})
+    hit = client.post("/api/generate-summary", json={}).json()
+    assert hit["cached"] is True
+    assert hit["source"] == "template"
+    assert hit["estimated_tokens_saved"] == 0
 
 
 def test_summary_cache_stats(monkeypatch, tmp_path):
@@ -113,6 +130,7 @@ def test_summary_cache_stats(monkeypatch, tmp_path):
         "estimated_tokens_saved": 0,
     }
     client.post("/api/generate-summary", json={})
+    _mark_cache_openai()
     client.post("/api/generate-summary", json={})
     stats = client.get("/api/summary-cache-stats").json()
     assert stats["entries"] == 1

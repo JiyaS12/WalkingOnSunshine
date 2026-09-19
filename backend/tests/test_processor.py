@@ -68,6 +68,47 @@ def test_leg_length_override_used():
     assert metrics.leg_length_m == 0.9
 
 
+def _symmetric_gait_frames(n=150, seed=7):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
+    import generate_mock_cohort as gen
+
+    session = gen.generate_session(
+        14, step_amp=0.3375, flex_amp_l=55, flex_amp_r=55,
+        lift_bias_r=0.0, speed_decay=0.0, seed=seed,
+    )
+    return session["frames"][:n]
+
+
+def _hip_centre(frames):
+    out = []
+    for f in frames:
+        mid = [
+            (f["left_hip"][i] + f["right_hip"][i]) / 2 for i in range(3)
+        ]
+        out.append(
+            {
+                j: [f[j][i] - mid[i] for i in range(3)]
+                for j in f
+            }
+        )
+    return out
+
+
+def test_hip_centred_input_uses_ankle_speed_proxy():
+    frames = _hip_centre(_symmetric_gait_frames())
+    metrics = GaitProcessor(frames, fps=30.0).compute()
+    assert metrics.velocity_degradation_pct < 10
+    assert metrics.fall_risk_score < 0.3
+
+
+def test_hip_centred_slowdown_detected():
+    frames = _symmetric_gait_frames(150)
+    # time-stretch the second half 2x (repeat each frame)
+    stretched = frames[:75] + [f for f in frames[75:] for _ in range(2)]
+    metrics = GaitProcessor(_hip_centre(stretched), fps=30.0).compute()
+    assert metrics.velocity_degradation_pct > 20
+
+
 def test_cohort_structure():
     cohort = load_cohort()
     assert cohort["patient_id"] == "RGN-0417"

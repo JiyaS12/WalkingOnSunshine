@@ -105,12 +105,17 @@ def generate_summary(
     key = _cache_key(metrics_day1, metrics_day14, patient_id)
     if key in cache:
         entry = dict(cache[key])
-        saved = (len(_build_prompt(metrics_day1, metrics_day14, patient_id))
-                 + len(entry["summary"])) // 4
-        _stats["estimated_tokens_saved"] += saved
+        if entry["source"] == "openai":
+            saved = (
+                len(_build_prompt(metrics_day1, metrics_day14, patient_id))
+                + len(entry["summary"])
+            ) // 4
+            _stats["estimated_tokens_saved"] += saved
+            entry["estimated_tokens_saved"] = _stats["estimated_tokens_saved"]
+        else:
+            entry["estimated_tokens_saved"] = 0
         _stats["cache_hits"] += 1
         entry["cached"] = True
-        entry["estimated_tokens_saved"] = _stats["estimated_tokens_saved"]
         return entry
 
     prompt = _build_prompt(metrics_day1, metrics_day14, patient_id)

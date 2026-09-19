@@ -7,8 +7,8 @@ Fall risk is normalized by estimated leg length rather than absolute
 geriatric thresholds: normal symmetric gait (stride ~= 1.4-1.6x leg length,
 knee flexion ROM ~= 50-65 deg) should score < 0.15, and standing still is not
 flagged as gait. MediaPipe world coordinates are hip-centred, so velocity
-degradation ~= 0 for live camera input (it only shows for the translating
-mock-cohort sessions).
+degradation is estimated from ankle swing speed for live input (hip
+translation only shows for the translating mock-cohort sessions).
 """
 
 from __future__ import annotations
@@ -162,6 +162,13 @@ class GaitProcessor:
         dx = np.diff(mid[:, 0])
         dz = np.diff(mid[:, 2])
         speed = np.sqrt(dx**2 + dz**2) * self.fps
+        # hip-centred inputs (live MediaPipe world coords) barely translate;
+        # fall back to mean ankle swing speed as the velocity proxy
+        path = float(np.sum(np.linalg.norm(np.diff(mid, axis=0), axis=1)))
+        if path < 0.05 * self.leg_length_m:
+            speed = (
+                self._ankle_speed("left") + self._ankle_speed("right")
+            ) / 2.0
         smoothed = (
             pd.Series(speed).rolling(window=5, min_periods=1).mean().to_numpy()
         )

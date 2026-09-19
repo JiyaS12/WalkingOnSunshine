@@ -91,31 +91,30 @@ function loadScript(src: string): Promise<void> {
   const cached = scriptPromises.get(src);
   if (cached) return cached;
   const promise = new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      scriptPromises.delete(src);
-      document.querySelector(`script[src="${src}"]`)?.remove();
-    };
     const existing = document.querySelector(`script[src="${src}"]`);
     if (existing) {
       existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => {
-        cleanup();
-        reject(new Error(`failed to load ${src}`));
-      });
+      existing.addEventListener("error", () =>
+        reject(new Error(`failed to load ${src}`))
+      );
       return;
     }
     const script = document.createElement("script");
     script.src = src;
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => {
-      cleanup();
-      reject(new Error(`failed to load ${src}`));
-    };
+    script.onerror = () => reject(new Error(`failed to load ${src}`));
     document.head.appendChild(script);
   });
-  scriptPromises.set(src, promise);
-  return promise;
+  const timed = withTimeout(promise, 15_000, `script load ${src}`).catch(
+    (err) => {
+      scriptPromises.delete(src);
+      document.querySelector(`script[src="${src}"]`)?.remove();
+      throw err;
+    }
+  );
+  scriptPromises.set(src, timed);
+  return timed;
 }
 
 function withTimeout<T>(
@@ -171,6 +170,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const rafRef = useRef<number>(0);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const bufferRef = useRef<JointFrame[]>([]);
   const timesRef = useRef<number[]>([]);
   const sendingRef = useRef(false);
@@ -187,6 +187,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const stopAll = useCallback(() => {
     generationRef.current += 1;
     cancelAnimationFrame(rafRef.current);
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (syncIntervalRef.current !== null) {
       clearInterval(syncIntervalRef.current);
       syncIntervalRef.current = null;
@@ -353,22 +355,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
           }`
         );
       }
-      await withTimeout(
-        Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]),
-        15_000,
-        "MediaPipe script load"
-      );
+      await Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]);
       if (isStale()) return;
       if (!window.Pose) throw new Error("MediaPipe Pose unavailable");
       if (!window.Camera)
         throw new Error("MediaPipe camera_utils unavailable");
-
-      if (embedded) {
-        stopAll();
-        setCameraBlocked(EMBEDDED_BLOCKED_MSG);
-        setTrackingStatus("idle");
-        return;
-      }
 
       const canvasEl = canvasRef.current;
       canvasEl
@@ -378,11 +369,18 @@ export default function WebcamFeed({ onMetrics }: Props) {
       setTrackingStatus("requesting-camera");
       let stream: MediaStream;
       try {
-        stream = await withTimeout(
-          navigator.mediaDevices.getUserMedia({ video: true }),
-          30_000,
-          "Camera permission"
-        );
+        const gumPromise = navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        // stop the tracks if the grant resolves after the timeout/mode change
+        gumPromise
+          .then((s) => {
+            if (streamRef.current !== s) {
+              s.getTracks().forEach((t) => t.stop());
+            }
+          })
+          .catch(() => undefined);
+        stream = await withTimeout(gumPromise, 30_000, "Camera permission");
       } catch (err) {
         if (isStale()) return;
         const name = err instanceof DOMException ? err.name : "";
@@ -418,6 +416,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
       if (isStale()) return;
 
       setTrackingStatus("starting-model");
+      abortRef.current = new AbortController();
 
       const pose = new window.Pose({
         locateFile: (file) => `${POSE_FILES}/${file}`,
@@ -487,14 +486,25 @@ export default function WebcamFeed({ onMetrics }: Props) {
             fps = Math.min(60, Math.max(5, measured));
           }
         }
-        processFrames(batch, fps, legLengthRef.current ?? undefined)
+        const sendGen = generationRef.current;
+        processFrames(
+          batch,
+          fps,
+          legLengthRef.current ?? undefined,
+          abortRef.current?.signal
+        )
           .then((m) => {
+            if (sendGen !== generationRef.current) return;
             onMetricsRef.current(m, "live");
             setLastSyncAt(new Date());
           })
-          .catch(() => undefined)
+          .catch((err) => {
+            if (err instanceof DOMException && err.name === "AbortError")
+              return;
+          })
           .finally(() => {
-            sendingRef.current = false;
+            if (sendGen === generationRef.current)
+              sendingRef.current = false;
           });
       }, SYNC_INTERVAL_MS);
     } catch (err) {
