@@ -38,7 +38,21 @@ cd backend
 ```
 
 Optional: set `OPENAI_API_KEY` to enable LLM-generated summaries on
-`POST /api/generate-summary` (falls back to a deterministic template without it).
+`POST /api/generate-summary` (falls back to a deterministic template without
+it). Summaries are cached in `backend/.cache/summaries.json` (heuristic
+token-saving layer); `GET /api/summary-cache-stats` reports cache stats.
+
+## Frontend setup
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local   # sets NEXT_PUBLIC_API_URL (default http://localhost:8000)
+npm run dev
+```
+
+Dashboard runs at http://localhost:3000 and expects the backend on
+`NEXT_PUBLIC_API_URL`.
 
 ## Test
 

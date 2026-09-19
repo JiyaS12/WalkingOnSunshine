@@ -5,10 +5,17 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import agent
 from main import app
 from simulator import load_cohort, get_simulation
 
 client = TestClient(app)
+
+
+def _use_tmp_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent, "CACHE_PATH", tmp_path / "summaries.json")
+    monkeypatch.setattr(agent, "_cache", None)
+    monkeypatch.setattr(agent, "_stats", {"estimated_tokens_saved": 0})
 
 
 def test_health():
@@ -55,9 +62,33 @@ def test_process_frame_too_few():
     assert resp.status_code == 422
 
 
-def test_generate_summary():
+def test_generate_summary(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
     resp = client.post("/api/generate-summary", json={})
     assert resp.status_code == 200
     body = resp.json()
     assert "summary" in body
     assert body["source"] in ("template", "openai")
+    assert body["cached"] is False
+
+
+def test_generate_summary_cached_on_second_call(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    first = client.post("/api/generate-summary", json={}).json()
+    assert first["cached"] is False
+    second = client.post("/api/generate-summary", json={}).json()
+    assert second["cached"] is True
+    assert second["summary"] == first["summary"]
+    assert second["estimated_tokens_saved"] > 0
+
+
+def test_summary_cache_stats(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    resp = client.get("/api/summary-cache-stats")
+    assert resp.status_code == 200
+    assert resp.json() == {"entries": 0, "estimated_tokens_saved": 0}
+    client.post("/api/generate-summary", json={})
+    client.post("/api/generate-summary", json={})
+    stats = client.get("/api/summary-cache-stats").json()
+    assert stats["entries"] == 1
+    assert stats["estimated_tokens_saved"] > 0
