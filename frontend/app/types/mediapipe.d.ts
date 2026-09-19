@@ -30,24 +30,8 @@ export interface PoseConstructor {
   new (config?: PoseConfig): Pose;
 }
 
-export interface CameraOptions {
-  onFrame: () => Promise<void> | void;
-  width?: number;
-  height?: number;
-}
-
-export interface MediaPipeCamera {
-  start(): Promise<void>;
-  stop(): void;
-}
-
-export interface CameraConstructor {
-  new (video: HTMLVideoElement, options: CameraOptions): MediaPipeCamera;
-}
-
 declare global {
   interface Window {
     Pose?: PoseConstructor;
-    Camera?: CameraConstructor;
   }
 }

@@ -20,11 +20,14 @@ import {
   LiveGaitMetrics,
 } from "../lib/gait";
 import type {
-  MediaPipeCamera,
   NormalizedLandmark,
   Pose,
   PoseResults,
 } from "../types/mediapipe";
+
+type VideoWithRVFC = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: () => void) => number;
+};
 
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
@@ -73,8 +76,6 @@ const SIM_PAIRS: [string, string][] = [
 ];
 
 const POSE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js";
-const CAMERA_CDN =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
 const POSE_FILES = "https://cdn.jsdelivr.net/npm/@mediapipe/pose";
 
 const EMBEDDED_BLOCKED_MSG =
@@ -166,8 +167,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const poseRef = useRef<Pose | null>(null);
-  const cameraRef = useRef<MediaPipeCamera | null>(null);
   const rafRef = useRef<number>(0);
+  const inFlightRef = useRef(false);
+  const loopActiveRef = useRef(false);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -197,12 +199,8 @@ export default function WebcamFeed({ onMetrics }: Props) {
       clearTimeout(resultsTimerRef.current);
       resultsTimerRef.current = null;
     }
-    try {
-      cameraRef.current?.stop();
-    } catch {
-      // camera_utils stop may throw if never started
-    }
-    cameraRef.current = null;
+    loopActiveRef.current = false;
+    inFlightRef.current = false;
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -355,11 +353,9 @@ export default function WebcamFeed({ onMetrics }: Props) {
           }`
         );
       }
-      await Promise.all([loadScript(POSE_CDN), loadScript(CAMERA_CDN)]);
+      await loadScript(POSE_CDN);
       if (isStale()) return;
       if (!window.Pose) throw new Error("MediaPipe Pose unavailable");
-      if (!window.Camera)
-        throw new Error("MediaPipe camera_utils unavailable");
 
       const canvasEl = canvasRef.current;
       canvasEl
@@ -370,7 +366,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
       let stream: MediaStream;
       try {
         const gumPromise = navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: "user",
+          },
         });
         // stop the tracks if the grant resolves after the timeout/mode change
         gumPromise
@@ -435,34 +435,50 @@ export default function WebcamFeed({ onMetrics }: Props) {
       poseRef.current = pose;
 
       const canvas = canvasRef.current;
-      video.onloadedmetadata = () => {
-        if (canvas && video.videoWidth && video.videoHeight) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-        }
-      };
       if (canvas && video.videoWidth && video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
 
-      const camera = new window.Camera(video, {
-        onFrame: async () => {
-          await pose.send({ image: video });
-        },
-        width: 640,
-        height: 480,
-      });
-      await withTimeout(camera.start(), 20_000, "Camera start");
-      if (isStale()) {
-        try {
-          camera.stop();
-        } catch {
-          // not started
-        }
-        return;
+      // own inference loop: rVFC when available, else rAF
+      const startLoop = () => {
+        if (isStale()) return;
+        loopActiveRef.current = true;
+        const v = video as VideoWithRVFC;
+        const schedule = () => {
+          if (v.requestVideoFrameCallback) {
+            v.requestVideoFrameCallback(tick);
+          } else {
+            rafRef.current = requestAnimationFrame(tick);
+          }
+        };
+        const tick = async () => {
+          if (!loopActiveRef.current || isStale()) return;
+          if (video.readyState >= 2 && !inFlightRef.current) {
+            inFlightRef.current = true;
+            try {
+              await pose.send({ image: video });
+            } catch {
+              // transient inference failure; keep looping
+            } finally {
+              inFlightRef.current = false;
+            }
+          }
+          schedule();
+        };
+        schedule();
+      };
+      if (video.readyState >= 1) {
+        startLoop();
+      } else {
+        video.onloadedmetadata = () => {
+          if (canvas && video.videoWidth && video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
+          startLoop();
+        };
       }
-      cameraRef.current = camera;
 
       resultsTimerRef.current = setTimeout(() => {
         if (isStale()) return;
@@ -717,11 +733,11 @@ export default function WebcamFeed({ onMetrics }: Props) {
       <div className="relative aspect-video overflow-hidden rounded-lg bg-slate-950">
         <video
           ref={videoRef}
-          className={`absolute inset-0 h-full w-full -scale-x-100 object-cover ${
-            simulated ? "hidden" : ""
-          }`}
+          autoPlay
           muted
           playsInline
+          className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+          style={{ display: simulated ? "none" : "block" }}
         />
         {!simulated && cameraBlocked && (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
@@ -764,7 +780,7 @@ export default function WebcamFeed({ onMetrics }: Props) {
           ref={canvasRef}
           width={640}
           height={360}
-          className={`h-full w-full ${
+          className={`pointer-events-none h-full w-full ${
             simulated ? "" : "absolute inset-0 -scale-x-100 object-cover"
           }`}
         />
