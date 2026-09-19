@@ -739,12 +739,12 @@ export default function WebcamFeed({ onMetrics }: Props) {
           setUploadCaption(
             `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
           );
-          onMetricsRef.current(analysis.metrics, "upload");
         } else {
           setUploadCaption(
             `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
           );
         }
+        onMetricsRef.current(analysis.metrics, "upload");
       } catch (err) {
         if (
           (err instanceof DOMException && err.name === "AbortError") ||

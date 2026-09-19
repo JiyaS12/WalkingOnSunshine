@@ -107,13 +107,14 @@ export default function Home() {
       if (source === "simulated") return;
       const label = source === "upload" ? "Upload" : "Live";
       setSessions((prev) => {
+        const rest = prev.filter((s) => s.label !== label);
+        if (source === "upload" && !m.gait_detected) return rest;
         const point: TrendSession = {
           label,
           asymmetry_pct: m.asymmetry_pct,
           fall_risk_score: m.fall_risk_score,
           stride_length_m: m.stride_length_m,
         };
-        const rest = prev.filter((s) => s.label !== label);
         return [...rest, point];
       });
     },
