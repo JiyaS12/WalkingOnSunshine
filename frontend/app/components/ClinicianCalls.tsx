@@ -9,7 +9,7 @@ interface Props {
   onAuthFailure: (error: unknown) => boolean;
 }
 
-const controlClass = "rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-sm disabled:opacity-50";
+const controlClass = "min-w-0 max-w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-sm disabled:opacity-50";
 
 export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
   const [calls, setCalls] = useState(patient.calls ?? []);
@@ -133,7 +133,7 @@ export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
       <h3 className="font-semibold">Voice follow-up</h3>
       <p className="text-xs text-muted-foreground">Select the patient&apos;s confirmed condition. Do not infer it from complaints or demographics.</p>
       <div className="flex flex-wrap items-end gap-2">
-        <label className="grid gap-1 text-xs">
+        <label className="grid min-w-0 max-w-full gap-1 text-xs">
           Condition
           <select aria-label="Condition" className={controlClass} value={condition} disabled={busy || blocked}
             onChange={(event) => setCondition(event.target.value as ConditionCategory | "")}>
@@ -153,7 +153,7 @@ export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
           })}>Save condition</button>
       </div>
       <form onSubmit={startCall} className="flex flex-wrap items-end gap-2">
-        <label className="grid gap-1 text-xs">
+        <label className="grid min-w-0 max-w-full gap-1 text-xs">
           Destination phone (E.164)
           <input aria-label="Destination phone (E.164)" type="tel" autoComplete="off" value={phone}
             onChange={(event) => setPhone(event.target.value)} required pattern="\+[1-9][0-9]{7,14}" maxLength={16}

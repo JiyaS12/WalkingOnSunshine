@@ -451,7 +451,7 @@ export default function DoctorPortal() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border-0 bg-muted px-3 py-1.5 text-xs text-muted-foreground shadow-pillow-inset">
             {session?.username}
           </span>
@@ -472,7 +472,7 @@ export default function DoctorPortal() {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
           <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
             <Search className="h-4 w-4 text-muted-foreground" />
@@ -588,7 +588,7 @@ export default function DoctorPortal() {
             </h2>
           </div>
           <div className="p-5">
-          <div className="mb-4 flex items-center justify-between text-xs">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs">
             <p className="text-muted-foreground">
               {record
                 ? `${record.name ?? record.patient_id} · ${record.patient_id}${
@@ -622,8 +622,8 @@ export default function DoctorPortal() {
             <ClinicianCalls key={record.patient_id} patient={record} onAuthFailure={handleAuthFailure} />
           )}
           {record && (
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="min-w-0 break-words rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Subjective — Phone Survey
                 </h3>
@@ -634,7 +634,7 @@ export default function DoctorPortal() {
                 )}
               </div>
 
-              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+              <div className="min-w-0 break-words rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Objective — Gait Analysis
                 </h3>
@@ -687,7 +687,7 @@ export default function DoctorPortal() {
                 )}
               </div>
 
-              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+              <div className="min-w-0 break-words rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   AI Clinical Summary
                 </h3>
@@ -727,7 +727,7 @@ export default function DoctorPortal() {
             </div>
           )}
           {record && (
-            <section aria-label="Clinical history" className="mt-4 space-y-3 text-xs">
+            <section aria-label="Clinical history" className="mt-4 space-y-3 break-words text-xs">
               <h3 className="font-semibold">Clinical history</h3>
               {[...record.surveys].reverse().map((survey, index) => (
                 <details key={survey.survey_id ?? `${survey.recorded_at}-${index}`} className="rounded-2xl border border-border p-3">
