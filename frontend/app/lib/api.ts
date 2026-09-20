@@ -21,9 +21,11 @@ export type JointFrame = Record<string, number[]>;
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -34,19 +36,65 @@ export interface SummaryResponse {
   estimated_tokens_saved: number;
 }
 
+export interface SummaryCacheStats {
+  entries: number;
+  cache_hits: number;
+  estimated_tokens_saved: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, init);
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    credentials: "include",
+  });
   if (!res.ok) {
     let detail = `API ${path} failed: ${res.status}`;
+    let code: string | undefined;
     try {
-      const body = (await res.json()) as { detail?: string };
+      const body = (await res.json()) as {
+        detail?: string | { code?: string; message?: string };
+      };
       if (typeof body.detail === "string") detail = body.detail;
+      if (body.detail && typeof body.detail === "object") {
+        if (body.detail.message) detail = body.detail.message;
+        code = body.detail.code;
+      }
     } catch {
       /* keep generic detail */
     }
-    throw new ApiError(detail || res.statusText, res.status);
+    throw new ApiError(detail || res.statusText, res.status, code);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+export interface ClinicianSession {
+  authenticated: true;
+  username: string;
+  expires_at: number;
+}
+
+export async function getClinicianSession(): Promise<ClinicianSession> {
+  return request<ClinicianSession>("/api/clinician/session");
+}
+
+export async function signInClinician(
+  username: string,
+  password: string
+): Promise<ClinicianSession> {
+  return request<ClinicianSession>("/api/clinician/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export async function signOutClinician(): Promise<void> {
+  return request<void>("/api/clinician/session", { method: "DELETE" });
+}
+
+export async function fetchSummaryCacheStats(): Promise<SummaryCacheStats> {
+  return request<SummaryCacheStats>("/api/summary-cache-stats");
 }
 
 export async function processFrames(

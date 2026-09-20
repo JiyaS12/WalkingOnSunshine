@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
   Copy,
   Loader2,
+  LogOut,
   Search,
+  ShieldCheck,
   Sparkles,
   Stethoscope,
   User,
@@ -13,16 +22,22 @@ import {
 import SkeletonReplay from "../components/SkeletonReplay";
 import TrendGraph, { TrendSession } from "../components/TrendGraph";
 import {
+  ApiError,
+  ClinicianSession,
   fetchPatient,
   fetchPatients,
   generateSynthesis,
+  getClinicianSession,
   GaitSession,
   PatientRecord,
   PatientSummary,
+  signInClinician,
+  signOutClinician,
   SummaryResponse,
 } from "../lib/api";
 
 type RiskFilter = "all" | "high" | "moderate" | "low";
+type AuthState = "checking" | "signed-out" | "signed-in" | "expired";
 
 function riskBand(score: number | null | undefined): string {
   if (score === null || score === undefined) return "none";
@@ -43,9 +58,15 @@ function riskBadge(score: number | null | undefined) {
 }
 
 export default function DoctorPortal() {
+  const [authState, setAuthState] = useState<AuthState>("checking");
+  const [session, setSession] = useState<ClinicianSession | null>(null);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
-  const [loadingList, setLoadingList] = useState(true);
+  const [loadingList, setLoadingList] = useState(false);
   const [query, setQuery] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const [dizzyOnly, setDizzyOnly] = useState(false);
@@ -66,6 +87,34 @@ export default function DoctorPortal() {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const clearProtectedData = useCallback(() => {
+    detailGenRef.current += 1;
+    synthGenRef.current += 1;
+    setPatients([]);
+    setSelectedId(null);
+    setRecord(null);
+    setSynthesis(null);
+    setListError(null);
+    setDetailError(null);
+    setSynthError(null);
+    setLoadingList(false);
+    setSynthLoading(false);
+    setLastSyncedAt(null);
+  }, []);
+
+  const handleAuthFailure = useCallback(
+    (error: unknown): boolean => {
+      if (!(error instanceof ApiError) || error.status !== 401) return false;
+      const expired = error.code === "session_expired";
+      setAuthState(expired ? "expired" : "signed-out");
+      setSession(null);
+      setAuthError(expired ? "Your clinician session expired. Sign in again." : null);
+      clearProtectedData();
+      return true;
+    },
+    [clearProtectedData]
+  );
+
   const loadList = useCallback((q: string, showSpinner = true) => {
     if (showSpinner) setLoadingList(true);
     fetchPatients(q || undefined)
@@ -75,11 +124,12 @@ export default function DoctorPortal() {
         setSelectedId((prev) => prev ?? (rows[0]?.patient_id ?? null));
         setLastSyncedAt(new Date());
       })
-      .catch((err) =>
-        setListError(err instanceof Error ? err.message : String(err))
-      )
+      .catch((err) => {
+        if (!handleAuthFailure(err))
+          setListError(err instanceof Error ? err.message : String(err));
+      })
       .finally(() => setLoadingList(false));
-  }, []);
+  }, [handleAuthFailure]);
 
   const loadDetail = useCallback((id: string, reset = true) => {
     const gen = ++detailGenRef.current;
@@ -100,17 +150,55 @@ export default function DoctorPortal() {
         }
       })
       .catch((err) => {
+        if (handleAuthFailure(err)) return;
         if (gen === detailGenRef.current)
           setDetailError(
             err instanceof Error ? err.message : String(err)
           );
       });
-  }, []);
+  }, [handleAuthFailure]);
 
-  useEffect(() => loadList(""), [loadList]);
+  useEffect(() => {
+    getClinicianSession()
+      .then((activeSession) => {
+        setSession(activeSession);
+        setAuthState("signed-in");
+        setAuthError(null);
+      })
+      .catch((err) => {
+        if (!handleAuthFailure(err)) {
+          setAuthState("signed-out");
+          setAuthError(err instanceof Error ? err.message : String(err));
+        }
+      });
+  }, [handleAuthFailure]);
+
+  useEffect(() => {
+    if (authState === "signed-in") loadList("");
+  }, [authState, loadList]);
+
+  useEffect(() => {
+    if (authState !== "signed-in" || !session) return;
+    const remainingMs = session.expires_at * 1000 - Date.now();
+    if (remainingMs <= 0) {
+      setAuthState("expired");
+      setSession(null);
+      setAuthError("Your clinician session expired. Sign in again.");
+      clearProtectedData();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAuthState("expired");
+      setSession(null);
+      setAuthError("Your clinician session expired. Sign in again.");
+      clearProtectedData();
+    }, Math.min(remainingMs, 2_147_000_000));
+    return () => clearTimeout(timer);
+  }, [authState, session, clearProtectedData]);
 
   // live sync: poll list + selected record every 5 s while the tab is visible
   useEffect(() => {
+    if (authState !== "signed-in") return;
     const tick = () => {
       if (document.visibilityState !== "visible") return;
       loadList(queryRef.current, false);
@@ -123,19 +211,20 @@ export default function DoctorPortal() {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [loadList, loadDetail]);
+  }, [authState, loadList, loadDetail]);
 
   useEffect(() => {
+    if (authState !== "signed-in") return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => loadList(query), 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, loadList]);
+  }, [authState, query, loadList]);
 
   useEffect(() => {
-    if (selectedId) loadDetail(selectedId);
-  }, [selectedId, loadDetail]);
+    if (authState === "signed-in" && selectedId) loadDetail(selectedId);
+  }, [authState, selectedId, loadDetail]);
 
   const filtered = useMemo(
     () =>
@@ -187,10 +276,43 @@ export default function DoctorPortal() {
       const result = await generateSynthesis(selectedId);
       if (gen === synthGenRef.current) setSynthesis(result);
     } catch (err) {
+      if (handleAuthFailure(err)) return;
       if (gen === synthGenRef.current)
         setSynthError(err instanceof Error ? err.message : String(err));
     } finally {
       if (gen === synthGenRef.current) setSynthLoading(false);
+    }
+  };
+
+  const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSigningIn(true);
+    setAuthError(null);
+    try {
+      const activeSession = await signInClinician(username, password);
+      setPassword("");
+      setSession(activeSession);
+      setAuthState("signed-in");
+    } catch (err) {
+      setAuthState("signed-out");
+      setAuthError(err instanceof Error ? err.message : "Sign-in failed");
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOutClinician();
+      setAuthState("signed-out");
+      setSession(null);
+      setPassword("");
+      setAuthError(null);
+      clearProtectedData();
+    } catch (err) {
+      setListError(
+        `Sign-out failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   };
 
@@ -215,6 +337,76 @@ export default function DoctorPortal() {
     </div>
   );
 
+  if (authState === "checking") {
+    return (
+      <main className="flex min-h-screen items-center justify-center text-muted-foreground">
+        <p className="flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Checking clinician session…
+        </p>
+      </main>
+    );
+  }
+
+  if (authState !== "signed-in") {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="w-full max-w-sm rounded-[1.75rem] border-0 bg-card p-6 shadow-pillow">
+          <div className="mb-5 flex items-center gap-3">
+            <ShieldCheck className="h-8 w-8 text-pastel-bluedeep" />
+            <div>
+              <h1 className="text-xl font-bold">Clinician sign-in</h1>
+              <p className="text-xs text-muted-foreground">
+                Sign in to access protected patient records.
+              </p>
+            </div>
+          </div>
+          {authState === "expired" && (
+            <p role="alert" className="mb-3 rounded-2xl border-0 bg-pastel-peach/70 p-2 text-xs text-foreground">
+              Your clinician session expired. Sign in again.
+            </p>
+          )}
+          <form onSubmit={handleSignIn} className="space-y-3">
+            <label className="block text-xs text-muted-foreground">
+              Username
+              <input
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-blue"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-blue"
+              />
+            </label>
+            {authError && authState !== "expired" && (
+              <p role="alert" className="text-xs text-[#9A4B32]">
+                {authError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={signingIn || !username || !password}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-bluedeep disabled:opacity-50"
+            >
+              {signingIn && <Loader2 className="h-4 w-4 animate-spin" />}
+              {signingIn ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+          <Link href="/" className="mt-4 block text-center text-xs text-muted-foreground hover:text-foreground">
+            Return to patient view
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen p-6 text-foreground">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -227,13 +419,25 @@ export default function DoctorPortal() {
             </p>
           </div>
         </div>
-        <Link
-          href="/"
-          className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
-        >
-          <User className="h-3.5 w-3.5 text-muted-foreground" />
-          Patient view
-        </Link>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border-0 bg-muted px-3 py-1.5 text-xs text-muted-foreground shadow-pillow-inset">
+            {session?.username}
+          </span>
+          <button
+            onClick={() => void handleSignOut()}
+            className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
+          >
+            <LogOut className="h-3.5 w-3.5 text-muted-foreground" />
+            Sign out
+          </button>
+          <Link
+            href="/"
+            className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
+          >
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+            Patient view
+          </Link>
+        </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">

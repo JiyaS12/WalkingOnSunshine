@@ -6,6 +6,7 @@ import os
 import secrets
 import tempfile
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from fastapi import (
     Depends,
@@ -14,15 +15,17 @@ from fastapi import (
     Header,
     HTTPException,
     Path,
+    Request,
     Response,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 from typing_extensions import Annotated
 
 import agent
+import clinician_auth
 import patient_access
 import store
 from processor import GaitMetrics, GaitProcessor, validate_frames
@@ -39,13 +42,204 @@ else:
 
 app = FastAPI(title="GaitGuard AI")
 
+
+def _cors_origins(raw: str | None = None) -> list[str]:
+    value = raw
+    if value is None:
+        value = os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        )
+    origins = list(
+        dict.fromkeys(
+            part.strip().rstrip("/")
+            for part in value.split(",")
+            if part.strip()
+        )
+    )
+    if "*" in origins:
+        raise RuntimeError(
+            "CORS_ALLOWED_ORIGINS cannot contain '*' when credentials are enabled"
+        )
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError(
+                "CORS_ALLOWED_ORIGINS entries must be exact http(s) origins"
+            )
+    return origins
+
+
+_ALLOWED_CORS_ORIGINS = _cors_origins()
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Survey-Token"],
 )
+
+
+_MAX_LOGIN_BODY_BYTES = 4096
+
+
+class ClinicianLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+def _auth_config() -> clinician_auth.AuthConfig:
+    try:
+        return clinician_auth.get_auth_config()
+    except clinician_auth.AuthConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "auth_unavailable",
+                "message": "Clinician sign-in is unavailable",
+            },
+        ) from exc
+
+
+def _auth_error(code: str) -> HTTPException:
+    message = (
+        "Clinician session expired"
+        if code == "session_expired"
+        else "Clinician authentication required"
+    )
+    return HTTPException(
+        status_code=401,
+        detail={"code": code, "message": message},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _check_browser_origin(request: Request) -> None:
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") not in _ALLOWED_CORS_ORIGINS:
+        raise HTTPException(status_code=403, detail="request origin is not allowed")
+
+
+def require_clinician(
+    request: Request, response: Response
+) -> clinician_auth.ClinicianSession:
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        _check_browser_origin(request)
+    config = _auth_config()
+    try:
+        session = clinician_auth.verify_session(
+            request.cookies.get(clinician_auth.SESSION_COOKIE), config
+        )
+    except clinician_auth.SessionError as exc:
+        raise _auth_error(exc.code) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return session
+
+
+@app.post("/api/clinician/session")
+async def clinician_sign_in(request: Request, response: Response) -> dict:
+    _check_browser_origin(request)
+    config = _auth_config()
+    client_key = request.client.host if request.client else "unknown"
+    retry_after = clinician_auth.login_retry_after(client_key, config)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="too many sign-in attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > _MAX_LOGIN_BODY_BYTES:
+                raise HTTPException(
+                    status_code=413, detail="sign-in request is too large"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="invalid sign-in request"
+            ) from None
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_LOGIN_BODY_BYTES:
+            raise HTTPException(
+                status_code=413, detail="sign-in request is too large"
+            )
+    try:
+        credentials = ClinicianLogin.model_validate_json(bytes(body))
+    except ValidationError:
+        raise HTTPException(
+            status_code=400, detail="invalid sign-in request"
+        ) from None
+
+    if not clinician_auth.credentials_match(
+        credentials.username, credentials.password, config
+    ):
+        raise HTTPException(
+            status_code=401, detail="invalid clinician credentials"
+        )
+
+    clinician_auth.clear_login_failures(client_key)
+    token, expires_at = clinician_auth.create_session(config)
+    response.set_cookie(
+        key=clinician_auth.SESSION_COOKIE,
+        value=token,
+        max_age=config.session_ttl_seconds,
+        httponly=True,
+        secure=config.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "authenticated": True,
+        "username": config.username,
+        "expires_at": expires_at,
+    }
+
+
+@app.get("/api/clinician/session")
+def clinician_session_status(
+    response: Response,
+    session: clinician_auth.ClinicianSession = Depends(require_clinician),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "authenticated": True,
+        "username": session.username,
+        "expires_at": session.expires_at,
+    }
+
+
+@app.delete("/api/clinician/session", status_code=204)
+def clinician_sign_out(request: Request, response: Response) -> None:
+    _check_browser_origin(request)
+    try:
+        config = clinician_auth.get_auth_config()
+        secure = config.cookie_secure
+    except clinician_auth.AuthConfigurationError:
+        secure = False
+    response.delete_cookie(
+        key=clinician_auth.SESSION_COOKIE,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
 
 
 class ProcessFrameRequest(BaseModel):
@@ -73,7 +267,9 @@ def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-@app.post("/api/generate-summary")
+@app.post(
+    "/api/generate-summary", dependencies=[Depends(require_clinician)]
+)
 def generate_summary(body: SummaryRequest) -> dict:
     try:
         record = store.get_patient(body.patient_id)
@@ -91,7 +287,9 @@ def generate_summary(body: SummaryRequest) -> dict:
     )
 
 
-@app.get("/api/summary-cache-stats")
+@app.get(
+    "/api/summary-cache-stats", dependencies=[Depends(require_clinician)]
+)
 def summary_cache_stats() -> dict:
     return agent.cache_stats()
 
@@ -226,12 +424,14 @@ def submit_survey(body: SurveyPayload, response: Response) -> dict:
         ) from exc
 
 
-@app.get("/api/patients")
+@app.get("/api/patients", dependencies=[Depends(require_clinician)])
 def list_patients(q: str | None = None) -> list[dict]:
     return store.list_patients(q)
 
 
-@app.get("/api/patients/{pid}")
+@app.get(
+    "/api/patients/{pid}", dependencies=[Depends(require_clinician)]
+)
 def get_patient(pid: str) -> dict:
     try:
         return store.get_patient(pid)
@@ -278,7 +478,10 @@ def _store_patient_session(pid: str, body: SessionPayload) -> dict:
         ) from exc
 
 
-@app.post("/api/patients/{pid}/sessions")
+@app.post(
+    "/api/patients/{pid}/sessions",
+    dependencies=[Depends(require_clinician)],
+)
 def add_patient_session(pid: str, body: SessionPayload) -> dict:
     return _store_patient_session(pid, body)
 
@@ -346,7 +549,10 @@ def add_patient_session_with_access(
 _PID_PATH = Path(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-@app.post("/api/patients/{pid}/ensure-demo")
+@app.post(
+    "/api/patients/{pid}/ensure-demo",
+    dependencies=[Depends(require_clinician)],
+)
 def ensure_demo_patient(pid: str = _PID_PATH) -> dict:
     allow_create = not os.getenv("SURVEY_INGEST_TOKEN") or os.getenv(
         "ALLOW_DEMO_PATIENTS", ""
@@ -383,7 +589,10 @@ def ensure_demo_patient(pid: str = _PID_PATH) -> dict:
     return {"created": created, "patient": record}
 
 
-@app.post("/api/patients/{pid}/synthesis")
+@app.post(
+    "/api/patients/{pid}/synthesis",
+    dependencies=[Depends(require_clinician)],
+)
 def patient_synthesis(pid: str) -> dict:
     try:
         record = store.get_patient(pid)

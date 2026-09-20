@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import clinician_auth
 import store
 from main import app
 
@@ -13,9 +14,21 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def isolated_store(tmp_path):
+def isolated_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLINICIAN_USERNAME", "test-clinician")
+    monkeypatch.setenv("CLINICIAN_PASSWORD", "test-password")
+    monkeypatch.setenv("CLINICIAN_SESSION_SECRET", "s" * 32)
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    clinician_auth.reset_login_rate_limits()
+    client.cookies.clear()
+    login = client.post(
+        "/api/clinician/session",
+        json={"username": "test-clinician", "password": "test-password"},
+    )
+    assert login.status_code == 200
     store.reset_for_tests(tmp_path / "patients.json")
     yield
+    client.cookies.clear()
     store.reset_for_tests(store.CACHE_PATH)
 
 
