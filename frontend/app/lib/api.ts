@@ -218,6 +218,38 @@ export interface PatientAccessRecord {
   gait_sessions: GaitSession[];
 }
 
+export type DatabaseCall = Pick<CallRecord,
+  "call_id" | "patient_id" | "attempt_id" | "condition_category" | "call_status" |
+  "survey_status" | "survey_id" | "sms_status" | "sms_attempt" | "error_code" |
+  "created_at" | "updated_at" | "walking"
+> & { destination_phone: string | null };
+
+export type DatabaseWalk = Omit<GaitSession, "frames" | "frames_ref" | "idempotency_key" | "metrics"> & {
+  metrics: Partial<GaitMetrics>;
+  stored_frame_count: number;
+};
+
+export type DatabasePatient = Omit<PatientRecord, "calls" | "gait_sessions"> & {
+  calls: DatabaseCall[];
+  gait_sessions: DatabaseWalk[];
+};
+
+export interface DatabaseSnapshot {
+  source: "supabase" | "json";
+  read_only: true;
+  read_at: string;
+  totals: { patients: number; calls: number; surveys: number; walking: number };
+  total: number;
+  offset: number;
+  limit: number;
+  patients: DatabasePatient[];
+}
+
+export function fetchDatabaseSnapshot(query: string, offset: number, signal?: AbortSignal) {
+  const params = new URLSearchParams({ q: query, offset: String(offset), limit: "25" });
+  return request<DatabaseSnapshot>(`/api/clinician/database?${params}`, { signal: boundedSignal(signal) });
+}
+
 export interface PatientSessionInput {
   call_id?: string | null;
   attempt_id?: string | null;

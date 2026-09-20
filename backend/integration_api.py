@@ -4,8 +4,9 @@ import os
 import secrets
 from collections.abc import Callable
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 
+import database_view
 import patient_access
 import store
 from integration_models import (
@@ -53,6 +54,17 @@ def create_router(clinician_auth: Callable, patient_auth: Callable) -> APIRouter
     clinician = [Depends(clinician_auth)]
     service = [Depends(require_service_token)]
     patient = [Depends(patient_auth)]
+
+    @router.get("/api/clinician/database", dependencies=clinician)
+    def clinician_database(
+        q: str = Query(default="", max_length=200),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=25, ge=1, le=100),
+    ) -> dict:
+        try:
+            return database_view.snapshot(q, offset, limit)
+        except store.StoreUnavailable as exc:
+            raise HTTPException(503, "Database unavailable. No local fallback was used.", headers={"Cache-Control": "no-store"}) from exc
 
     @router.patch("/api/patients/{pid}/condition", dependencies=clinician)
     def set_condition(pid: str, body: ConditionInput) -> dict:
