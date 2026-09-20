@@ -398,6 +398,12 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
     )
 
 
+def readback_text(question, value: str) -> str:
+    """Check a label the recognizer was unsure it heard, without re-reading the scale."""
+
+    return f"I think I heard {value} for your {question.topic}. Is that right?"
+
+
 def clarification_text(
     question, acknowledgment=None, *, include_options: bool = True, attempt: int = 0
 ) -> str:
