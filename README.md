@@ -181,6 +181,21 @@ clinician credentials or access tokens to the frontend environment. For cookie
 delivery, deploy the frontend and API on the same site and list the frontend's
 exact origin in `CORS_ALLOWED_ORIGINS`.
 
+## Quick local demo
+
+Quickest path (macOS/Linux, needs Python 3.11 or 3.12 and Node 20):
+
+```bash
+git clone https://github.com/JiyaS12/WalkingOnSunshine.git
+cd WalkingOnSunshine
+./demo.sh
+```
+
+`demo.sh` creates the virtualenv, installs both sides, writes a local
+`backend/.env` with demo clinician credentials and random secrets, starts both
+servers, and prints the clinician login plus a signed link for the seeded demo
+patient. For the manual signed-link flow, see below.
+
 ## Local-only signed-link demo
 
 The public home page never lists patients, accepts arbitrary IDs, or creates

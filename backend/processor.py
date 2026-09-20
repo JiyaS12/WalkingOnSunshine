@@ -3,12 +3,21 @@
 Consumes MediaPipe-style world-coordinate joint positions (meters, y vertical
 with larger y = higher) and produces clinical gait metrics.
 
-Fall risk is normalized by estimated leg length rather than absolute
-geriatric thresholds: normal symmetric gait (stride ~= 1.4-1.6x leg length,
-knee flexion ROM ~= 50-65 deg) should score < 0.15, and standing still is not
-flagged as gait. MediaPipe world coordinates are hip-centred, so velocity
-degradation is estimated from ankle swing speed for live input (hip
-translation only shows for the translating mock-cohort sessions).
+Fall risk is a logistic regression over biomechanical features:
+
+    ln(p / (1 - p)) = b0 + b1*V_COM + b2*theta_knee + b3*M_knee + b4*omega_knee + ...
+
+where V_COM is centre-of-mass (hip midpoint) velocity, theta_knee the knee
+flexion range of motion, M_knee a mass-normalised knee-moment proxy
+(shank inertia x knee angular acceleration, since a camera gives no ground
+reaction force) and omega_knee the peak knee angular velocity. The trailing
+terms carry the gait-quality features the clinician report already shows
+(stance/ROM asymmetry, within-walk velocity degradation). Normal symmetric
+gait (V ~= 1.2 m/s, ROM ~= 50-65 deg) scores < 0.15; standing still is not
+flagged as gait and gets the intercept-only baseline. MediaPipe world
+coordinates are hip-centred, so V_COM falls back to ankle swing speed for
+live input (hip translation only shows for the translating mock-cohort
+sessions).
 """
 
 from __future__ import annotations
@@ -31,6 +40,21 @@ _EPS = 1e-9
 # above this share of frames missing a joint the clip is too sparse to score
 _MAX_DROPPED_PCT = 50.0
 
+# Logistic fall-risk coefficients (feature units in comments). Calibrated so
+# healthy reference gait (1.2 m/s, 55 deg ROM, 250 deg/s, low moment proxy)
+# scores ~0.1 and the impaired mock cohort scores > 0.6.
+FALL_RISK_BETA = {
+    "intercept": 3.8,
+    "v_com": -2.4,  # per m/s
+    "theta_knee": -0.05,  # per deg of knee flexion ROM
+    "m_knee": 0.9,  # per unit of mass-normalised moment proxy (m^2/s^2)
+    "omega_knee": -0.002,  # per deg/s peak knee angular velocity
+    "asymmetry": 0.06,  # per % stance/ROM asymmetry
+    "velocity_degradation": 0.05,  # per % within-walk slowdown
+}
+# shank+foot ~ 6% of body mass, radius of gyration ~ 0.3 x shank length
+_SHANK_INERTIA_FRACTION = 0.06 * 0.3**2
+
 
 class GaitMetrics(BaseModel):
     stride_length_m: float
@@ -45,6 +69,10 @@ class GaitMetrics(BaseModel):
     peak_ankle_speed_mps: float
     gait_detected: bool
     dropped_frame_pct: float = 0.0
+    # None when the metrics came from a client that predates the model
+    com_velocity_mps: float | None = None
+    knee_angular_velocity_dps: float | None = None
+    knee_moment_proxy: float | None = None
 
 
 def validate_frames(frames: list[dict[str, list[float]]]) -> None:
@@ -66,6 +94,27 @@ def validate_frames(frames: list[dict[str, list[float]]]) -> None:
 
 def _sigmoid(z: float) -> float:
     return 1.0 / (1.0 + np.exp(-z))
+
+
+def fall_risk_logit(
+    v_com: float,
+    theta_knee: float,
+    m_knee: float,
+    omega_knee: float,
+    asymmetry_pct: float = 0.0,
+    velocity_degradation_pct: float = 0.0,
+) -> float:
+    """ln(p/(1-p)) for the fall-risk logistic model."""
+    b = FALL_RISK_BETA
+    return (
+        b["intercept"]
+        + b["v_com"] * v_com
+        + b["theta_knee"] * theta_knee
+        + b["m_knee"] * m_knee
+        + b["omega_knee"] * omega_knee
+        + b["asymmetry"] * asymmetry_pct
+        + b["velocity_degradation"] * velocity_degradation_pct
+    )
 
 
 class GaitProcessor:
@@ -175,6 +224,88 @@ class GaitProcessor:
         flex = self._knee_flexion(side)
         return float(np.percentile(flex, 95) - np.percentile(flex, 5))
 
+    def _knee_angular_velocity(self, side: str) -> np.ndarray:
+        """Per-frame |d(theta_knee)/dt| (deg/s)."""
+        return np.abs(np.diff(self._knee_flexion(side))) * self.fps
+
+    def _peak_knee_angular_velocity(self) -> float:
+        return float(
+            np.mean(
+                [
+                    np.percentile(self._knee_angular_velocity(s), 95)
+                    for s in ("left", "right")
+                ]
+            )
+        )
+
+    def _knee_moment_proxy(self) -> float:
+        """Mass-normalised knee moment proxy (m^2/s^2): I/m * |alpha_knee|.
+
+        Without ground reaction forces the inertial term of inverse dynamics
+        is all the camera can see: shank inertia (per kg body mass) times the
+        knee angular acceleration, averaged over the walk.
+        """
+        shank = float(
+            np.mean(
+                [
+                    np.linalg.norm(
+                        self._joint_array(f"{s}_knee")
+                        - self._joint_array(f"{s}_ankle"),
+                        axis=1,
+                    ).mean()
+                    for s in ("left", "right")
+                ]
+            )
+        )
+        inertia = _SHANK_INERTIA_FRACTION * shank**2
+        accels = []
+        for side in ("left", "right"):
+            omega = np.radians(np.diff(self._knee_flexion(side)) * self.fps)
+            if len(omega) < 2:
+                continue
+            smoothed = (
+                pd.Series(omega).rolling(window=3, min_periods=1).mean().to_numpy()
+            )
+            accels.append(np.mean(np.abs(np.diff(smoothed) * self.fps)))
+        if not accels:
+            return 0.0
+        return float(inertia * np.mean(accels))
+
+    def _hip_midpoint(self) -> np.ndarray:
+        return (self._joint_array("left_hip") + self._joint_array("right_hip")) / 2.0
+
+    def _hips_translate(self) -> bool:
+        """Whether the hip midpoint actually moves through space.
+
+        Hip-centred input (live MediaPipe world coordinates) keeps the midpoint
+        near the origin apart from tracker jitter. Judge by the horizontal
+        range of a ~0.5 s smoothed midpoint, which jitter cannot inflate no
+        matter how long the clip runs.
+        """
+        mid = self._hip_midpoint()
+        window = max(1, int(round(0.5 * self.fps)))
+        smoothed = (
+            pd.DataFrame(mid[:, [0, 2]])
+            .rolling(window=window, min_periods=1)
+            .mean()
+            .to_numpy()
+        )
+        extent = float(np.linalg.norm(np.ptp(smoothed, axis=0)))
+        return extent >= 0.1 * self.leg_length_m
+
+    def _com_velocity(self) -> float:
+        """Mean hip-midpoint speed (m/s); ankle-swing proxy for hip-centred input."""
+        step = np.linalg.norm(np.diff(self._hip_midpoint(), axis=0), axis=1)
+        if not self._hips_translate():
+            # relative to the hips a foot moves backward at ~v in stance and
+            # forward at ~2v in swing (plus lift), so its time-averaged speed
+            # is ~2x the centre-of-mass velocity
+            step = (
+                np.linalg.norm(np.diff(self._joint_array("left_ankle"), axis=0), axis=1)
+                + np.linalg.norm(np.diff(self._joint_array("right_ankle"), axis=0), axis=1)
+            ) / 4.0
+        return float(np.mean(step) * self.fps)
+
     def _ankle_speed(self, side: str) -> np.ndarray:
         """Per-frame |Δankle| * fps (m/s)."""
         ankle = self._joint_array(f"{side}_ankle")
@@ -222,16 +353,13 @@ class GaitProcessor:
         return abs(left - right) / max(mean, _EPS) * 100.0
 
     def _velocity_degradation_pct(self) -> float:
-        left_hip = self._joint_array("left_hip")
-        right_hip = self._joint_array("right_hip")
-        mid = (left_hip + right_hip) / 2.0  # (n, 3)
+        mid = self._hip_midpoint()  # (n, 3)
         dx = np.diff(mid[:, 0])
         dz = np.diff(mid[:, 2])
         speed = np.sqrt(dx**2 + dz**2) * self.fps
         # hip-centred inputs (live MediaPipe world coords) barely translate;
         # fall back to mean ankle swing speed as the velocity proxy
-        path = float(np.sum(np.linalg.norm(np.diff(mid, axis=0), axis=1)))
-        if path < 0.05 * self.leg_length_m:
+        if not self._hips_translate():
             speed = (
                 self._ankle_speed("left") + self._ankle_speed("right")
             ) / 2.0
@@ -291,23 +419,26 @@ class GaitProcessor:
         cadence = len(peaks) / duration_min if duration_min > 0 else 0.0
 
         stride_ratio = stride / self.leg_length_m
-        stride_deficit = float(np.clip((1.4 - stride_ratio) / 0.4, 0.0, 2.0))
-        knee_deficit = float(np.clip((40.0 - knee_rom) / 30.0, 0.0, 1.0))
-        if not gait_detected:
+        v_com = self._com_velocity()
+        omega_knee = self._peak_knee_angular_velocity()
+        m_knee = self._knee_moment_proxy()
+        if gait_detected:
+            z = fall_risk_logit(
+                v_com=v_com,
+                theta_knee=knee_rom,
+                m_knee=m_knee,
+                omega_knee=omega_knee,
+                asymmetry_pct=asymmetry,
+                velocity_degradation_pct=vel_deg,
+            )
+        else:
+            # no walk to score: report the low-evidence baseline rather than
+            # the zero-velocity extreme of the model
             asymmetry = 0.0
             stride = 0.0
             stride_ratio = 0.0
             cadence = 0.0
-            stride_deficit = 0.0
-            knee_deficit = 0.0
-
-        z = (
-            1.5 * (asymmetry / 20.0)
-            + 1.2 * float(np.clip(vel_deg / 15.0, 0.0, 1.5))
-            + 1.5 * stride_deficit
-            + 1.0 * knee_deficit
-            - 3.0
-        )
+            z = -3.0
         score = round(float(np.clip(_sigmoid(z), 0.0, 1.0)), 3)
 
         return GaitMetrics(
@@ -323,4 +454,7 @@ class GaitProcessor:
             peak_ankle_speed_mps=round(peak_ankle_speed, 4),
             gait_detected=gait_detected,
             dropped_frame_pct=round(self.dropped_frame_pct, 2),
+            com_velocity_mps=round(v_com, 4),
+            knee_angular_velocity_dps=round(omega_knee, 2),
+            knee_moment_proxy=round(m_knee, 4),
         )

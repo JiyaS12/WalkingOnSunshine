@@ -17,6 +17,10 @@ export interface GaitMetrics {
   gait_detected: boolean;
   /** share of frames where a dropped landmark had to be interpolated */
   dropped_frame_pct: number;
+  /** logistic fall-risk model inputs; absent on sessions saved before the model */
+  com_velocity_mps?: number | null;
+  knee_angular_velocity_dps?: number | null;
+  knee_moment_proxy?: number | null;
 }
 
 export type JointFrame = Record<string, number[]>;
@@ -322,7 +326,7 @@ async function patientAccessRequest<T>(
     ...init,
     headers,
     cache: "no-store",
-    credentials: "omit",
+    credentials: API_URL === "" ? "same-origin" : "omit",
     referrerPolicy: "no-referrer",
   });
   if (!res.ok) {
