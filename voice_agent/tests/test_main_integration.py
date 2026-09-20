@@ -1,0 +1,635 @@
+"""Offline contract checks against the authoritative backend's real JSON store."""
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import httpx
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from starlette.datastructures import FormData
+
+import phone_app
+from app.generic_intake import GenericIntake, parse_value
+from app.integrated_service import IntegratedService
+from app.integrated_session import IntegratedSession
+from app.integration_contract import CallStart, SMSRetry
+from app.main_backend import BackendError, MainBackend
+from app.operator_auth import OperatorAuth
+from app.phone_receipts import ReceiptStore
+from app.telephony.config import load_settings
+from app.telephony.integrated_provider import FakePhoneProvider, ProviderUnknown, TwilioProvider
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from backend import store  # noqa: E402
+from backend.integration_models import ConditionSurvey, PhoneSnapshot  # noqa: E402
+
+TOKEN = "offline-operator-token-1234"
+SERVICE_TOKEN = "offline-service-token"
+ENV = {
+    "DEEPGRAM_API_KEY": "offline",
+    "TWILIO_ACCOUNT_SID": "ACoffline",
+    "TWILIO_AUTH_TOKEN": "offline-signature-token",
+    "TWILIO_FROM_NUMBER": "+15005550006",
+    "PUBLIC_BASE_URL": "https://phone.example.test",
+}
+
+
+class MainHarness:
+    def __init__(self, path):
+        store.upsert_survey({"patient_id": "patient1", "submission_kind": "manual"})
+        call, _ = store.reserve_call("patient1", "request-1234567890", "orthopedic", "main-fingerprint")
+        self.payload = CallStart(
+            patient_id="patient1", call_id=call["call_id"], attempt_id=call["attempt_id"],
+            request_id=call["request_id"], condition_category="orthopedic", to_number="+14155550123",
+        )
+        self.url = "https://patient.example.test/patient/patient1?token=MAIN-CANONICAL-TOKEN"
+        self.submissions = []
+        self.snapshots = []
+        self.paths = []
+        self.submit_error = 0
+        self.lose_response = False
+        self.walks = []
+        self.block_walk = False
+        self.walk_requested = asyncio.Event()
+        self.provider = FakePhoneProvider()
+        self.backend = MainBackend(
+            "http://127.0.0.1:8000", SERVICE_TOKEN, transport=httpx.MockTransport(self.request),
+        )
+        self.path = path / "receipts.sqlite3"
+        self.service = IntegratedService(
+            self.backend, self.provider, ReceiptStore(self.path), TOKEN, ENV["PUBLIC_BASE_URL"],
+        )
+        self.spoken = []
+
+    async def request(self, request):
+        assert request.headers["X-Survey-Token"] == SERVICE_TOKEN
+        self.paths.append(request.url.path)
+        prefix = f"/api/integration/patients/patient1/calls/{self.payload.call_id}"
+        try:
+            if request.url.path == "/api/integration/patients/patient1":
+                return httpx.Response(200, json=store.get_patient("patient1"))
+            if request.url.path == prefix:
+                return httpx.Response(200, json={"call": store.get_call("patient1", self.payload.call_id)})
+            if request.url.path == prefix + "/status":
+                snapshot = PhoneSnapshot.model_validate_json(request.content).model_dump()
+                call = store.apply_phone_snapshot("patient1", self.payload.call_id, snapshot)
+                self.snapshots.append(snapshot)
+                return httpx.Response(200, json={"call": call})
+            if request.url.path == "/api/submit-survey":
+                payload = json.loads(request.content)
+                self.submissions.append(payload)
+                if self.submit_error:
+                    return httpx.Response(self.submit_error)
+                ConditionSurvey.model_validate(payload["condition_survey"])
+                store.upsert_survey(payload)
+                if self.lose_response:
+                    raise httpx.ReadTimeout("Synthetic lost response")
+                return httpx.Response(200, json={
+                    "status": "stored", "patient_url": self.url,
+                    "patient_access_expires_at": "2099-01-01T00:00:00Z",
+                })
+            if request.url.path == prefix + "/walking":
+                self.walk_requested.set()
+                if self.block_walk:
+                    await asyncio.Event().wait()
+                if self.walks:
+                    return httpx.Response(200, json=self.walks.pop(0))
+                return httpx.Response(200, json=store.walking_view(store.get_call("patient1", self.payload.call_id)))
+        except store.Conflict:
+            return httpx.Response(409)
+        raise AssertionError(f"Unexpected backend path: {request.url.path}")
+
+    async def session(self, **options):
+        await self.service.start(self.payload)
+        call = await self.service.begin_stream(self.payload.call_id, "CAfake1")
+
+        async def speak(text):
+            self.spoken.append(text)
+
+        session = IntegratedSession(self.service, call, speak, poll_seconds=0.001, wait_seconds=0.2, **options)
+        await session.begin()
+        return session
+
+    def view(self, status, sequence, last_event=None, session_id=None):
+        return {
+            "call_id": self.payload.call_id, "attempt_id": self.payload.attempt_id,
+            "version": sequence + 1, "survey_status": "stored", "status": status,
+            "last_sequence": sequence, "last_event": last_event, "session_id": session_id,
+        }
+
+
+@pytest.fixture
+def harness(tmp_path):
+    with patch.multiple(store, _patients={}, _cache_path=tmp_path / "main.json"):
+        value = MainHarness(tmp_path)
+        yield value
+        value.service.store.close()
+
+
+async def say(session, text):
+    session.add_transcript(text)
+    return await session.flush_utterance()
+
+
+async def answer_survey(session, *, unknown=False):
+    for text in (["unknown"] * 7 if unknown else ["7", "2", "yes", "fell on stairs", "no", "none", "hip pain; trouble walking"]):
+        await say(session, text)
+        await say(session, "yes")
+    for _ in range(6):
+        await say(session, "mild")
+
+
+def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        payload = harness.submissions[0]
+        assert payload["pain_scale"] == 7
+        assert payload["fall_history"] == {
+            "falls_last_6_months": 2, "injured": True, "last_fall_description": "fell on stairs",
+        }
+        assert payload["dizziness"] is False
+        assert payload["primary_complaints"] == ["hip pain", "trouble walking"]
+        assert len(payload["condition_survey"]["answers"]) == 6
+        assert {answer["normalized_value"] for answer in payload["condition_survey"]["answers"]} == {"mild"}
+        assert harness.url in harness.provider.last_body
+        assert harness.service.receipt(session.call.call_id).snapshot.survey_status == "stored"
+        assert harness.url not in harness.path.read_bytes().decode(errors="ignore")
+        assert "MAIN-CANONICAL-TOKEN" not in json.dumps([r.model_dump() for r in harness.service.store.all()])
+        await harness.service.retry_submission(session.call.call_id)
+        assert len(store.get_patient("patient1")["surveys"]) == 2
+        assert harness.provider.messages == 1
+        assert harness.submissions[0] == harness.submissions[1]
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_unknown_intake_never_derived_from_condition_answers(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session, unknown=True)
+        await harness.walk_requested.wait()
+        payload = harness.submissions[0]
+        assert payload["pain_scale"] is None
+        assert payload["dizziness"] is None
+        assert payload["primary_complaints"] is None
+        assert all(value is None for value in payload["fall_history"].values())
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_stroke_call_uses_captured_condition_and_stroke_ids(harness):
+    async def scenario():
+        await harness.service.start(harness.payload)
+        await harness.service.end(harness.payload.call_id, "stopped", "stopped")
+        call, _ = store.reserve_call("patient1", "stroke-request-123456", "stroke", "stroke-fingerprint")
+        harness.payload = CallStart(
+            patient_id="patient1", call_id=call["call_id"], attempt_id=call["attempt_id"],
+            request_id=call["request_id"], condition_category="stroke", to_number="+14155550123",
+        )
+        snapshot = await harness.service.start(harness.payload)
+        registered = await harness.service.begin_stream(harness.payload.call_id, snapshot.provider_call_id)
+
+        async def speak(text):
+            harness.spoken.append(text)
+
+        session = IntegratedSession(harness.service, registered, speak, poll_seconds=0.001)
+        await session.begin()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        condition = harness.submissions[0]["condition_survey"]
+        assert condition["instrument"] == "stroke_mobility"
+        assert {a["question_id"] for a in condition["answers"]} == {
+            "stroke_balance", "stroke_weakness", "stroke_stairs", "stroke_turning",
+            "stroke_walking", "stroke_recovery",
+        }
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_stop_during_unconfirmed_intake_never_submits(harness):
+    async def scenario():
+        session = await harness.session()
+        await say(session, "7")
+        await say(session, "stop")
+        assert session.finished
+        assert not session.generic.values
+        assert harness.submissions == []
+        assert harness.provider.messages == 0
+        assert store.get_call("patient1", session.call.call_id)["survey_status"] == "stopped"
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("kind,text", [
+    ("pain", "moderate"), ("pain", "0"), ("pain", "11"), ("count", "-2"),
+    ("boolean", "maybe"), ("complaints", "x" * 121), ("text", "x" * 501),
+])
+def test_generic_intake_validation(kind, text):
+    assert parse_value(kind, text)[0] is False
+
+
+def test_generic_intake_confirmation_pause_and_bounded_rejections():
+    intake = GenericIntake()
+    intake.handle("7")
+    assert intake.values == {}
+    assert "Paused" in intake.handle("pause")
+    intake.handle("yes")
+    assert intake.values == {}
+    assert '"7"' in intake.handle("resume")
+    assert '"7"' in intake.handle("repeat")
+    intake.handle("no")
+    intake.handle("8")
+    intake.handle("no")
+    intake.handle("9")
+    intake.handle("no")
+    assert intake.state == "needs_review"
+    assert intake.values == {}
+
+
+def test_concurrent_start_is_reserved_and_reconciles_after_restart(harness):
+    async def scenario():
+        results = await asyncio.gather(*(harness.service.start(harness.payload) for _ in range(4)))
+        assert harness.provider.calls == 1
+        assert all(result.call_id == harness.payload.call_id for result in results)
+        with pytest.raises(HTTPException, match="conflicts"):
+            await harness.service.start(harness.payload.model_copy(update={"to_number": "+14155550124"}))
+        other = IntegratedService(
+            harness.backend, harness.provider, ReceiptStore(harness.path), TOKEN, ENV["PUBLIC_BASE_URL"],
+        )
+        await other.recover()
+        await other.start(harness.payload)
+        assert harness.provider.calls == 1
+        other.store.close()
+    asyncio.run(scenario())
+
+
+def test_mismatched_registered_condition_blocks_dialing(harness):
+    async def scenario():
+        with pytest.raises(HTTPException):
+            await harness.service.start(harness.payload.model_copy(update={"condition_category": "stroke"}))
+        assert harness.provider.calls == 0
+    asyncio.run(scenario())
+
+
+def test_ambiguous_call_never_redispatched(harness):
+    class Ambiguous(FakePhoneProvider):
+        async def call(self, to_number, voice_url, status_url):
+            self.calls += 1
+            raise ProviderUnknown()
+
+    async def scenario():
+        provider = Ambiguous()
+        harness.service.provider = provider
+        first = await harness.service.start(harness.payload)
+        second = await harness.service.start(harness.payload)
+        assert first.call_status == second.call_status == "unknown"
+        assert provider.calls == 1
+        await harness.service.carrier(harness.payload.call_id, "CAreal", "in-progress", 2)
+        await harness.service.carrier(harness.payload.call_id, "CAreal", "ringing", 1)
+        assert harness.service.receipt(harness.payload.call_id).snapshot.call_status == "in_progress"
+    asyncio.run(scenario())
+
+
+def test_failed_sms_reserved_retry_and_delivery_replays(harness):
+    async def scenario():
+        harness.provider.sms_outcome = "rejected"
+        session = await harness.session()
+        await answer_survey(session)
+        await session._background
+        assert session.finished
+        assert harness.service.receipt(session.call.call_id).snapshot.sms_status == "failed"
+        call, _ = store.reserve_sms_retry("patient1", session.call.call_id, "sms-retry-1234567890")
+        retry = SMSRetry(
+            patient_id="patient1", call_id=session.call.call_id, attempt_id=call["attempt_id"],
+            request_id="sms-retry-1234567890", sms_attempt=1, patient_url=harness.url,
+            patient_access_expires_at="2099-01-01T00:00:00Z",
+        )
+        harness.provider.sms_outcome = "sent"
+        await asyncio.gather(*(harness.service.retry_sms(session.call.call_id, retry) for _ in range(3)))
+        assert harness.provider.messages == 2
+        await harness.service.sms_event(session.call.call_id, 1, "SMfake2", "delivered")
+        version = harness.service.receipt(session.call.call_id).snapshot.version
+        await harness.service.sms_event(session.call.call_id, 1, "SMfake2", "sent")
+        await harness.service.sms_event(session.call.call_id, 0, "SMold", "failed")
+        assert harness.service.receipt(session.call.call_id).snapshot.sms_status == "delivered"
+        assert harness.service.receipt(session.call.call_id).snapshot.version == version
+        assert store.get_call("patient1", session.call.call_id)["sms_status"] == "delivered"
+    asyncio.run(scenario())
+
+
+def test_unknown_sms_is_not_automatically_retried(harness):
+    async def scenario():
+        harness.provider.sms_outcome = "unknown"
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await harness.service.retry_submission(session.call.call_id)
+        assert harness.provider.messages == 1
+        assert harness.service.receipt(session.call.call_id).snapshot.sms_status == "unknown"
+        await harness.service.sms_event(session.call.call_id, 0, "SMlate", "delivered")
+        assert store.get_call("patient1", session.call.call_id)["sms_status"] == "delivered"
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("lost_response", [False, True])
+def test_submission_retry_uses_frozen_confirmed_payload(harness, lost_response):
+    async def scenario():
+        harness.lose_response = lost_response
+        harness.submit_error = 0 if lost_response else 503
+        session = await harness.session()
+        await answer_survey(session)
+        await session._background
+        assert harness.provider.messages == 0
+        assert session.finished
+        harness.lose_response = False
+        harness.submit_error = 0
+        await harness.service.retry_submission(session.call.call_id)
+        assert harness.provider.messages == 1
+        assert harness.submissions[0] == harness.submissions[1]
+        assert len(store.get_patient("patient1")["surveys"]) == 2
+        changed = dict(harness.submissions[0], pain_scale=1)
+        with pytest.raises(HTTPException):
+            await harness.service.submit(session.call.call_id, changed)
+    asyncio.run(scenario())
+
+
+def test_409_submission_conflict_produces_no_link_or_retry(harness):
+    async def scenario():
+        harness.submit_error = 409
+        session = await harness.session()
+        await answer_survey(session)
+        await session._background
+        assert session.finished
+        assert harness.provider.messages == 0
+        assert len(harness.submissions) == 1
+        assert "could not confirm saving" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def test_readiness_capture_errors_and_save_require_backend_events(harness):
+    async def scenario():
+        harness.walks = [
+            harness.view("waiting", 1, "permission_denied"),
+            harness.view("calibrating", 2, "calibration_started"),
+            harness.view("ready", 3, "calibration_completed"),
+            harness.view("capturing", 4, "capture_started"),
+            harness.view("captured", 5, "recoverable_error"),
+            harness.view("captured", 6, "capture_completed"),
+            harness.view("saved", 7, session_id="gait-session"),
+        ]
+        session = await harness.session()
+        await answer_survey(session)
+        await session._background
+        assert session.finished
+        assert any("permission was denied" in text for text in harness.spoken)
+        assert any("reports a problem" in text for text in harness.spoken)
+        assert any("confirms calibration is ready" in text for text in harness.spoken)
+        assert "backend confirms your walking test is saved" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def test_verbal_ready_and_elapsed_timer_never_mean_saved(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await say(session, "I am ready")
+        await session._background
+        assert session.finished
+        assert not any("start capture" in text for text in harness.spoken)
+        assert not any("confirms your walking test is saved" in text for text in harness.spoken)
+        assert "cannot confirm" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def test_stop_during_blocked_walking_poll_is_responsive(harness):
+    async def scenario():
+        harness.block_walk = True
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.wait_for(say(session, "stop"), 0.1)
+        assert session.finished
+        assert store.get_call("patient1", session.call.call_id)["call_status"] == "stopped"
+        assert not any("walking test is saved" in text for text in harness.spoken)
+    asyncio.run(scenario())
+
+
+def test_pause_defers_guidance_and_resume_observes_saved_status(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await say(session, "pause")
+        harness.walks = [harness.view("saved", 5, session_id="gait-session")]
+        await asyncio.sleep(0.01)
+        assert not session.finished
+        assert harness.walks
+        await say(session, "resume")
+        await session._background
+        assert "confirms your walking test is saved" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def test_wrong_attempt_and_saved_without_session_never_claim_success(harness):
+    async def scenario():
+        view = harness.view("saved", 1)
+        harness.walks = [view]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        view = harness.view("saved", 2, session_id="gait-session")
+        view["attempt_id"] = "wrong-attempt"
+        harness.walks = [view]
+        await session._background
+        assert not any("confirms your walking test is saved" in text for text in harness.spoken)
+        assert "does not match" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def signed(path, form):
+    body = ENV["PUBLIC_BASE_URL"] + path + "".join(key + form[key] for key in sorted(form))
+    digest = hmac.new(ENV["TWILIO_AUTH_TOKEN"].encode(), body.encode(), hashlib.sha1).digest()
+    return {"X-Twilio-Signature": base64.b64encode(digest).decode()}
+
+
+def test_operator_contract_and_signed_callback_replay(harness):
+    app = phone_app.create_app(load_settings(ENV), OperatorAuth(TOKEN), integrated_service=harness.service)
+    with TestClient(app) as client:
+        assert client.post("/api/calls", json=harness.payload.model_dump()).status_code == 401
+        client.headers["Authorization"] = f"Bearer {TOKEN}"
+        response = client.post("/api/calls", json=harness.payload.model_dump())
+        assert response.status_code == 200
+        assert "call" not in response.json()
+        PhoneSnapshot.model_validate(response.json())
+        path = f"/twilio/status?call_id={harness.payload.call_id}"
+        form = {"AccountSid": ENV["TWILIO_ACCOUNT_SID"], "CallSid": "CAfake1", "CallStatus": "completed", "SequenceNumber": "3"}
+        assert client.post(path, data=form).status_code == 403
+        assert client.post(path, data=form, headers=signed(path, form)).status_code == 204
+        form.update(CallStatus="ringing", SequenceNumber="2")
+        assert client.post(path, data=form, headers=signed(path, form)).status_code == 204
+        result = client.get(f"/api/calls/{harness.payload.call_id}").json()
+        assert result["call_status"] == "completed"
+        form["CallSid"] = "CAwrong"
+        assert client.post(path, data=form, headers=signed(path, form)).status_code == 409
+        assert client.post(f"/api/calls/{harness.payload.call_id}/survey-retries").status_code == 409
+
+
+def test_stream_ticket_and_call_binding(harness):
+    app = phone_app.create_app(load_settings(ENV), OperatorAuth(TOKEN), integrated_service=harness.service)
+    with TestClient(app) as client:
+        client.headers["Authorization"] = f"Bearer {TOKEN}"
+        snapshot = client.post("/api/calls", json=harness.payload.model_dump()).json()
+        path = f"/twilio/voice?call_id={harness.payload.call_id}"
+        form = {"AccountSid": ENV["TWILIO_ACCOUNT_SID"], "CallSid": "CAfake1"}
+        result = client.post(path, data=form, headers=signed(path, form))
+        assert result.status_code == 200
+        assert 'name="callId"' in result.text and 'name="streamToken"' in result.text
+        call = asyncio.run(harness.service.begin_stream(harness.payload.call_id, "CAfake1"))
+        assert call.attempt_id == harness.payload.attempt_id
+        assert snapshot["phone_session_id"]
+        with pytest.raises(HTTPException):
+            asyncio.run(harness.service.begin_stream(harness.payload.call_id, "CAfake1"))
+        assert "<Hangup/>" in client.post(path, data=form, headers=signed(path, form)).text
+
+
+def test_sms_callback_requires_signature_and_message_binding(harness):
+    async def prepare():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await session.disconnect()
+    asyncio.run(prepare())
+    app = phone_app.create_app(load_settings(ENV), OperatorAuth(TOKEN), integrated_service=harness.service)
+    with TestClient(app) as client:
+        path = f"/twilio/sms-status?call_id={harness.payload.call_id}&attempt=0"
+        form = {"AccountSid": ENV["TWILIO_ACCOUNT_SID"], "MessageSid": "SMfake1", "MessageStatus": "delivered"}
+        assert client.post(path, data=form).status_code == 403
+        assert client.post(path, data=form, headers=signed(path, form)).status_code == 204
+        assert client.post(path, data=form, headers=signed(path, form)).status_code == 204
+        form["MessageSid"] = "SMwrong"
+        assert client.post(path, data=form, headers=signed(path, form)).status_code == 409
+        assert store.get_call("patient1", harness.payload.call_id)["sms_status"] == "delivered"
+
+
+def test_integrated_media_rejects_valid_ticket_for_wrong_session_scope(harness):
+    class Socket:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    async def scenario():
+        await harness.service.start(harness.payload)
+        tickets = phone_app.StreamTickets()
+        token = tickets.issue("wrong-session")
+        socket = Socket()
+        bridge = phone_app.MediaStreamBridge(
+            socket, load_settings(ENV), phone_app.InMemoryPatientRepository(),
+            phone_app.InMemoryPersistence(), tickets, integrated_service=harness.service,
+        )
+        await bridge._on_start({"start": {
+            "callSid": "CAfake1", "streamSid": "MZoffline",
+            "customParameters": {
+                "sessionId": "wrong-session", "callId": harness.payload.call_id, "streamToken": token,
+            },
+        }})
+        assert socket.closed
+        assert bridge.session is None
+        assert not harness.service.receipt(harness.payload.call_id).stream_started
+    asyncio.run(scenario())
+
+
+def test_cancelled_speech_clears_provider_playback():
+    class Socket:
+        sent = []
+
+        async def send_text(self, text):
+            self.sent.append(json.loads(text))
+
+    async def scenario():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def block_speech(text, mark):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        socket = Socket()
+        bridge = phone_app.MediaStreamBridge(
+            socket, load_settings(ENV), phone_app.InMemoryPatientRepository(),
+            phone_app.InMemoryPersistence(), phone_app.StreamTickets(),
+        )
+        bridge.stream_sid = "MZoffline"
+        with patch.object(bridge, "_stream_speech", block_speech):
+            speech = asyncio.create_task(bridge._speak("A synthetic prompt."))
+            await started.wait()
+            speech.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await speech
+            await asyncio.wait_for(cancelled.wait(), 0.1)
+        assert socket.sent[-1]["event"] == "clear"
+        assert bridge._playback is None
+    asyncio.run(scenario())
+
+
+def test_signature_covers_repeated_form_values():
+    form = httpx.QueryParams([("AccountSid", "ACoffline"), ("Extra", "a"), ("Extra", "b")])
+    request = httpx.Request("POST", "https://phone.example.test/twilio/status", content=str(form))
+    body = str(request.url) + "AccountSidACofflineExtraaExtrab"
+    digest = hmac.new(ENV["TWILIO_AUTH_TOKEN"].encode(), body.encode(), hashlib.sha1).digest()
+    data = FormData(form.multi_items())
+    signature = base64.b64encode(digest).decode()
+    assert phone_app.twilio.validate_form_signature(ENV["TWILIO_AUTH_TOKEN"], str(request.url), data, signature)
+    assert not phone_app.twilio.validate_form_signature(ENV["TWILIO_AUTH_TOKEN"], str(request.url), data, "é")
+
+
+def test_default_app_needs_no_secrets_and_never_uses_demo_identity():
+    with patch.dict("os.environ", {}, clear=True):
+        app = phone_app.create_app()
+        with TestClient(app) as client:
+            assert client.get("/api/config").json() == {"mode": "integrated", "ready": False}
+            assert client.post("/api/calls", json={"patient_code": "RGN-0417"}).status_code == 503
+
+
+def test_provider_adapter_uses_no_retries_and_includes_delivery_callback():
+    async def scenario():
+        seen = []
+
+        def respond(request):
+            seen.append(request)
+            return httpx.Response(503)
+
+        provider = TwilioProvider(load_settings(ENV), transport=httpx.MockTransport(respond))
+        with pytest.raises(ProviderUnknown):
+            await provider.sms("+14155550123", "offline message", "https://phone.example.test/callback")
+        assert len(seen) == 1
+        assert b"StatusCallback=" in seen[0].content
+    asyncio.run(scenario())
+
+
+def test_backend_rejects_redirect_and_maps_timeout_without_retry():
+    async def scenario():
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(307, headers={"Location": "https://elsewhere.example.test"})
+
+        backend = MainBackend("http://127.0.0.1:8000", SERVICE_TOKEN, transport=httpx.MockTransport(respond))
+        with pytest.raises(BackendError):
+            await backend.patient("patient1")
+        assert len(requests) == 1
+    asyncio.run(scenario())

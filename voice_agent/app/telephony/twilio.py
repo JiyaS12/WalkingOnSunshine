@@ -11,8 +11,24 @@ from urllib import error, request
 from urllib.parse import urlencode
 from xml.sax.saxutils import escape, quoteattr
 
+from starlette.datastructures import FormData
+
 TWILIO_API_ROOT = "https://api.twilio.com/2010-04-01"
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+def validate_form_signature(token: str, url: str, form: FormData, signature: str) -> bool:
+    if not token or not signature:
+        return False
+    signed = url
+    for key in sorted(form):
+        values = form.getlist(key)
+        if not all(isinstance(value, str) for value in values):
+            return False
+        for value in sorted({str(value) for value in values}):
+            signed += key + value
+    expected = base64.b64encode(hmac.new(token.encode(), signed.encode(), hashlib.sha1).digest()).decode()
+    return hmac.compare_digest(expected.encode(), signature.encode())
 
 
 class TwilioError(RuntimeError):
