@@ -76,7 +76,9 @@ The app runs at http://localhost:3000 and expects the backend on
 
 1. `cd backend && .venv/bin/uvicorn main:app --port 8000`
 2. `cd frontend && npm run dev`
-3. Open http://localhost:3000 — pick a patient link (or type the patient ID).
+3. Open http://localhost:3000 — pick a patient link, type a patient ID, or
+   click **Load Demo Patient RGN-0417**; any unknown ID auto-creates a demo
+   profile (pain 3/10, no prior falls) so you can test right away.
 4. On `/patient/<id>`: do a **Live Camera** walk or **Upload Video** —
    metrics update, sessions save to the patient's record.
 5. Open `/doctor` — the portal live-syncs every 5 s; select the patient to

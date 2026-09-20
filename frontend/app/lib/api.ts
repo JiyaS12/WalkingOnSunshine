@@ -40,7 +40,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = `API ${path} failed: ${res.status}`;
     try {
       const body = (await res.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      if (typeof body.detail === "string") detail = body.detail;
     } catch {
       /* keep generic detail */
     }
@@ -91,7 +91,7 @@ export async function processVideo(
     let detail = `API /api/process-video failed: ${res.status}`;
     try {
       const body = (await res.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      if (typeof body.detail === "string") detail = body.detail;
     } catch {
       /* keep generic detail */
     }
@@ -173,6 +173,15 @@ export async function addPatientSession(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }
+  );
+}
+
+export async function ensureDemoPatient(
+  id: string
+): Promise<{ created: boolean; patient: PatientRecord }> {
+  return request<{ created: boolean; patient: PatientRecord }>(
+    `/api/patients/${encodeURIComponent(id)}/ensure-demo`,
+    { method: "POST" }
   );
 }
 
