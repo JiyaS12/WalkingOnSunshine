@@ -721,3 +721,20 @@ def test_stop_while_waiting_on_the_link_ends_the_call_politely(monkeypatch):
     assert "leave it there" in spoken[-1]
     assert not any("Live Camera" in line for line in spoken)
     assert session.finished
+
+
+@pytest.mark.parametrize(
+    ("said", "expected"),
+    [
+        ("I'd say, like,", True),
+        ("Um, so", True),
+        ("Well, it's", True),
+        ("moderate.", False),
+        ("I'd say, like, mild difficulty", False),
+        ("no pain at all", False),
+    ],
+)
+def test_trailing_off_spots_an_unfinished_thought(said, expected):
+    session, _ = build_session()
+    session.add_transcript(said)
+    assert session.trailing_off() is expected

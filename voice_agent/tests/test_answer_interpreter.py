@@ -153,3 +153,49 @@ def test_configuration_enables_llm_only_when_selected_and_configured(monkeypatch
     monkeypatch.setenv("SURVEY_EXTRACTOR", "typo")
     with pytest.raises(ValueError):
         build_answer_interpreter()
+
+
+@pytest.mark.parametrize(
+    ("said", "label"),
+    [
+        ("No difficulty.", "none"),
+        ("I'd say, like, no hip pain at all", "none"),
+        ("Not too much difficulty", "mild"),
+        ("It's been a little bit of pain", "mild"),
+        ("a moderate amount", "moderate"),
+        ("Some pain.", "moderate"),
+        ("I had a lot of hip pain", "severe"),
+        ("it was pretty bad", "severe"),
+        ("It was unbearable", "extreme"),
+    ],
+)
+def test_plain_words_for_a_scale_point_are_taken_as_the_patients_choice(said, label):
+    result = ExactAnswerInterpreter().interpret(said, QUESTION)
+    assert (result.intent, result.value) == ("select", label)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "no",
+        "not severe",
+        "no pain but a lot of stiffness",
+        "a lot, it's getting worse",
+        "quite a bit",
+        "yes",
+        "no not really",
+        "a lot less",
+        "Maybe severe",
+        "I think mild",
+        "extreme, or was it severe",
+    ],
+)
+def test_anything_beyond_the_paraphrase_table_is_not_guessed(said):
+    assert ExactAnswerInterpreter().interpret(said, QUESTION).intent == "clarify"
+
+
+def test_paraphrases_do_not_answer_while_a_proposal_awaits_confirmation():
+    """"Not much" about a pending 'moderate' is feedback on the proposal, not a new pick."""
+
+    assert ExactAnswerInterpreter().interpret("not much", QUESTION, "moderate").intent == "clarify"
+    assert ExactAnswerInterpreter().interpret("mild", QUESTION, "moderate").intent == "select"

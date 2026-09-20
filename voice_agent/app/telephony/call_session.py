@@ -65,6 +65,12 @@ _FILLER_CLAUSE = re.compile(
     r"(?:\s+|$))+"
 )
 
+# An utterance that stops on one of these has not reached its point yet.
+_TRAILING_FILLER = re.compile(
+    r"\b(?:like|um+|uh+|so|and|or|well|i'?d say|i would say|i think|i mean|it'?s|"
+    r"maybe|probably|about|kind of|sort of|it was|i guess)[,.\s]*$"
+)
+
 Speaker = Callable[[str], Awaitable[None]]
 SmsSender = Callable[[str, str], Awaitable[None]]
 
@@ -135,6 +141,11 @@ class PhoneCallSession:
         cleaned = text.strip()
         if cleaned:
             self._buffer.append(cleaned)
+
+    def trailing_off(self) -> bool:
+        """Whether the caller paused mid-thought ("I'd say, like...")."""
+
+        return bool(_TRAILING_FILLER.search(self.pending_transcript.lower()))
 
     def discard_pending(self) -> None:
         """Forget speech recognized while we were still talking over the line."""
