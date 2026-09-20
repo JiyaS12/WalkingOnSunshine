@@ -123,6 +123,7 @@ Content-Type: application/json
 {
   "label": "Walking test",
   "source": "live",
+  "idempotency_key": "live_a24f2f4ba26c41e8b3108d57fdd03162_1",
   "metrics": {
     "stride_length_m": 1.0,
     "asymmetry_pct": 5.0,
@@ -146,7 +147,9 @@ The response has the same shape as the authenticated read and includes the
 updated `gait_sessions`. This route shares the existing session implementation:
 Pydantic metric validation, the 300-frame request cap, landmark validation,
 50-session record cap, timestamp ordering, and persistence rollback all remain
-in force.
+in force. `idempotency_key` is a non-secret, client-generated identifier that
+must remain stable when retrying the same analyzed walk. Repeating a write with
+the same key returns the existing record without appending another session.
 
 The client permits saves only when `gait_detected` is true. Upload analyses are
 auto-saved once per analysis, live saves use an in-flight/completed guard, and

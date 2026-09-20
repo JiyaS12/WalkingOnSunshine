@@ -166,6 +166,7 @@ export interface Survey {
 
 export interface GaitSession {
   label: string;
+  idempotency_key?: string | null;
   recorded_at?: string | null;
   source: string;
   metrics: GaitMetrics;
@@ -205,6 +206,7 @@ export interface PatientAccessRecord {
 export interface PatientSessionInput {
   label: string;
   source: "live" | "upload";
+  idempotency_key: string;
   metrics: GaitMetrics;
   frames?: JointFrame[] | null;
 }

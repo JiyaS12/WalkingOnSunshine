@@ -57,6 +57,7 @@ describe("patient access API client", () => {
     await addPatientAccessSession("RGN-0417", "signed.payload", {
       label: "Upload 12:00:00",
       source: "upload",
+      idempotency_key: "upload_0123456789abcdef",
       metrics,
       frames: null,
     });
@@ -65,6 +66,10 @@ describe("patient access API client", () => {
     expect(url).toBe("http://localhost:8000/api/patient-access/RGN-0417/sessions");
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("Authorization")).toBe("Bearer signed.payload");
-    expect(JSON.parse(String(init.body))).toMatchObject({ source: "upload", metrics });
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      source: "upload",
+      idempotency_key: "upload_0123456789abcdef",
+      metrics,
+    });
   });
 });

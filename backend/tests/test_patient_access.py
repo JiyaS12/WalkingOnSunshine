@@ -306,6 +306,30 @@ def test_patient_scoped_session_write_happy_path():
     assert "surveys" not in response.json()
 
 
+def test_patient_scoped_session_write_is_idempotent_across_retries():
+    _create(_NEW_PID)
+    body = _session()
+    body["idempotency_key"] = "live_0123456789abcdef"
+    headers = _auth(_NEW_PID)
+
+    first = client.post(
+        f"/api/patient-access/{_NEW_PID}/sessions",
+        headers=headers,
+        json=body,
+    )
+    second = client.post(
+        f"/api/patient-access/{_NEW_PID}/sessions",
+        headers=headers,
+        json=body,
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    sessions = store.get_patient(_NEW_PID)["gait_sessions"]
+    assert len(sessions) == 1
+    assert sessions[0]["idempotency_key"] == body["idempotency_key"]
+
+
 def test_patient_scoped_session_write_preserves_frame_validation_and_cap():
     _create(_NEW_PID)
     headers = _auth(_NEW_PID)

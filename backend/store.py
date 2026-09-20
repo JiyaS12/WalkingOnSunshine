@@ -190,6 +190,12 @@ def add_session(pid: str, session: dict) -> dict:
         if pid not in patients:
             raise KeyError(f"unknown patient: {pid}")
         old_record = patients[pid]
+        idempotency_key = session.get("idempotency_key")
+        if idempotency_key is not None and any(
+            item.get("idempotency_key") == idempotency_key
+            for item in old_record["gait_sessions"]
+        ):
+            return json.loads(json.dumps(old_record))
         if len(old_record["gait_sessions"]) >= _MAX_SESSIONS:
             raise ValueError("patient already has 50 sessions")
         if session.get("recorded_at") is None:
