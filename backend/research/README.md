@@ -45,10 +45,10 @@ Xsens reference. The committed artifact is **not promoted**:
 
 | Check | Measured | Required |
 | --- | ---: | ---: |
-| Nested participant-LOOCV Spearman | 0.0876 | ≥ 0.50 |
-| Nested participant-LOOCV RMSE | 3.1918 | < baseline 2.7308 |
-| Xsens step-time MAE | 0.0465 s | ≤ 0.08 s |
-| Xsens cadence MAE | 9.0137 steps/min | ≤ 5 steps/min |
+| Nested participant-LOOCV Spearman | 0.3818 | ≥ 0.50 |
+| Nested participant-LOOCV RMSE | 3.2169 | < baseline 2.7308 |
+| Xsens step-time MAE | 0.0392 s | ≤ 0.08 s |
+| Xsens cadence MAE | 7.6746 steps/min | ≤ 5 steps/min |
 | Matched Xsens participants | 9 | ≥ 8 |
 
 These results do not support enabling the experimental number. Runtime
@@ -63,14 +63,12 @@ The Xsens comparison uses participant median proxies, not synchronized,
 independently annotated heel-strike events. It does not establish event-level
 accuracy.
 
-The feature CSV records the extraction fingerprint from its checkpoint.
-The model separately records the runtime and trainer source fingerprints,
-clinical spreadsheet hash, and feature CSV hash. Extraction ran before the
-final runtime input-validation/capture-loss fixes and 300-sample cap, using
-the extractor from commit `17285a0`. Those
-fixes are redundant for the extractor's already-bounded, finite, complete
-landmark windows; both fingerprints are retained rather than relabeling the
-saved features as a new extraction run.
+All features and Xsens references were regenerated with the extractor from
+commit `61c7cae`. Step timing uses only adjacent opposite-foot events; a
+same-foot interval is a stride and cannot count toward the minimum five
+plausible step intervals. CV and Xsens share this timing calculation.
+The model records matching extraction and runtime fingerprints, the trainer
+source fingerprint, clinical spreadsheet hash, and feature CSV hash.
 
 To reproduce model fitting from the committed features:
 
@@ -85,7 +83,7 @@ retraining passes produced identical model and metrics hashes; the runtime
 artifact SHA-256 is:
 
 ```
-fc778c211606097976164d5a3694426879a25d5654188b0ad12e6f33b9f30a99
+30c011a66221eef824614e46e8308a52791b45b85205db6f0a7be98b91fca9f3
 ```
 
 For a new extraction after changing source, move the old
