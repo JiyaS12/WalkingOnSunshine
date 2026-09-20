@@ -15,15 +15,18 @@ import os
 from fastapi import HTTPException, Request
 
 OPERATOR_TOKEN_ENV = "OPERATOR_TOKEN"
+MIN_TOKEN_LENGTH = 16
 NOT_CONFIGURED = (
-    f"{OPERATOR_TOKEN_ENV} is not set. Add a long random value to .env and restart "
-    "so only operators can place calls or read transcripts."
+    f"{OPERATOR_TOKEN_ENV} is not set or shorter than {MIN_TOKEN_LENGTH} characters. "
+    "Add a long random value (openssl rand -hex 32) to .env and restart so only "
+    "operators can place calls or read transcripts."
 )
 
 
 class OperatorAuth:
     def __init__(self, token: str | None):
-        self.token = token or None
+        cleaned = (token or "").strip()
+        self.token = cleaned if len(cleaned) >= MIN_TOKEN_LENGTH else None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> OperatorAuth:

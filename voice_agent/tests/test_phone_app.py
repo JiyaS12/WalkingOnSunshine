@@ -13,7 +13,7 @@ from app.operator_auth import OperatorAuth
 from app.telephony.config import load_settings
 from app.telephony.deepgram_stt import SpeechEvent
 
-TOKEN = "operator-secret"
+TOKEN = "operator-secret-0123456789"
 ENV = {
     "DEEPGRAM_API_KEY": "dg-key",
     "TWILIO_ACCOUNT_SID": "AC123",
@@ -272,12 +272,15 @@ class StubWebSocket:
     def __init__(self, inbound: list[dict]):
         self.inbound = [json.dumps(message) for message in inbound]
         self.sent: list[dict] = []
+        self.closed = False
 
     async def accept(self) -> None:
         return None
 
     async def receive_text(self) -> str:
         while not self.inbound:
+            if self.closed:
+                raise phone_app.WebSocketDisconnect()
             await asyncio.sleep(0.01)
         return self.inbound.pop(0)
 
@@ -285,7 +288,7 @@ class StubWebSocket:
         self.sent.append(json.loads(text))
 
     async def close(self) -> None:
-        return None
+        self.closed = True
 
 
 def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
@@ -420,3 +423,46 @@ def test_prompt_audio_is_sent_ahead_of_playback_without_an_opening_gap(client, m
     assert halfway < 0.5
     # ...and the remaining second is paced so the whole 2s prompt finishes ~1s early.
     assert 0.8 < total < 1.6
+
+
+def test_short_operator_tokens_count_as_unconfigured():
+    assert OperatorAuth("short").configured is False
+    assert OperatorAuth("   ").configured is False
+    assert OperatorAuth(TOKEN).configured is True
+
+
+def test_a_speech_failure_ends_the_call_instead_of_muting_it(client, monkeypatch):
+    """Without a mark the bridge would keep swallowing the caller's audio forever."""
+
+    async def broken_tts(text: str, api_key: str, model: str) -> bytes:
+        raise RuntimeError("Deepgram TTS 500")
+
+    monkeypatch.setattr(phone_app, "synthesize_mulaw_async", broken_tts)
+    client.app.state.persistence.start_call("sess-9", "RGN-0417", "orthopedic")
+    start = {
+        "event": "start",
+        "streamSid": "MZ9",
+        "start": {
+            "streamSid": "MZ9",
+            "callSid": "CA9",
+            "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-9"},
+        },
+    }
+    media = {"event": "media", "media": {"track": "inbound", "payload": base64.b64encode(b"\x01" * 160).decode("ascii")}}
+    websocket = StubWebSocket([start, media])
+    bridge = phone_app.MediaStreamBridge(
+        websocket,
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        transcriber_factory=ScriptedTranscriber,
+    )
+
+    async def drive() -> None:
+        await asyncio.wait_for(bridge.run(), 5)
+
+    asyncio.run(drive())
+
+    record = client.app.state.persistence.calls["sess-9"]
+    assert (record.status, record.final_status) == ("completed", "failed")
+    assert bridge.bot_speaking is False

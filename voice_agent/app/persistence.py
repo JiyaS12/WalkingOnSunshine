@@ -199,13 +199,18 @@ class CompositePersistence:
             logger.exception("Database persistence failed for session %s", session_id)
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
+        local = self.memory.list_results(patient_code)
         try:
             rows = self.database.list_results(patient_code)
-            if rows:
-                return rows
         except Exception:
             logger.exception("Database result read failed; returning in-memory transcript results.")
-        return self.memory.list_results(patient_code)
+            return local
+        # A session whose write-through failed exists only in memory; keep it
+        # visible alongside the database rows (which win for duplicates).
+        stored = {
+            str(row.get("follow_up_label", "")).removeprefix("live:") for row in rows
+        }
+        return rows + [row for row in local if row["session_id"] not in stored]
 
 
 def build_persistence() -> ConversationPersistence:

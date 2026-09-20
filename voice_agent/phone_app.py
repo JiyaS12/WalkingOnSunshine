@@ -278,9 +278,22 @@ class MediaStreamBridge:
         self._interruptible = False
         self._mark_counter += 1
         self._last_mark = f"prompt-{self._mark_counter}"
-        self._playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
+        playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
+        self._playback = playback
         # Waiting this way keeps a barge-in cancellation local to the playback.
-        await asyncio.wait({self._playback})
+        await asyncio.wait({playback})
+        if playback.cancelled() or playback.exception() is None:
+            return
+        # No mark will ever arrive for a prompt that failed to play, so the call
+        # would otherwise sit muted forever. Record the outcome and hang up.
+        logger.error(
+            "Speech failed on stream %s: %r", self.stream_sid, playback.exception()
+        )
+        self.bot_speaking = False
+        self._interruptible = False
+        if self.session is not None and self.session.session_id in self.persistence.calls:
+            self.persistence.complete_call(self.session.session_id, "failed")
+        await self._close()
 
     async def _stream_speech(self, text: str, mark: str) -> None:
         """Synthesize the prompt piece by piece and play it at speaking speed.
