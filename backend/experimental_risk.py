@@ -8,12 +8,12 @@ poor-quality trials produce an explicit status instead of a reassuring score.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 
 
 MODEL_PATH = Path(__file__).with_name("models") / "experimental_cv_risk_v1.json"
@@ -316,16 +316,57 @@ def extract_features(
     )
 
 
-def load_model(path: Path = MODEL_PATH) -> dict | None:
+class ExperimentalRiskModel(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    schema_version: Literal[1] = 1
+    promoted: bool
+    model_version: str = Field(min_length=1, pattern=r"\S")
+    feature_names: list[str]
+    feature_mean: list[FiniteFloat] = Field(min_length=6, max_length=6)
+    feature_scale: list[FiniteFloat] = Field(min_length=6, max_length=6)
+    coefficients: list[FiniteFloat] = Field(min_length=6, max_length=6)
+    intercept: FiniteFloat
+    percentile_x: list[FiniteFloat] = Field(min_length=2)
+    percentile_y: list[FiniteFloat] = Field(min_length=2)
+    training_feature_min: list[FiniteFloat] = Field(min_length=6, max_length=6)
+    training_feature_max: list[FiniteFloat] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode="after")
+    def validate_parameters(self) -> Self:
+        if not self.promoted:
+            raise ValueError("model is not promoted")
+        if tuple(self.feature_names) != FEATURE_NAMES:
+            raise ValueError("incompatible feature order")
+        if min(self.feature_scale) <= 0:
+            raise ValueError("feature scales must be positive")
+        if any(low > high for low, high in zip(self.training_feature_min, self.training_feature_max)):
+            raise ValueError("invalid feature bounds")
+        if len(self.percentile_x) != len(self.percentile_y):
+            raise ValueError("percentile arrays must have the same length")
+        if any(left >= right for left, right in zip(self.percentile_x, self.percentile_x[1:])):
+            raise ValueError("percentile inputs must be strictly increasing")
+        if any(left > right for left, right in zip(self.percentile_y, self.percentile_y[1:])):
+            raise ValueError("percentiles must be nondecreasing")
+        if any(value < 0 or value > 100 for value in self.percentile_y):
+            raise ValueError("percentiles must be between 0 and 100")
+        return self
+
+
+def load_model(path: Path = MODEL_PATH) -> ExperimentalRiskModel | None:
     try:
-        artifact = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return ExperimentalRiskModel.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    if not artifact.get("promoted"):
-        return None
-    if tuple(artifact.get("feature_names", ())) != FEATURE_NAMES:
-        return None
-    return artifact
+
+
+def _model_unavailable(warnings: list[str]) -> RiskResult:
+    return RiskResult(
+        None,
+        "model_unavailable",
+        MODEL_VERSION_UNAVAILABLE,
+        warnings=warnings + ["no valid promoted experimental model is installed"],
+    )
 
 
 def score_features(result: FeatureResult, model: dict | None = None) -> RiskResult:
@@ -333,41 +374,43 @@ def score_features(result: FeatureResult, model: dict | None = None) -> RiskResu
         return RiskResult(
             None, result.status, MODEL_VERSION_UNAVAILABLE, warnings=result.warnings
         )
-    artifact = model if model is not None else load_model()
+    try:
+        artifact = ExperimentalRiskModel.model_validate(model) if model is not None else load_model()
+    except ValidationError:
+        artifact = None
     if artifact is None:
-        return RiskResult(
-            None,
-            "model_unavailable",
-            MODEL_VERSION_UNAVAILABLE,
-            warnings=result.warnings + ["no promoted experimental model is installed"],
-        )
+        return _model_unavailable(result.warnings)
 
     vector = np.asarray([result.features[name] for name in FEATURE_NAMES], dtype=float)
-    mean = np.asarray(artifact["feature_mean"], dtype=float)
-    scale = np.asarray(artifact["feature_scale"], dtype=float)
-    coefficients = np.asarray(artifact["coefficients"], dtype=float)
-    standardized = (vector - mean) / np.maximum(scale, 1e-9)
-    latent = float(artifact["intercept"] + np.dot(standardized, coefficients))
-    percentile_x = np.asarray(artifact["percentile_x"], dtype=float)
-    percentile_y = np.asarray(artifact["percentile_y"], dtype=float)
+    mean = np.asarray(artifact.feature_mean, dtype=float)
+    scale = np.asarray(artifact.feature_scale, dtype=float)
+    coefficients = np.asarray(artifact.coefficients, dtype=float)
+    with np.errstate(over="ignore", invalid="ignore"):
+        standardized = (vector - mean) / np.maximum(scale, 1e-9)
+        contributions = standardized * coefficients
+        latent = float(artifact.intercept + np.dot(standardized, coefficients))
+    if not np.isfinite(latent) or not np.all(np.isfinite(contributions)):
+        return _model_unavailable(result.warnings)
+    percentile_x = np.asarray(artifact.percentile_x, dtype=float)
+    percentile_y = np.asarray(artifact.percentile_y, dtype=float)
     index = float(np.interp(latent, percentile_x, percentile_y))
 
     warnings = list(result.warnings)
-    training_min = np.asarray(artifact.get("training_feature_min", vector), dtype=float)
-    training_max = np.asarray(artifact.get("training_feature_max", vector), dtype=float)
+    training_min = np.asarray(artifact.training_feature_min, dtype=float)
+    training_max = np.asarray(artifact.training_feature_max, dtype=float)
     span = np.maximum(training_max - training_min, 1e-9)
     if np.any(vector < training_min - 0.2 * span) or np.any(
         vector > training_max + 0.2 * span
     ):
         warnings.append("one or more features are outside the training reference range")
-    contributions = {
+    contributors = {
         name: round(float(value), 4)
-        for name, value in zip(FEATURE_NAMES, standardized * coefficients)
+        for name, value in zip(FEATURE_NAMES, contributions)
     }
     return RiskResult(
         round(float(np.clip(index, 0.0, 100.0)), 1),
         "scored_with_warning" if warnings else "scored",
-        str(artifact["model_version"]),
-        contributors=contributions,
+        artifact.model_version,
+        contributors=contributors,
         warnings=list(dict.fromkeys(warnings)),
     )
