@@ -176,6 +176,15 @@ export async function addPatientSession(
   );
 }
 
+export async function ensureDemoPatient(
+  id: string
+): Promise<{ created: boolean; patient: PatientRecord }> {
+  return request<{ created: boolean; patient: PatientRecord }>(
+    `/api/patients/${encodeURIComponent(id)}/ensure-demo`,
+    { method: "POST" }
+  );
+}
+
 export async function generateSynthesis(
   id: string
 ): Promise<SummaryResponse> {

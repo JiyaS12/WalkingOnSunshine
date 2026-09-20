@@ -7,12 +7,15 @@ import {
   Activity,
   ArrowRight,
   Loader2,
+  Sparkles,
   Stethoscope,
   User,
 } from "lucide-react";
 import {
   API_URL,
+  ApiError,
   PatientSummary,
+  ensureDemoPatient,
   fetchPatients,
 } from "./lib/api";
 
@@ -21,6 +24,8 @@ export default function Home() {
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [idInput, setIdInput] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [goError, setGoError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -33,9 +38,23 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
-  const go = () => {
-    const id = idInput.trim();
-    if (id) router.push(`/patient/${encodeURIComponent(id)}`);
+  const go = async (override?: string) => {
+    const id = (override ?? idInput).trim();
+    if (!id || creating) return;
+    setCreating(true);
+    setGoError(null);
+    try {
+      await ensureDemoPatient(id);
+      router.push(`/patient/${encodeURIComponent(id)}`);
+    } catch (err) {
+      setGoError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not reach the backend"
+      );
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -79,22 +98,40 @@ export default function Home() {
             Open your screening link (sent by text) or enter your patient ID.
           </p>
 
-          <div className="mb-5 flex gap-2">
+          <button
+            onClick={() => {
+              setIdInput("RGN-0417");
+              void go("RGN-0417");
+            }}
+            disabled={creating}
+            className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10 disabled:opacity-50"
+          >
+            <Sparkles className="h-4 w-4" />
+            Load Demo Patient RGN-0417
+          </button>
+
+          <div className="mb-1 flex gap-2">
             <input
               value={idInput}
               onChange={(e) => setIdInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && go()}
+              onKeyDown={(e) => e.key === "Enter" && void go()}
               placeholder="Enter your patient ID"
-              className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-500"
+              disabled={creating}
+              className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-500 disabled:opacity-50"
             />
             <button
-              onClick={go}
-              disabled={!idInput.trim()}
+              onClick={() => void go()}
+              disabled={!idInput.trim() || creating}
               className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
             >
-              Go <ArrowRight className="h-4 w-4" />
+              {creating ? "Opening…" : "Go"} <ArrowRight className="h-4 w-4" />
             </button>
           </div>
+          <p className="mb-4 text-[11px] text-slate-500">
+            Any new ID auto-creates a demo profile (pain 3/10, no prior falls)
+            so you can test right away.
+          </p>
+          {goError && <p className="mb-4 text-xs text-rose-300">{goError}</p>}
 
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Patient links

@@ -164,6 +164,39 @@ def test_generate_summary_identical_sessions_unchanged(monkeypatch, tmp_path):
     assert "unchanged" in resp.json()["summary"].lower()
 
 
+def test_ensure_demo_creates_patient(monkeypatch, tmp_path):
+    resp = client.post("/api/patients/NEW-001/ensure-demo")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] is True
+    assert body["patient"]["patient_id"] == "NEW-001"
+    assert len(body["patient"]["surveys"]) == 1
+    assert body["patient"]["surveys"][0]["pain_scale"] == 3
+
+
+def test_ensure_demo_idempotent(monkeypatch, tmp_path):
+    first = client.post("/api/patients/NEW-002/ensure-demo")
+    assert first.json()["created"] is True
+    second = client.post("/api/patients/NEW-002/ensure-demo")
+    assert second.status_code == 200
+    assert second.json()["created"] is False
+    assert len(second.json()["patient"]["surveys"]) == 1
+
+
+def test_ensure_demo_seeded_patient_unchanged(monkeypatch, tmp_path):
+    before = store.get_patient("RGN-0417")
+    resp = client.post("/api/patients/RGN-0417/ensure-demo")
+    assert resp.status_code == 200
+    assert resp.json()["created"] is False
+    after = store.get_patient("RGN-0417")
+    assert len(after["surveys"]) == len(before["surveys"])
+
+
+def test_ensure_demo_invalid_id_422(monkeypatch, tmp_path):
+    resp = client.post("/api/patients/bad id!/ensure-demo")
+    assert resp.status_code == 422
+
+
 def test_generate_summary_unknown_patient_404(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
     resp = client.post("/api/generate-summary", json={"patient_id": "NOPE"})

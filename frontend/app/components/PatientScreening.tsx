@@ -24,6 +24,7 @@ import {
   SummaryResponse,
   ApiError,
   addPatientSession,
+  ensureDemoPatient,
   fetchPatient,
   generateSummary,
 } from "../lib/api";
@@ -200,6 +201,20 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           <p className="text-sm text-slate-200">
             We couldn&apos;t find this patient link.
           </p>
+          <button
+            onClick={() => {
+              void ensureDemoPatient(patientId)
+                .then(() => {
+                  setNotFound(false);
+                  setLoading(true);
+                  void loadPatient();
+                })
+                .catch(() => undefined);
+            }}
+            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10"
+          >
+            Create demo profile for {patientId}
+          </button>
           <Link
             href="/"
             className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
