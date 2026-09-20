@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
   ArrowRight,
   Loader2,
   Sparkles,
@@ -67,7 +67,7 @@ export default function Home() {
     <main className="min-h-screen p-6 text-foreground">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Activity className="h-8 w-8 text-pastel-blue" />
+          <Image src="/sana-logo.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
             <h1 className="text-2xl font-bold text-foreground">Sana</h1>
             <p className="text-xs text-muted-foreground">

@@ -8,15 +8,14 @@ import {
   useRef,
   useState,
 } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Copy,
   Loader2,
   LogOut,
   Search,
-  ShieldCheck,
   Sparkles,
-  Stethoscope,
   User,
 } from "lucide-react";
 import SkeletonReplay from "../components/SkeletonReplay";
@@ -363,7 +362,7 @@ export default function DoctorPortal() {
       <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
         <div className="w-full max-w-sm rounded-[1.75rem] border-0 bg-card p-6 shadow-pillow">
           <div className="mb-5 flex items-center gap-3">
-            <ShieldCheck className="h-8 w-8 text-pastel-bluedeep" />
+            <Image src="/sana-logo.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
             <div>
               <h1 className="text-xl font-bold">Clinician sign-in</h1>
               <p className="text-xs text-muted-foreground">
@@ -422,7 +421,7 @@ export default function DoctorPortal() {
     <main className="min-h-screen p-6 text-foreground">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Stethoscope className="h-8 w-8 text-pastel-blue" />
+          <Image src="/sana-logo.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
             <h1 className="text-2xl font-bold text-foreground">Doctor&apos;s Portal</h1>
             <p className="text-xs text-muted-foreground">
