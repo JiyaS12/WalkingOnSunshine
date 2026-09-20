@@ -30,6 +30,7 @@ today.
 gaitguard-ai/
   backend/
     main.py          FastAPI app and route definitions
+    patient_access.py signed patient-token and link generation/verification
     processor.py     GaitProcessor: frames -> GaitMetrics
     video.py         OpenCV + MediaPipe extraction for uploaded video
     store.py         patient records: surveys, sessions, synthesis
@@ -58,16 +59,32 @@ cd backend
 .venv/bin/uvicorn main:app --port 8000
 ```
 
+Required patient-link configuration:
+
+- `PATIENT_LINK_SIGNING_SECRET` — a deployment secret containing at least 32
+  bytes. Survey ingestion fails closed when it is absent or too short.
+- `PATIENT_APP_BASE_URL` — public patient-app base URL used to construct the
+  complete signed link (default `http://localhost:3000`; non-local URLs must use
+  HTTPS).
+- `PATIENT_LINK_TTL_SECONDS` — link lifetime from 60 to 604800 seconds (default
+  `900`).
+
 Optional environment variables:
 - `OPENAI_API_KEY` — enable LLM-generated summaries/synthesis
   (deterministic template fallback without it). Summaries are cached in
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
   cache stats.
-- `SURVEY_INGEST_TOKEN` — when set, `POST /api/submit-survey` requires the
-  `X-Survey-Token` header to match. It also disables `POST
+- `SURVEY_INGEST_TOKEN` — required for `POST /api/submit-survey`; callers send
+  it in `X-Survey-Token`. It also disables `POST
   /api/patients/{id}/ensure-demo` (403) unless `ALLOW_DEMO_PATIENTS` is set.
+- `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` — local-only escape hatch. Set to
+  `1`/`true`/`yes` to run survey ingestion without a token. Never enable this
+  in a shared or production environment.
 - `ALLOW_DEMO_PATIENTS` — set to `1`/`true`/`yes` to keep auto-created demo
   patient profiles enabled while survey ingestion is token-protected.
+
+See [the patient access contract](docs/patient-access-contract.md) for stable
+request/response examples used by the patient UI and voice/SMS integrations.
 
 ## Frontend setup
 
