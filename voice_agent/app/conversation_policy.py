@@ -282,9 +282,10 @@ INTEGRATED_SUBMIT_FAILED = (
     "Your care team will follow up with you separately. Thank you for your time. Take care, and goodbye."
 )
 INTEGRATED_SMS_FAILED = (
-    "Your answers are saved, but the text did not go through on my end, so we will leave the "
-    "walking check for another time. Your care team will send you the link separately. "
-    "Thank you for your answers today. Take care, and goodbye."
+    "Your answers are saved, but the text does not look like it went through on my end. "
+    "Your care team can pass you the same link another way. If you get it, open it on your "
+    "phone and tell me when you have it up, or say ‘stop’ if you would rather leave the "
+    "walking check for another time."
 )
 INTEGRATED_LINK_SENT = (
     "Your answers are saved, and I’ve asked for the text to go out to you. It can take a minute "

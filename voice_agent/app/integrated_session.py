@@ -30,17 +30,19 @@ _CONSENT_YES = re.compile(
 _CONSENT_NO = re.compile(
     r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later|stop)\b"
 )
-# "can't wait (to get the text)" / "won't hesitate (to open it)" are eagerness,
-# not inability.
+# "can't wait (to get the text)" / "won't hesitate (to open it)" are eagerness
+# and "can't you text me?" is a request, not inability.
 _INABILITY = (
     r"\b(?:can't|cannot|can not|won't|will not|unable to|not able to)\b"
-    r"(?!\s+(?:wait|hesitate)\b)(?: be able to)?"
+    r"(?!\s+(?:wait|hesitate|you)\b)(?: be able to)?"
 )
-# Any inability whose object, within a few words, is the text or link refuses
-# ("you can't text me", "sure, but I can't access the link", "won't be able
-# to view the message"); a verb list would miss ordinary phrasings.
+# An inability whose object, within the same clause, is the text or link
+# refuses ("you can't text me", "sure, but I can't access the link", "won't be
+# able to view the message"). Punctuation or a connective ("I can't talk,
+# please text me") ends the clause, so a separate request is not swallowed.
+_CLAUSE_WORD = r"\s+(?!(?:please|yes|but|and|so|then|just)\b)\w+"
 _CONSENT_CANNOT_TEXT = re.compile(
-    _INABILITY + r"(?:\W+\w+){0,4}?\W+(?:text|texts|texting|message|messages|link|links)\b"
+    _INABILITY + r"(?:" + _CLAUSE_WORD + r"){0,4}?\s+(?:text|texts|texting|message|messages|link|links)\b"
     r"|" + _INABILITY + r"\s+(?:send|open|get|receive|read|see|view|access|click|use)\s+(?:it|that)\b"
 )
 # A bare inability with no agreement anywhere ("I won't be able to") is a no.
@@ -82,7 +84,7 @@ class IntegratedSession:
     def __init__(
         self, service: IntegratedService, call: RegisteredCall, speak: Speaker,
         interpreter: AnswerInterpreter | None = None, end_playback: Callable[[], Awaitable[None]] | None = None,
-        poll_seconds: float = 1, wait_seconds: float = 180, max_call_seconds: float = 600,
+        poll_seconds: float = 1, wait_seconds: float = 300, max_call_seconds: float = 600,
     ):
         patient = PatientRecord(call.patient_id, call.patient_id, ConditionCategory(call.condition_category))
         self.engine = SafeSurveyEngine(
@@ -102,6 +104,7 @@ class IntegratedSession:
         self.link_open = False
         # Backend-confirmed page activity; a spoken "ready" alone never sets this.
         self._page_seen = False
+        self._sms_failure_told = False
         self._page_active = False
         self._buffer: list[str] = []
         self._confidence: float | None = None
@@ -250,11 +253,12 @@ class IntegratedSession:
             return
         if self.finished:
             return
-        if snapshot.sms_status == "failed":
-            await self.finish("completed", policy.INTEGRATED_SMS_FAILED, snapshot.error_code)
-            return
         self.stage = "walking"
-        await self._say(policy.INTEGRATED_LINK_SENT)
+        if snapshot.sms_status == "failed":
+            self._sms_failure_told = True
+            await self._say(policy.INTEGRATED_SMS_FAILED)
+        else:
+            await self._say(policy.INTEGRATED_LINK_SENT)
         await self._poll_walk()
 
     async def _poll_walk(self) -> None:
@@ -302,11 +306,13 @@ class IntegratedSession:
                             await self._say(policy.INTEGRATED_CAPTURING)
                         elif view.status == "captured":
                             await self._say(policy.INTEGRATED_CAPTURED)
-                if not self._page_seen:
+                if not self._page_seen and not self._sms_failure_told:
                     snapshot = self.service.receipt(self.call.call_id).snapshot
                     if snapshot.sms_status == "failed":
-                        await self.finish("completed", policy.INTEGRATED_SMS_FAILED, snapshot.error_code)
-                        return
+                        # The carrier bounced it, but the clinician can still
+                        # hand over the link, so keep the call open for the page.
+                        self._sms_failure_told = True
+                        await self._say(policy.INTEGRATED_SMS_FAILED)
             await asyncio.sleep(self.poll_seconds)
         if not self.finished:
             await self.finish("completed", policy.INTEGRATED_TIMED_OUT)

@@ -239,6 +239,8 @@ def test_repeated_unclear_consent_replies_default_to_no(harness):
     ("okay, I won't be able to open the link", "no"), ("fine, but I cannot receive messages", "no"),
     ("sure, but I can't access the link", "no"), ("yes but I can't click the link", "no"),
     ("okay, I won't be able to view the message", "no"), ("sure, I can't open it", "no"),
+    ("I can't talk, please text me", "yes"), ("can't you text me?", "yes"),
+    ("I can't hear well. Yes, send the link", "yes"),
     ("I can't wait", "unclear"),
     ("hmm", "unclear"), ("what link", "unclear"), ("", "unclear"),
 ])
@@ -476,19 +478,54 @@ def test_failed_sms_reserved_retry_and_delivery_replays(harness):
     asyncio.run(scenario())
 
 
-def test_carrier_undelivered_sms_ends_the_wait_honestly(harness):
+def test_carrier_undelivered_sms_is_announced_once_and_the_call_stays_open(harness):
     async def scenario():
         session = await harness.session()
         await answer_survey(session)
         await harness.walk_requested.wait()
         assert any(text == policy.INTEGRATED_LINK_SENT for text in harness.spoken)
         await harness.service.sms_event(session.call.call_id, 0, "SMfake1", "failed", error="provider_rejected")
+        await asyncio.sleep(0.02)
+        assert not session.finished
+        assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
+        assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
+        assert store.get_call("patient1", session.call.call_id)["sms_status"] == "failed"
+        assert store.get_call("patient1", session.call.call_id)["call_status"] != "completed"
+        # A link handed over another way still completes the walk.
+        harness.walks = [harness.view("page_ready", 2, "page_ready"), harness.view("saved", 3, "saved", session_id="gait-1")]
         await asyncio.wait_for(session._background, 1)
         assert session.finished
-        assert harness.spoken[-1] == policy.INTEGRATED_SMS_FAILED
+        assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
+        assert harness.spoken[-1] == policy.INTEGRATED_SAVED
+    asyncio.run(scenario())
+
+
+def test_sms_rejected_at_submit_still_waits_for_the_page(harness):
+    async def scenario():
+        harness.provider.sms_outcome = "failed"
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        assert not session.finished
+        assert policy.INTEGRATED_LINK_SENT not in harness.spoken
+        assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
+        await asyncio.sleep(0.02)
+        assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
+        await say(session, "stop")
+        assert session.finished
+        assert harness.service.receipt(session.call.call_id).snapshot.error_code == "stopped"
+    asyncio.run(scenario())
+
+
+def test_timing_out_after_a_bounced_text_keeps_the_carrier_code(harness):
+    async def scenario():
+        harness.provider.sms_outcome = "failed"
+        session = await harness.session()
+        await answer_survey(session)
+        await asyncio.wait_for(session._background, 1)
+        assert harness.spoken[-1] == policy.INTEGRATED_TIMED_OUT
         assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
         assert store.get_call("patient1", session.call.call_id)["call_status"] == "completed"
-        assert store.get_call("patient1", session.call.call_id)["sms_status"] == "failed"
     asyncio.run(scenario())
 
 
@@ -500,9 +537,11 @@ def test_a_spoken_ready_does_not_hide_an_undelivered_text(harness):
         await say(session, "ready")
         assert session.link_open
         await harness.service.sms_event(session.call.call_id, 0, "SMfake1", "failed", error="provider_rejected")
-        await asyncio.wait_for(session._background, 1)
+        await asyncio.sleep(0.02)
+        assert not session.finished
         assert harness.spoken[-1] == policy.INTEGRATED_SMS_FAILED
         assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
+        await session.disconnect()
     asyncio.run(scenario())
 
 

@@ -232,7 +232,9 @@ class IntegratedService:
             snapshot = value.snapshot
             if snapshot.call_status not in TERMINAL_CALL:
                 snapshot.call_status = status
-                snapshot.error_code = error
+                # A call that outlives its bounced text keeps the carrier code.
+                if error is not None or snapshot.sms_status != "failed":
+                    snapshot.error_code = error
             if snapshot.survey_status not in TERMINAL_SURVEY:
                 if status == "stopped":
                     snapshot.survey_status = "stopped"
