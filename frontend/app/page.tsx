@@ -71,7 +71,7 @@ export default function Home() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">Sana</h1>
             <p className="text-xs text-muted-foreground">
-              Clinical gait monitoring & fall-risk analytics
+              Helping you Heal
             </p>
           </div>
         </div>
