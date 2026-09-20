@@ -159,9 +159,10 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
     answers = (["unknown"] * 7 if unknown else
                ["7", "2", "yes", "I tripped on a rug", "yes",
                 "After standing up", "hip stiffness; unstable walking"])
-    for answer in answers:
-        for text in (answer, "yes"):
-            ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": text}))
+    for index, answer in enumerate(answers):
+        ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": answer}))
+        if not unknown and index in {3, 5, 6}:  # free text is read back for a yes/no
+            ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "yes"}))
     for _ in range(6):
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "mild"}))
     state = poll(phone, call_id, lambda row: row["snapshot"]["sms_status"] in {
