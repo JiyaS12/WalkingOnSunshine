@@ -889,7 +889,7 @@ export default function WebcamFeed({
         : "waiting for frames";
 
   return (
-    <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
+    <div className="rounded-3xl border-0 bg-card p-3 shadow-pillow sm:rounded-[2.25rem] sm:p-5">
       <div className="mb-3">
         <div
           role="radiogroup"
@@ -905,13 +905,13 @@ export default function WebcamFeed({
               setMode("live");
               setPaused(false);
             }}
-            className={`flex items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
+            className={`flex min-h-11 items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "live"
                 ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                 : "bg-card text-muted-foreground shadow-pillow-inset"
             }`}
           >
-            <Camera className="h-4 w-4" />
+            <Camera className="h-4 w-4 shrink-0" />
             {patientFacing ? "Use camera" : "Live Camera (MediaPipe Pose)"}
           </button>
           <button
@@ -921,13 +921,13 @@ export default function WebcamFeed({
               setError(null);
               setMode("upload");
             }}
-            className={`flex items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
+            className={`flex min-h-11 items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "upload"
                 ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                 : "bg-card text-muted-foreground shadow-pillow-inset"
             }`}
           >
-            <Upload className="h-4 w-4" />
+            <Upload className="h-4 w-4 shrink-0" />
             Upload Video
           </button>
         </div>
@@ -936,7 +936,7 @@ export default function WebcamFeed({
             ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
             : "Stand with your full body visible for 60 calibration frames. Then walk across the frame if safe and choose Save this walk. Only joint coordinates leave the browser."}
         </p>
-        {mode === "live" && <button className="mt-2 rounded-full bg-muted px-3 py-1 text-xs text-foreground shadow-pillow-sm"
+        {mode === "live" && <button className="mt-2 min-h-11 rounded-full bg-muted px-4 text-sm text-foreground shadow-pillow-sm sm:min-h-0 sm:px-3 sm:py-1 sm:text-xs"
           onClick={() => {
             onInputResetRef.current?.();
             setPaused((value) => !value);
@@ -951,15 +951,15 @@ export default function WebcamFeed({
         </div>
       )}
 
-      <div className="rounded-[2.5rem] bg-gradient-to-br from-pastel-blue via-pastel-blue to-pastel-sage/70 p-3 shadow-pillow-lg">
-        <div className="mb-2 flex items-center justify-between px-1 text-xs text-foreground">
+      <div className="rounded-3xl bg-gradient-to-br from-pastel-blue via-pastel-blue to-pastel-sage/70 p-2 shadow-pillow-lg sm:rounded-[2.5rem] sm:p-3">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1 text-xs text-foreground">
           {mode === "live" ? (
             <>
-              <span className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${statusDot}`} />
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot}`} />
                 {patientFacing ? (cameraBlocked ? "Camera unavailable" : trackingStatus === "no-person" ? "Please move into view" : legLengthM ? "Ready for your walk" : "Getting the camera ready…") : statusText}
               </span>
-              <span className="flex items-center gap-2">
+              <span className="flex shrink-0 items-center gap-2">
                 {!patientFacing && statusDetail && <span className="opacity-70">{statusDetail}</span>}
                 <span className="rounded-full bg-pastel-peach px-2 py-0.5 text-[10px] font-semibold tracking-wider">
                   LIVE
@@ -975,14 +975,14 @@ export default function WebcamFeed({
             </>
           )}
         </div>
-        <div className="relative aspect-video overflow-hidden rounded-2xl">
+        <div className={`relative overflow-hidden rounded-2xl ${patientFacing ? "aspect-[3/4] sm:aspect-video" : "aspect-video"}`}>
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
           // Patients see the plain video, never the tracking overlay.
-          className={`pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover ${patientFacing ? "" : "opacity-0"}`}
+          className={`pointer-events-none absolute inset-0 h-full w-full -scale-x-100 ${patientFacing ? "object-contain sm:object-cover" : "object-cover opacity-0"}`}
           style={{ display: mode === "live" ? "block" : "none" }}
         />
         {mode === "live" && !cameraBlocked && bodyOutOfFrame && (
@@ -995,9 +995,9 @@ export default function WebcamFeed({
         )}
         {mode === "live" && cameraBlocked && (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
-            <div className="max-w-sm rounded-2xl bg-pastel-peach/70 p-4 text-center shadow-pillow">
+            <div className="max-h-full max-w-sm overflow-y-auto rounded-2xl bg-pastel-peach/70 p-4 text-center shadow-pillow">
               <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
-              <p className="text-xs text-foreground">{cameraBlocked}</p>
+              <p className="text-sm text-foreground sm:text-xs">{cameraBlocked}</p>
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 {embedded && (
                   <button
@@ -1017,7 +1017,7 @@ export default function WebcamFeed({
                     setPaused(false);
                     setRetryNonce((n) => n + 1);
                   }}
-                  className="flex items-center gap-1.5 rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
+                  className="flex min-h-11 items-center gap-1.5 rounded-full bg-pastel-sage px-4 py-1.5 text-sm font-medium text-foreground shadow-pillow-sm sm:min-h-0 sm:px-3 sm:text-xs"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Retry camera
@@ -1028,7 +1028,7 @@ export default function WebcamFeed({
                     setError(null);
                     setMode("upload");
                   }}
-                  className="rounded-2xl bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm"
+                  className="min-h-11 rounded-2xl bg-card px-4 py-1.5 text-sm text-foreground shadow-pillow-sm sm:min-h-0 sm:px-3 sm:text-xs"
                 >
                   Use Upload Video instead
                 </button>
@@ -1059,7 +1059,7 @@ export default function WebcamFeed({
             className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground hover:border-pastel-sage hover:text-foreground"
           >
             <Upload className="h-8 w-8" />
-            <span className="text-sm">
+            <span className="max-w-full truncate px-4 text-sm">
               {uploadName
                 ? uploadName
                 : "Drag a video here or choose a file"}
@@ -1078,14 +1078,14 @@ export default function WebcamFeed({
           </div>
         )}
         {mode === "upload" && uploadCaption && (
-          <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
-            <span className="rounded-full bg-card/90 px-2 py-0.5 text-[10px] text-foreground shadow-pillow-sm">
+          <div className="absolute bottom-2 left-2 right-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 truncate rounded-full bg-card/90 px-2 py-0.5 text-[10px] text-foreground shadow-pillow-sm">
               {uploadCaption}
             </span>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="rounded-full bg-card/90 px-2 py-0.5 text-[10px] font-medium text-foreground shadow-pillow-sm"
+              className="min-h-9 shrink-0 rounded-full bg-card/90 px-3 py-0.5 text-xs font-medium text-foreground shadow-pillow-sm sm:min-h-0 sm:px-2 sm:text-[10px]"
             >
               Analyze another video
             </button>
