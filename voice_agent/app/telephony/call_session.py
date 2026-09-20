@@ -13,7 +13,7 @@ from ..voice_adapter import VoiceAdapter
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_STATES = {"complete", "escalated"}
+TERMINAL_STATES = {"complete", "escalated", "stopped"}
 # How long the caller walks in front of the camera before we sign off.
 WALK_SECONDS = 15.0
 

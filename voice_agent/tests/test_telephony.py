@@ -190,6 +190,20 @@ def test_call_session_escalates_after_repeated_silence():
     assert session.persistence.calls["sess-1"].final_status == "escalated"
 
 
+def test_call_session_hangs_up_when_the_patient_asks_to_stop():
+    session, spoken = build_session()
+
+    async def scenario() -> bool:
+        await session.begin()
+        session.add_transcript("please stop")
+        return await session.flush_utterance()
+
+    assert asyncio.run(scenario()) is True
+    assert session.finished
+    assert not session.engine.session.needs_human_review
+    assert "stop" in spoken[-1].lower()
+
+
 def test_call_session_completes_and_prepares_handoff():
     session, spoken = build_session()
 

@@ -315,12 +315,8 @@ class MediaStreamBridge:
                     }
                 )
                 sent_frames += 1
-                ahead = (
-                    started
-                    + sent_frames * FRAME_SECONDS
-                    + PLAYBACK_LEAD_SECONDS
-                    - loop.time()
-                )
+                # Stay at most PLAYBACK_LEAD_SECONDS of audio ahead of the caller.
+                ahead = started + sent_frames * FRAME_SECONDS - PLAYBACK_LEAD_SECONDS - loop.time()
                 if ahead > 0:
                     await asyncio.sleep(ahead)
         # Everything is queued now and Twilio is a couple of seconds behind, so
@@ -549,6 +545,10 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             elif CallStatus in CARRIER_FAILURES and record.final_status is None:
                 record.status = "completed"
                 record.final_status = CallStatus
+            elif CallStatus == "completed" and record.final_status is None:
+                # The patient hung up before the survey reached a terminal state.
+                record.status = "completed"
+                record.final_status = "hung_up"
         return Response(status_code=204)
 
     @app.websocket(MEDIA_PATH)

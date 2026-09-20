@@ -120,6 +120,26 @@ def test_status_webhook_marks_a_call_the_patient_never_answered(client, monkeypa
     assert record["call_sid"] == "CA2"
 
 
+def test_status_webhook_closes_a_call_the_patient_hung_up_on(client, monkeypatch):
+    async def fake_place_call(**kwargs):
+        return phone_app.twilio.PlacedCall(
+            call_sid="CA3", status="queued", to_number=kwargs["to_number"]
+        )
+
+    monkeypatch.setattr(phone_app.twilio, "place_call_async", fake_place_call)
+    session_id = client.post(
+        "/api/calls", json={"to_number": "+14155550123", "patient_code": "RGN-0417"}
+    ).json()["session_id"]
+
+    client.post("/twilio/status", data={"CallSid": "CA3", "CallStatus": "in-progress"})
+    assert client.get(f"/api/calls/{session_id}").json()["status"] == "in_progress"
+
+    client.post("/twilio/status", data={"CallSid": "CA3", "CallStatus": "completed"})
+    record = client.get(f"/api/calls/{session_id}").json()
+    assert record["status"] == "completed"
+    assert record["final_status"] == "hung_up"
+
+
 def test_start_call_rejects_unknown_patient(client):
     response = client.post("/api/calls", json={"to_number": "+14155550123", "patient_code": "NOPE"})
     assert response.status_code == 404
@@ -284,8 +304,14 @@ def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
     assert any(message["event"] == "clear" for message in websocket.sent)
 
 
-def test_the_mic_feed_is_muted_while_a_prompt_plays(client):
+def test_the_mic_feed_is_muted_while_a_prompt_plays(client, monkeypatch):
     """Deepgram must not hear the prompt the handset echoes back at us."""
+
+    async def slow_tts(text: str, api_key: str, model: str) -> bytes:
+        return b"\xff" * (160 * 25)  # half a second per chunk, paced in real time
+
+    monkeypatch.setattr(phone_app, "synthesize_mulaw_async", slow_tts)
+    monkeypatch.setattr(phone_app, "PLAYBACK_LEAD_SECONDS", 0.0)
 
     start = {
         "event": "start",
@@ -325,3 +351,38 @@ def test_the_mic_feed_is_muted_while_a_prompt_plays(client):
 
     assert bridge.transcriber.audio_frames[0] == b"\x01" * 160
     assert bridge.transcriber.audio_frames[-1] == phone_app.MULAW_SILENCE
+
+
+def test_prompt_audio_is_sent_ahead_of_playback_without_an_opening_gap(client, monkeypatch):
+    """The first frames go out at once; only audio beyond the lead is paced."""
+
+    async def two_seconds(text: str, api_key: str, model: str) -> bytes:
+        return b"\xff" * (160 * 100)
+
+    monkeypatch.setattr(phone_app, "synthesize_mulaw_async", two_seconds)
+    monkeypatch.setattr(phone_app, "PLAYBACK_LEAD_SECONDS", 1.0)
+    websocket = StubWebSocket([])
+    bridge = phone_app.MediaStreamBridge(
+        websocket,
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        transcriber_factory=ScriptedTranscriber,
+    )
+    bridge.stream_sid = "MZ1"
+
+    async def drive() -> tuple[float, float]:
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        task = asyncio.create_task(bridge._stream_speech("One sentence.", "prompt-1"))
+        while len([m for m in websocket.sent if m["event"] == "media"]) < 50:
+            await asyncio.sleep(0.005)
+        halfway = loop.time() - started
+        await task
+        return halfway, loop.time() - started
+
+    halfway, total = asyncio.run(drive())
+    # One second of audio (the lead) is queued immediately rather than after a wait...
+    assert halfway < 0.5
+    # ...and the remaining second is paced so the whole 2s prompt finishes ~1s early.
+    assert 0.8 < total < 1.6

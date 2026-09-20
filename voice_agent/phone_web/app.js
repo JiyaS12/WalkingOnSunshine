@@ -102,6 +102,7 @@ function describeOutcome(record) {
   if (record.final_status === "no-answer") return "The patient did not answer.";
   if (record.final_status === "busy") return "The line was busy.";
   if (record.final_status === "failed") return "Twilio could not connect the call.";
+  if (record.final_status === "hung_up") return "The patient hung up before the survey finished.";
   return `Call ended (${record.final_status || "unknown"}).`;
 }
 
