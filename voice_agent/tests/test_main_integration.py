@@ -237,6 +237,8 @@ def test_repeated_unclear_consent_replies_default_to_no(harness):
     ("yes, I can't wait", "yes"), ("yes, I can\u2019t wait to get the text", "yes"),
     ("sure, I won't hesitate to open it", "yes"), ("sure, but I can't get texts", "no"),
     ("okay, I won't be able to open the link", "no"), ("fine, but I cannot receive messages", "no"),
+    ("sure, but I can't access the link", "no"), ("yes but I can't click the link", "no"),
+    ("okay, I won't be able to view the message", "no"), ("sure, I can't open it", "no"),
     ("I can't wait", "unclear"),
     ("hmm", "unclear"), ("what link", "unclear"), ("", "unclear"),
 ])

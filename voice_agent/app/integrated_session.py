@@ -30,18 +30,21 @@ _CONSENT_YES = re.compile(
 _CONSENT_NO = re.compile(
     r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later|stop)\b"
 )
-_INABILITY = r"\b(?:can't|cannot|can not|won't|will not|unable to|not able to)\b(?: be able to)?"
-# Only an inability aimed at the text itself refuses ("you can't text me",
-# "sure, but I won't be able to open the link"); idioms like "can't wait to
-# get the text" or "won't hesitate to open it" do not match.
-_CONSENT_CANNOT_TEXT = re.compile(
-    _INABILITY + r"\s+(?:text|send|message)\s+(?:me|it|that|anything)\b"
-    r"|" + _INABILITY + r"\s+(?:get|receive|read|open|see|use)\s+(?:\w+\s+){0,2}?"
-    r"(?:text|texts|texting|message|messages|link|links|it)\b"
+# "can't wait (to get the text)" / "won't hesitate (to open it)" are eagerness,
+# not inability.
+_INABILITY = (
+    r"\b(?:can't|cannot|can not|won't|will not|unable to|not able to)\b"
+    r"(?!\s+(?:wait|hesitate)\b)(?: be able to)?"
 )
-# A bare inability with no agreement anywhere ("I won't be able to") is a no;
-# "can't wait" is excitement, not inability.
-_CONSENT_CANNOT = re.compile(_INABILITY + r"(?!\s+wait\b)")
+# Any inability whose object, within a few words, is the text or link refuses
+# ("you can't text me", "sure, but I can't access the link", "won't be able
+# to view the message"); a verb list would miss ordinary phrasings.
+_CONSENT_CANNOT_TEXT = re.compile(
+    _INABILITY + r"(?:\W+\w+){0,4}?\W+(?:text|texts|texting|message|messages|link|links)\b"
+    r"|" + _INABILITY + r"\s+(?:send|open|get|receive|read|see|view|access|click|use)\s+(?:it|that)\b"
+)
+# A bare inability with no agreement anywhere ("I won't be able to") is a no.
+_CONSENT_CANNOT = re.compile(_INABILITY)
 _CURLY_APOSTROPHES = str.maketrans("\u2019\u2018\u02bc", "'''")
 # "no problem" / "not a problem" are agreement, not refusal.
 _CONSENT_NOT_REFUSAL = re.compile(r"\b(?:no|not a|not really a) (?:problem|worries|issue)\b")
