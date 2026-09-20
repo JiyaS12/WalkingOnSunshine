@@ -119,7 +119,7 @@ The integration-specific frontend fixtures mock walking status explicitly.
    metadata and allocates `call_id`/`attempt_id`.
 3. Provide an E.164 destination and start once. Keep the same request ID when
    recovering an uncertain HTTP result; a new ID is a new request.
-4. Phone collects seven generic facts, preserving refusals/unknowns as null,
+4. Phone collects three generic facts (pain, falls, dizziness), preserving refusals/unknowns as null,
    and six condition items. Explicit selections are confirmed values; inferred
    proposals require a separate yes/no confirmation. Stop/clarification limits
    terminate or escalate rather than fabricating answers.

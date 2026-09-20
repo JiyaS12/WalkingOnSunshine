@@ -483,6 +483,65 @@ def test_a_one_word_answer_over_the_question_is_kept_without_cutting_it(client, 
     assert not any(message["event"] == "clear" for message in websocket.sent)
 
 
+def test_an_answer_finalised_just_after_the_prompt_ends_still_counts(client, monkeypatch):
+    """Deepgram may only finalise a prompt-tail answer after Twilio's mark.
+
+    A caller we already heard talking is listened to through the echo tail
+    instead of having their final transcript dropped as our own voice.
+    """
+
+    monkeypatch.setattr(phone_app, "ECHO_GRACE_SECONDS", 5.0)
+    start = {
+        "event": "start",
+        "streamSid": "MZ1",
+        "start": {
+            "streamSid": "MZ1",
+            "callSid": "CA1",
+            "customParameters": {
+                "patientCode": "RGN-0417",
+                "sessionId": "sess-2c",
+                "streamToken": client.app.state.stream_tickets.issue("sess-2c"),
+            },
+        },
+    }
+    websocket = StubWebSocket([start])
+    bridge = phone_app.MediaStreamBridge(
+        websocket,
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        client.app.state.stream_tickets,
+        transcriber_factory=ScriptedTranscriber,
+    )
+
+    async def until(predicate) -> None:
+        deadline = asyncio.get_running_loop().time() + 10
+        while not predicate():
+            assert asyncio.get_running_loop().time() < deadline, "timed out"
+            await asyncio.sleep(0.01)
+
+    async def answer_across_the_mark() -> None:
+        await until(lambda: bridge._interruptible)
+        ScriptedTranscriber.queue.append(SpeechEvent("transcript", "terrible", False))
+        await until(lambda: bridge._early_answer)
+        mark = next(m for m in websocket.sent if m["event"] == "mark")
+        websocket.inbound.append(json.dumps({"event": "mark", "mark": mark["mark"]}))
+        await until(lambda: not bridge.bot_speaking)
+        ScriptedTranscriber.queue.append(SpeechEvent("transcript", "Terrible.", True))
+        ScriptedTranscriber.queue.append(SpeechEvent("utterance_end"))
+        record = client.app.state.persistence.calls["sess-2c"]
+        await until(lambda: any(line.startswith("patient:") for line in record.transcript))
+        websocket.inbound.append(json.dumps({"event": "stop"}))
+
+    async def drive() -> None:
+        await asyncio.gather(bridge.run(), answer_across_the_mark())
+
+    asyncio.run(drive())
+
+    record = client.app.state.persistence.calls["sess-2c"]
+    assert any(line.startswith("patient: Terrible.") for line in record.transcript)
+
+
 def test_the_mic_feed_is_muted_while_a_prompt_plays(client, monkeypatch):
     """Deepgram must not hear the prompt the handset echoes back at us."""
 

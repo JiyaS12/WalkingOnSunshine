@@ -51,34 +51,14 @@ class IntakeQuestion:
     kind: str
 
 
+# Kept to the three questions the care team acts on so the call reaches the
+# condition survey quickly; the remaining SurveyPayload fields stay unset.
 QUESTIONS = (
+    IntakeQuestion("pain_scale", "On a scale of one to ten, how's your pain today?", "pain"),
     IntakeQuestion(
-        "pain_scale",
-        "On a scale from one to ten, how would you rate your pain right now? If you're not sure, just say so.",
-        "pain",
+        "falls_last_6_months", "How many times have you fallen in the last six months?", "count",
     ),
-    IntakeQuestion(
-        "falls_last_6_months",
-        "In the last six months, how many times have you fallen? None is fine to say.",
-        "count",
-    ),
-    IntakeQuestion("injured", "Have you been hurt in a fall in the last six months?", "boolean"),
-    IntakeQuestion(
-        "last_fall_description",
-        "Could you tell me a little about your most recent fall or injury? If there wasn't one, just say none.",
-        "text",
-    ),
-    IntakeQuestion("dizziness", "Have you been feeling dizzy at all lately?", "boolean"),
-    IntakeQuestion(
-        "dizziness_notes",
-        "Is there anything you'd like to tell your care team about the dizziness? You can say none.",
-        "text",
-    ),
-    IntakeQuestion(
-        "primary_complaints",
-        "Lastly, what's bothering you the most these days? You can name a few things, or say none.",
-        "complaints",
-    ),
+    IntakeQuestion("dizziness", "Any dizziness lately?", "boolean"),
 )
 
 
@@ -133,7 +113,7 @@ class GenericIntake:
         self.failures = 0
         if self.index == len(QUESTIONS):
             self.state = "complete"
-            return "Thank you, that covers the general questions."
+            return "Thanks."
         ack = ACKNOWLEDGMENTS[self._acknowledged % len(ACKNOWLEDGMENTS)]
         self._acknowledged += 1
         return f"{ack} {self.prompt()}"
@@ -185,12 +165,14 @@ class GenericIntake:
             raise ValueError("All generic questions must be explicitly confirmed.")
         return {
             "pain_scale": self.values["pain_scale"],
-            "fall_history": {key: self.values[key] for key in (
-                "falls_last_6_months", "injured", "last_fall_description",
-            )},
+            "fall_history": {
+                "falls_last_6_months": self.values["falls_last_6_months"],
+                "injured": None,
+                "last_fall_description": None,
+            },
             "dizziness": self.values["dizziness"],
-            "dizziness_notes": self.values["dizziness_notes"],
-            "primary_complaints": self.values["primary_complaints"],
+            "dizziness_notes": None,
+            "primary_complaints": None,
         }
 
 

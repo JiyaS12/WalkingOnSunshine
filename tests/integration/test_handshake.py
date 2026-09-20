@@ -156,13 +156,9 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
         "Authorization": "Bearer invalid",
     }).status_code == 401
     ok(phone.post(f"/fixture/calls/{call_id}/begin"))
-    answers = (["unknown"] * 7 if unknown else
-               ["7", "2", "yes", "I tripped on a rug", "yes",
-                "After standing up", "hip stiffness; unstable walking"])
-    for index, answer in enumerate(answers):
+    answers = ["unknown"] * 3 if unknown else ["7", "2", "yes"]
+    for answer in answers:
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": answer}))
-        if not unknown and index in {3, 5, 6}:  # free text is read back for a yes/no
-            ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "yes"}))
     for _ in range(6):
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "mild"}))
     state = poll(phone, call_id, lambda row: row["snapshot"]["sms_status"] in {
@@ -176,15 +172,11 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
     payload = state["submission"]
     assert payload["pain_scale"] == (None if unknown else 7)
     assert payload["fall_history"]["falls_last_6_months"] == (None if unknown else 2)
-    assert payload["fall_history"]["injured"] == (None if unknown else True)
-    assert payload["fall_history"]["last_fall_description"] == (
-        None if unknown else "I tripped on a rug"
-    )
+    assert payload["fall_history"]["injured"] is None
+    assert payload["fall_history"]["last_fall_description"] is None
     assert payload["dizziness"] == (None if unknown else True)
-    assert payload["dizziness_notes"] == (None if unknown else "After standing up")
-    assert payload["primary_complaints"] == (
-        None if unknown else ["hip stiffness", "unstable walking"]
-    )
+    assert payload["dizziness_notes"] is None
+    assert payload["primary_complaints"] is None
     instrument = "hoos_jr" if condition == "orthopedic" else "stroke_mobility"
     assert payload["condition_survey"]["instrument"] == instrument
     assert len(payload["condition_survey"]["answers"]) == 6

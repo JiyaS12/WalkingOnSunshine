@@ -281,11 +281,17 @@ class MediaStreamBridge:
         self._active_mark = None
         self.bot_speaking = False
         self._interruptible = False
-        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         if self.session is not None and self._early_answer:
+            # The caller was already talking over the tail: keep listening
+            # through the echo tail so their final transcript is not lost, and
+            # take what has already been recognised as the answer.
             self._early_answer = False
-            self._start_silence_timer(EARLY_ANSWER_FLUSH_SECONDS)
+            if self.session.pending_transcript:
+                self._start_silence_timer(EARLY_ANSWER_FLUSH_SECONDS)
+            else:
+                self._start_silence_timer()
             return
+        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         if self.session is not None:
             self.session.discard_pending()
         self._start_silence_timer()
@@ -343,11 +349,11 @@ class MediaStreamBridge:
                 ):
                     continue
                 self._cancel_silence_timer()
+                self._early_answer = True
                 if self._is_barge_in(event.text):
                     await self._stop_playback()
                 if event.is_final:
                     self.session.add_transcript(event.text)
-                    self._early_answer = self.bot_speaking
                 continue
             if asyncio.get_running_loop().time() < self._listen_from:
                 continue
