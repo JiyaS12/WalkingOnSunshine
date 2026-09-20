@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VoiceAIThing desktop survey</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main>
+      <h1>VoiceAIThing</h1>
+      <p class="muted">A check-up conversation, one question at a time.</p>
+
+      <label for="token">Operator token</label>
+      <div class="row">
+        <input id="token" type="password" autocomplete="current-password" placeholder="OPERATOR_TOKEN from .env">
+      </div>
+      <label for="patient">Patient code</label>
+      <div class="row">
+        <input id="patient" value="RGN-0417" autocomplete="off">
+        <button id="start">Start survey</button>
+      </div>
+
+      <section id="conversation" aria-live="polite"></section>
+      <audio id="voice" controls hidden aria-label="Survey helper's voice"></audio>
+      <div class="row">
+        <button id="listen-toggle" disabled>Pause microphone</button>
+        <button id="record" disabled>Send now</button>
+      </div>
+      <p id="status" class="muted" role="status">Start a survey to begin.</p>
+      <p class="muted">After the helper finishes, just speak. Your answer sends automatically after about 1.5 seconds of quiet. Use Pause microphone whenever you need a break, or Send now to send sooner.</p>
+    </main>
+    <script src="/static/voice_activity.js?v=handsfree-4"></script>
+    <script src="/static/app.js?v=handsfree-4"></script>
+  </body>
+</html>

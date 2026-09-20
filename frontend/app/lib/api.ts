@@ -1,3 +1,5 @@
+import type { CallRecord, CallStart, ConditionCategory, ConditionSurvey, WalkingEvent, WalkingView } from "./integration";
+
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -56,6 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
+    cache: "no-store",
   });
   if (!res.ok) {
     let detail = `API ${path} failed: ${res.status}`;
@@ -169,21 +172,28 @@ export async function processVideo(
 export interface Survey {
   patient_id: string;
   patient_name?: string | null;
-  pain_scale: number;
-  fall_history: {
-    falls_last_6_months: number;
-    injured: boolean;
+  submission_kind?: "manual" | "integrated";
+  survey_id?: string;
+  condition_survey?: ConditionSurvey | null;
+  pain_scale?: number | null;
+  fall_history?: {
+    falls_last_6_months: number | null;
+    injured?: boolean | null;
     last_fall_description?: string | null;
-  };
-  dizziness: boolean;
+  } | null;
+  dizziness?: boolean | null;
   dizziness_notes?: string | null;
-  primary_complaints: string[];
+  primary_complaints?: string[] | null;
   call_id?: string | null;
   recorded_at?: string | null;
 }
 
 export interface GaitSession {
+  session_id?: string;
+  call_id?: string | null;
+  attempt_id?: string | null;
   label: string;
+  idempotency_key?: string | null;
   recorded_at?: string | null;
   source: string;
   metrics: GaitMetrics;
@@ -192,6 +202,8 @@ export interface GaitSession {
 }
 
 export interface PatientSummary {
+  condition_category?: ConditionCategory | null;
+  active_call_id?: string | null;
   patient_id: string;
   name?: string | null;
   age?: number | null;
@@ -205,12 +217,141 @@ export interface PatientSummary {
 }
 
 export interface PatientRecord {
+  condition_category?: ConditionCategory | null;
+  condition_source?: "clinician" | null;
+  active_call_id?: string | null;
+  calls?: CallRecord[];
   patient_id: string;
   name?: string | null;
   age?: number | null;
   cohort?: string | null;
   surveys: Survey[];
   gait_sessions: GaitSession[];
+}
+
+/** Minimum record exposed by a signed patient link. */
+export interface PatientAccessRecord {
+  patient_id: string;
+  name?: string | null;
+  gait_sessions: GaitSession[];
+}
+
+export interface PatientSessionInput {
+  call_id?: string | null;
+  attempt_id?: string | null;
+  label: string;
+  source: "live" | "upload";
+  idempotency_key: string;
+  metrics: GaitMetrics;
+  frames?: JointFrame[] | null;
+}
+
+function boundedSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(15_000);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+export function fetchPatientWalking(id: string, token: string, signal?: AbortSignal) {
+  return patientAccessRequest<{ walking: WalkingView | null }>(
+    `/api/patient-access/${encodeURIComponent(id)}/walking`, token,
+    { signal: boundedSignal(signal) }
+  );
+}
+
+export function publishWalkingEvent(id: string, token: string, body: WalkingEvent, signal?: AbortSignal) {
+  return patientAccessRequest<{ walking: WalkingView }>(
+    `/api/patient-access/${encodeURIComponent(id)}/walking/events`, token,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: boundedSignal(signal) }
+  );
+}
+
+export function setPatientCondition(id: string, condition_category: ConditionCategory, signal?: AbortSignal) {
+  return request<{ patient_id: string; condition_category: ConditionCategory; condition_source: "clinician" }>(
+    `/api/patients/${encodeURIComponent(id)}/condition`,
+    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ condition_category }), signal: boundedSignal(signal) }
+  );
+}
+
+export function fetchPatientCalls(id: string, signal?: AbortSignal) {
+  return request<{ calls: CallRecord[] }>(`/api/patients/${encodeURIComponent(id)}/calls`, { signal: boundedSignal(signal) });
+}
+
+export function startPatientCall(id: string, body: CallStart, signal?: AbortSignal) {
+  return request<{ call: CallRecord; replayed: boolean }>(`/api/patients/${encodeURIComponent(id)}/calls`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: boundedSignal(signal),
+  });
+}
+
+export function refreshPatientCall(id: string, callId: string, signal?: AbortSignal) {
+  return request<{ call: CallRecord; phone_available: boolean }>(
+    `/api/patients/${encodeURIComponent(id)}/calls/${encodeURIComponent(callId)}/refresh`,
+    { method: "POST", signal: boundedSignal(signal) }
+  );
+}
+
+export function retryPatientSMS(id: string, callId: string, request_id: string, signal?: AbortSignal) {
+  return request<{ call: CallRecord; replayed: boolean }>(
+    `/api/patients/${encodeURIComponent(id)}/calls/${encodeURIComponent(callId)}/sms-retries`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id }), signal: boundedSignal(signal) }
+  );
+}
+
+async function patientAccessRequest<T>(
+  path: string,
+  token: string,
+  init?: RequestInit
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+  });
+  if (!res.ok) {
+    let detail = "Patient access request failed";
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      /* keep the non-sensitive fallback */
+    }
+    throw new ApiError(detail, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function fetchPatientAccess(
+  id: string,
+  token: string,
+  signal?: AbortSignal
+): Promise<PatientAccessRecord> {
+  return patientAccessRequest<PatientAccessRecord>(
+    `/api/patient-access/${encodeURIComponent(id)}`,
+    token,
+    { signal: boundedSignal(signal) }
+  );
+}
+
+export async function addPatientAccessSession(
+  id: string,
+  token: string,
+  body: PatientSessionInput,
+  signal?: AbortSignal
+): Promise<PatientAccessRecord> {
+  return patientAccessRequest<PatientAccessRecord>(
+    `/api/patient-access/${encodeURIComponent(id)}/sessions`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: boundedSignal(signal),
+    }
+  );
 }
 
 export async function fetchPatients(q?: string): Promise<PatientSummary[]> {
