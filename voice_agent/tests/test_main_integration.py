@@ -17,7 +17,9 @@ from starlette.datastructures import FormData
 
 import phone_app
 from app import conversation_policy as policy
-from app.generic_intake import GenericIntake, IntakeReading, lenient_parse, parse_value
+from app.generic_intake import (
+    QUESTIONS, GenericIntake, IntakeReading, OpenAIIntakeInterpreter, lenient_parse, parse_value,
+)
 from app.integrated_service import IntegratedService
 from app.integrated_session import IntegratedSession
 from app.integration_contract import CallStart, SMSRetry
@@ -141,8 +143,11 @@ async def say(session, text):
 
 
 async def answer_survey(session, *, unknown=False):
-    for text in (["unknown"] * 7 if unknown else ["7", "2", "yes", "fell on stairs", "no", "none", "hip pain; trouble walking"]):
+    answers = ["unknown"] * 7 if unknown else ["7", "2", "yes", "fell on stairs", "no", "none", "hip pain; trouble walking"]
+    for index, text in enumerate(answers):
         await say(session, text)
+        if not unknown and index in {3, 6}:
+            await say(session, "yes")
     for _ in range(6):
         await say(session, "mild")
 
@@ -260,7 +265,7 @@ def test_generic_intake_confirmation_pause_and_bounded_rejections():
     ("count", "no falls", 0), ("count", "I haven't fallen", 0), ("count", "once", 1), ("count", "I fell twice", 2),
     ("boolean", "yes I have", True), ("boolean", "no I haven't", False), ("boolean", "not really", False),
     ("pain", "I'm not sure", None), ("count", "no idea", None),
-    ("text", "nothing really", None), ("complaints", "my knee and my back", ["my knee", "my back"]),
+    ("text", "nothing really", None), ("complaints", "no complaints", []),
 ])
 def test_generic_intake_reads_plain_speech_without_confirmation(kind, text, value):
     reading = lenient_parse(kind, text)
@@ -273,6 +278,11 @@ def test_generic_intake_reads_plain_speech_without_confirmation(kind, text, valu
 ])
 def test_generic_intake_does_not_guess(kind, text):
     assert lenient_parse(kind, text).valid is False
+
+
+def test_free_text_is_split_but_proposed_for_confirmation():
+    reading = lenient_parse("complaints", "my knee and my back")
+    assert (reading.valid, reading.value, reading.clear) == (True, ["my knee", "my back"], False)
 
 
 def test_hedged_intake_answers_are_proposed_not_accepted():
@@ -887,8 +897,12 @@ def test_carrier_completion_before_confirmation_still_requires_review(harness):
 ])
 def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, complaints, readback):
     intake = GenericIntake()
-    for response in ["7", "0", "no", answer, "no", answer, answer]:
-        intake.handle(response)
+    for index, response in enumerate(["7", "0", "no", answer, "no", answer, answer]):
+        prompt = intake.handle(response)
+        if index in {3, 5, 6} and notes is not None:
+            assert f'I heard "{readback}".' in prompt
+            assert intake.index == index
+            intake.handle("yes")
     assert intake.complete
     payload = intake.payload()
     assert payload["fall_history"]["last_fall_description"] == notes
@@ -896,12 +910,48 @@ def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, com
     assert payload["primary_complaints"] == complaints
 
 
-def test_absent_notes_are_stored_as_none():
+def test_absent_notes_are_stored_without_confirmation_but_free_text_is_read_back():
     intake = GenericIntake()
     for answer in ["7", "0", "no"]:
         intake.handle(answer)
     intake.handle("none")
     assert intake.values["last_fall_description"] is None
     intake.handle("no")
+    assert 'I heard "Why do you need to know?"' in intake.handle("Why do you need to know?")
+    assert "dizziness_notes" not in intake.values
+    intake.handle("no")
     intake.handle("fell on stairs")
+    intake.handle("yes")
     assert intake.values["dizziness_notes"] == "fell on stairs"
+
+
+@pytest.mark.parametrize("text,value", [
+    ("I am not dizzy", False), ("I'm not dizzy", False), ("I do not think so", False), ("no I haven't", False),
+    ("I don't get dizzy", False), ("yes I am", True), ("I have been", True),
+])
+def test_negated_boolean_replies_are_not_affirmative(text, value):
+    reading = lenient_parse("boolean", text)
+    assert (reading.valid, reading.value) == (True, value)
+
+
+@pytest.mark.parametrize("text", ["5.5", "five point five", "seven and a half", "5,5"])
+def test_fractional_ratings_are_not_rounded(text):
+    assert lenient_parse("pain", text).valid is False
+
+
+def test_model_mode_reasks_free_text_the_model_calls_off_topic():
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    class Choice:
+                        finish_reason = "stop"
+                        message = type("M", (), {"refusal": None, "content": json.dumps(
+                            {"value": None, "unknown": False, "unclear": True}
+                        )})()
+                    return type("R", (), {"choices": [Choice()]})()
+
+    interpreter = OpenAIIntakeInterpreter(Client())
+    assert interpreter.interpret(QUESTIONS[3], "Why do you need to know?").valid is False
+    assert interpreter.interpret(QUESTIONS[0], "about a five").value == 5

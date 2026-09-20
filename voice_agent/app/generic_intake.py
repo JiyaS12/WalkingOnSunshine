@@ -28,10 +28,10 @@ _FILLER = re.compile(
     r"honestly|really|just|so|well|yeah|oh|a|an|the|out of ten|out of 10|on the scale|right now|today|"
     r"my pain is|pain is|falls?|times?|i'?ve had|i had|i have had|i fell|i'?ve fallen)\b"
 )
-_YES_WORDS = re.compile(r"\b(?:yes|yeah|yep|yup|i have|i did|i do|correct|that's right|i was|i am)\b")
-_NO_WORDS = re.compile(
-    r"\b(?:no|nope|nah|not really|i haven't|i have not|i didn't|i did not|i wasn't|i was not|never|none)\b"
-)
+_STRONG_YES = re.compile(r"\b(?:yes|yeah|yep|yup|correct|that's right)\b")
+_YES_WORDS = re.compile(r"\b(?:yes|yeah|yep|yup|i have|i did|i do|correct|that's right|i was|i am|i'm)\b")
+_NO_WORDS = re.compile(r"\b(?:no|nope|nah|never|none|not|n't|haven't|didn't|wasn't|don't|isn't|aren't)\b")
+_DECIMAL = re.compile(r"\b(?:point|decimal|half|quarter)\b|\d\s*[.,]\s*\d")
 _NONE_TEXT = {"none", "nothing", "no", "nope", "nothing to note", "nothing really", "not really",
               "no complaints", "no notes", "nothing to add", "nothing else"}
 ACKNOWLEDGMENTS = ("Got it.", "Okay.", "Thanks.")
@@ -235,9 +235,13 @@ def lenient_parse(kind: str, text: str) -> IntakeReading:
     """Read everyday phrasing deterministically; hedged or mixed replies are never clear."""
     valid, value = parse_value(kind, text)
     if valid:
-        return IntakeReading(True, value, clear=True)
+        # Free text is only clear when it is an explicit "nothing to report"; anything
+        # else is proposed back so an off-topic remark cannot become the answer.
+        return IntakeReading(True, value, clear=kind not in {"text", "complaints"} or not value)
     cleaned = clean_utterance(text)
     if not cleaned or len(text) > MAX_TRANSCRIPT_CHARS:
+        return IntakeReading(False)
+    if kind in {"pain", "count"} and _DECIMAL.search(text.casefold()):
         return IntakeReading(False)
     if any(phrase in cleaned for phrase in UNKNOWN) and kind != "text" and kind != "complaints":
         return IntakeReading(True, None, clear=not _HEDGES.search(cleaned))
@@ -248,14 +252,17 @@ def lenient_parse(kind: str, text: str) -> IntakeReading:
                    for token in stripped.split() if token.isdigit() or token in _NUMBER_WORDS]
         if kind == "count" and not numbers and _NO_WORDS.search(cleaned) and not _YES_WORDS.search(cleaned):
             numbers = [0]
-        if len(set(numbers)) != 1:
+        if len(numbers) != 1:
             return IntakeReading(False)
         number = numbers[0]
         if kind == "pain" and not 1 <= number <= 10:
             return IntakeReading(False)
         return IntakeReading(True, number, clear=not hedged and len(stripped.split()) <= 3)
     if kind == "boolean":
-        yes, no = bool(_YES_WORDS.search(cleaned)), bool(_NO_WORDS.search(cleaned))
+        no = bool(_NO_WORDS.search(cleaned))
+        if no and _STRONG_YES.search(cleaned):
+            return IntakeReading(False)
+        yes = bool(_YES_WORDS.search(cleaned)) and not no
         if yes == no:
             return IntakeReading(False)
         return IntakeReading(True, yes, clear=not hedged)
@@ -289,8 +296,17 @@ class OpenAIIntakeInterpreter:
 
     def interpret(self, question: IntakeQuestion, transcript: str) -> IntakeReading:
         direct = lenient_parse(question.kind, transcript)
-        if direct.valid or not transcript.strip() or len(transcript) > MAX_TRANSCRIPT_CHARS:
+        if (direct.valid and direct.clear) or not transcript.strip() or len(transcript) > MAX_TRANSCRIPT_CHARS:
             return direct
+        if direct.valid and question.kind not in {"text", "complaints"}:
+            return direct
+        model = self._read(question, transcript)
+        if not model.valid and direct.valid:
+            # The model saw a question or an off-topic remark: re-ask instead of proposing it.
+            return IntakeReading(False)
+        return model
+
+    def _read(self, question: IntakeQuestion, transcript: str) -> IntakeReading:
         value_schema = {
             "pain": {"type": ["integer", "null"], "minimum": 1, "maximum": 10},
             "count": {"type": ["integer", "null"], "minimum": 0, "maximum": 999999},
