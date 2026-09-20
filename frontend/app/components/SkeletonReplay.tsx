@@ -53,7 +53,7 @@ export default function SkeletonReplay({
         const hipMidX = (f.left_hip[0] + f.right_hip[0]) / 2;
         const toX = (x: number) => width / 2 + (x - hipMidX) * scale;
         ctx.clearRect(0, 0, width, height);
-        ctx.strokeStyle = "#60a5fa";
+        ctx.strokeStyle = "#8FB4D2";
         ctx.lineWidth = 2;
         for (const [a, b] of SIM_PAIRS) {
           const pa = f[a];
@@ -64,7 +64,7 @@ export default function SkeletonReplay({
           ctx.lineTo(toX(pb[0]), toY(pb[1]));
           ctx.stroke();
         }
-        ctx.fillStyle = "#facc15";
+        ctx.fillStyle = "#B3A8DC";
         for (const joint of Object.values(f)) {
           ctx.beginPath();
           ctx.arc(toX(joint[0]), toY(joint[1]), 4, 0, 2 * Math.PI);
@@ -82,7 +82,7 @@ export default function SkeletonReplay({
       ref={canvasRef}
       width={width}
       height={height}
-      className="h-auto w-full rounded-lg bg-slate-950"
+      className="h-auto w-full rounded-2xl bg-muted shadow-pillow-inset"
     />
   );
 }

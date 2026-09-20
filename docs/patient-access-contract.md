@@ -85,9 +85,31 @@ decode, store, or log the token. Repeating survey ingestion intentionally
 issues a new link; SMS idempotency remains the responsibility of #27. Responses
 that contain the link or patient-scoped data include `Cache-Control: no-store`.
 
+## 1b. Exchange the link token for a patient session (magic link)
+
+The patient UI takes `token` from its initial page URL
+(`/patient/{pid}?token=…`) and exchanges it once for a short-lived HttpOnly
+`sana_patient_session` cookie, then removes the token from the address bar.
+The cookie is itself a signed token bound to the same patient id
+(`PATIENT_SESSION_TTL_SECONDS`, default 4 hours; `Secure` follows
+`CLINICIAN_COOKIE_SECURE`), so it can only read and write that patient.
+
+```http
+GET /api/auth/verify?patient_id=RGN-0417&token=<signed-token> HTTP/1.1
+```
+
+```json
+{ "authenticated": true, "patient_id": "RGN-0417", "expires_at": 1780000000 }
+```
+
+`401` for a bad/expired/mismatched token, `404` when the patient record does
+not exist, `503` when signing is not configured. `DELETE /api/auth/verify`
+clears the cookie. Non-`GET` requests authenticated by the cookie must carry an
+allow-listed browser `Origin`; the bearer form below still works unchanged.
+
 ## 2. Read the patient walking-test view
 
-The patient UI takes `token` from its initial page URL and sends it as a bearer
+The patient UI sends either the session cookie or the link token as a bearer
 credential. It must not put the token into subsequent API query strings or
 browser storage.
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Activity,
@@ -15,18 +16,29 @@ import {
   User,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import TrendGraph, { TrendSession } from "./TrendGraph";
-import TokenEfficiency from "./TokenEfficiency";
 import {
   GaitMetrics,
   JointFrame,
-  PatientRecord,
+  PatientView,
   SummaryResponse,
   ApiError,
   addPatientSession,
+  addPatientViewSession,
   ensureDemoPatient,
   fetchPatient,
+  fetchPatientView,
+  generatePatientViewSummary,
   generateSummary,
+  verifyPatientToken,
 } from "../lib/api";
 
 // trend labels for a reading that has not been saved to the record yet;
@@ -35,10 +47,19 @@ const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
 
 function riskLevel(score: number): { label: string; classes: string } {
   if (score < 0.3)
-    return { label: "LOW", classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40" };
+    return {
+      label: "LOW",
+      classes: "border-0 rounded-full bg-pastel-green text-foreground",
+    };
   if (score < 0.5)
-    return { label: "MODERATE", classes: "bg-amber-600/20 text-amber-300 border-amber-500/40" };
-  return { label: "HIGH", classes: "bg-rose-600/20 text-rose-300 border-rose-500/40" };
+    return {
+      label: "MODERATE",
+      classes: "border-0 rounded-full bg-pastel-peach/70 text-foreground",
+    };
+  return {
+    label: "HIGH",
+    classes: "border-0 rounded-full bg-pastel-peach text-foreground",
+  };
 }
 
 interface CardProps {
@@ -51,33 +72,55 @@ interface CardProps {
 
 function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-400">
+    <Card className="[--card-spacing:1.5rem]">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {title}
-        </span>
-        <span className="text-slate-500">{icon}</span>
-      </div>
-      <div className="mt-2 flex items-end gap-2">
-        <span className="text-2xl font-semibold text-slate-100">{value}</span>
-        {badge && (
-          <span
-            className={`mb-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.classes}`}
-          >
-            {badge.label}
+        </CardTitle>
+        <CardAction>
+          <span className="text-muted-foreground">{icon}</span>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="pt-2">
+        <div className="flex items-end gap-2">
+          <span className="text-3xl font-semibold text-foreground">
+            {value}
           </span>
+          {badge && (
+            <Badge
+              variant="outline"
+              className={`mb-1 text-[10px] font-semibold ${badge.classes}`}
+            >
+              {badge.label}
+            </Badge>
+          )}
+        </div>
+        {sub && (
+          <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
         )}
-      </div>
-      {sub && <p className="mt-1 text-[10px] text-slate-500">{sub}</p>}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
-export default function PatientScreening({ patientId }: { patientId: string }) {
-  const [patient, setPatient] = useState<PatientRecord | null>(null);
+// how the current visitor is authorised: a magic-link patient session cookie
+// (patient-scoped API) or a clinician session (full record API)
+type Access = "patient" | "clinician";
+
+export default function PatientScreening({
+  patientId,
+  token = null,
+}: {
+  patientId: string;
+  token?: string | null;
+}) {
+  const [patient, setPatient] = useState<PatientView | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const accessRef = useRef<Access | null>(null);
 
   const [metrics, setMetrics] = useState<GaitMetrics | null>(null);
   const [metricsFrames, setMetricsFrames] = useState<JointFrame[] | null>(null);
@@ -88,7 +131,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [summaryCount, setSummaryCount] = useState(0);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
@@ -97,12 +139,21 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   const loadPatient = useCallback(async () => {
     const gen = ++patientGenRef.current;
+    setNotFound(false);
+    setLoadError(null);
+    setAuthRequired(false);
     try {
-      const rec = await fetchPatient(patientId);
+      let rec: PatientView;
+      try {
+        rec = await fetchPatientView(patientId);
+        accessRef.current = "patient";
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 401)) throw err;
+        rec = await fetchPatient(patientId);
+        accessRef.current = "clinician";
+      }
       if (gen !== patientGenRef.current) return;
       setPatient(rec);
-      setNotFound(false);
-      setLoadError(null);
       setSessions(
         rec.gait_sessions.map((s) => ({
           label: s.label,
@@ -115,6 +166,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       if (gen !== patientGenRef.current) return;
       if (err instanceof ApiError && err.status === 404) {
         setNotFound(true);
+      } else if (err instanceof ApiError && err.status === 401) {
+        setAuthRequired(true);
       } else {
         setLoadError(err instanceof Error ? err.message : String(err));
       }
@@ -125,8 +178,40 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   useEffect(() => {
     setLoading(true);
-    void loadPatient();
-  }, [loadPatient]);
+    setLinkError(null);
+    if (!token) {
+      void loadPatient();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await verifyPatientToken(patientId, token);
+      } catch (err) {
+        if (cancelled) return;
+        setLinkError(
+          err instanceof ApiError && err.status === 401
+            ? "This link has expired or is not valid."
+            : err instanceof Error
+              ? err.message
+              : String(err)
+        );
+        setLoading(false);
+        return;
+      }
+      if (cancelled) return;
+      // the token is a credential: drop it from the address bar and history
+      window.history.replaceState(
+        window.history.state,
+        "",
+        window.location.pathname
+      );
+      void loadPatient();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, patientId, loadPatient]);
 
   const saveSession = useCallback(
     async (
@@ -138,12 +223,17 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       setSaving(true);
       setSaveNote(null);
       try {
-        await addPatientSession(patientId, {
+        const body = {
           label: `${source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
           source,
           metrics: m,
           frames,
-        });
+        };
+        if (accessRef.current === "patient") {
+          await addPatientViewSession(patientId, body);
+        } else {
+          await addPatientSession(patientId, body);
+        }
         setSaveNote("Saved — your doctor's portal is updated");
         await loadPatient();
       } catch (err) {
@@ -201,8 +291,11 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     setSummaryLoading(true);
     setSummaryError(null);
     try {
-      setSummary(await generateSummary(patientId));
-      setSummaryCount((c) => c + 1);
+      setSummary(
+        await (accessRef.current === "patient"
+          ? generatePatientViewSummary(patientId)
+          : generateSummary(patientId))
+      );
     } catch (err) {
       setSummaryError(
         err instanceof Error ? err.message : "summary request failed"
@@ -214,10 +307,10 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   if (notFound) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-        <div className="max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6 text-center">
-          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-300" />
-          <p className="text-sm text-slate-200">
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="max-w-sm rounded-3xl bg-card p-8 text-center shadow-pillow">
+          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-pastel-peach" />
+          <p className="text-sm text-foreground">
             We couldn&apos;t find this patient link.
           </p>
           <button
@@ -240,16 +333,16 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                 )
                 .finally(() => setDemoBusy(false));
             }}
-            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10 disabled:opacity-50"
+            className="mt-4 block w-full rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
           >
             {demoBusy ? "Creating…" : `Create demo profile for ${patientId}`}
           </button>
           {demoError && (
-            <p className="mt-2 text-xs text-rose-300">{demoError}</p>
+            <p className="mt-2 text-xs text-foreground">{demoError}</p>
           )}
           <Link
             href="/"
-            className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+            className="mt-4 inline-block rounded-2xl bg-card px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm"
           >
             Back to home
           </Link>
@@ -260,119 +353,161 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
+      <main className="flex min-h-screen items-center justify-center text-muted-foreground">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your
         screening…
       </main>
     );
   }
 
+  if (linkError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="w-full max-w-sm rounded-[2.25rem] bg-card p-6 text-center shadow-pillow">
+          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-pastel-peach" />
+          <p className="text-sm">{linkError}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Ask your care team to send a new link, or open the home page to
+            look up your record.
+          </p>
+          <Link
+            href="/"
+            className="mt-4 inline-block rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep"
+          >
+            Back to home
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="w-full max-w-sm rounded-[2.25rem] bg-card p-6 text-center shadow-pillow">
+          <p className="text-sm">
+            Patient records are protected. Open the screening link from your
+            text message, or sign in as a clinician to open this screening.
+          </p>
+          <Link
+            href={`/doctor?next=${encodeURIComponent(`/patient/${patientId}`)}`}
+            className="mt-4 inline-block rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep"
+          >
+            Clinician sign-in
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   if (loadError) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-        <p className="text-sm text-rose-300">
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <p className="text-sm text-foreground">
           Failed to load patient: {loadError}
         </p>
       </main>
     );
   }
 
-  const latestSurvey = patient?.surveys?.length
-    ? patient.surveys[patient.surveys.length - 1]
-    : null;
   const hasSessions = (patient?.gait_sessions?.length ?? 0) > 0;
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <main className="min-h-screen p-6 text-foreground">
+      <header className="mx-auto mb-8 flex max-w-6xl flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Activity className="h-8 w-8 text-emerald-400" />
+          <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
-            <h1 className="text-2xl font-bold">GaitGuard AI</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="text-2xl font-bold text-foreground">Sana</h1>
+            <p className="text-xs text-muted-foreground">
               Gait screening for {patient?.name ?? patientId} · {patientId}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-            <User className="h-3.5 w-3.5 text-slate-400" />
+          <span className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
             {patient?.name ?? patientId}
           </span>
           <Link
             href="/doctor"
-            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+            className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
           >
-            <Stethoscope className="h-3.5 w-3.5 text-slate-400" />
+            <Stethoscope className="h-3.5 w-3.5 text-muted-foreground" />
             Doctor&apos;s Portal
           </Link>
         </div>
       </header>
 
-      <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900 p-4">
-        <h2 className="mb-1 text-sm font-medium text-slate-200">
-          From your phone survey
-        </h2>
-        {latestSurvey ? (
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
-            <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-2 py-0.5 text-amber-300">
-              pain {latestSurvey.pain_scale}/10
-            </span>
-            <span>
-              falls (6 mo): {latestSurvey.fall_history.falls_last_6_months}
-              {latestSurvey.fall_history.injured ? " · injured" : ""}
-            </span>
-            <span>dizziness: {latestSurvey.dizziness ? "yes" : "no"}</span>
-            <span className="flex flex-wrap gap-1">
-              {latestSurvey.primary_complaints.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300"
-                >
-                  {c}
-                </span>
-              ))}
-            </span>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400">No survey on file yet.</p>
-        )}
-      </div>
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        <section>
+          <WebcamFeed
+            onMetrics={handleMetrics}
+            onInputReset={handleInputReset}
+            footer={
+              (metrics && !metrics.gait_detected) ||
+              (metricsSource === "live" && metrics) ||
+              saveNote ? (
+                <div className="flex flex-col gap-2">
+                  {metrics && !metrics.gait_detected && (
+                    <p className="rounded-2xl border-0 bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
+                      No walking detected — walk across the frame (or upload a
+                      clip with walking) to record a session.
+                    </p>
+                  )}
+                  {metricsSource === "live" && metrics && (
+                    <div className="flex items-center gap-2 rounded-3xl bg-card p-4 shadow-pillow">
+                      <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">
+                        Save this walk to your record
+                      </span>
+                      <button
+                        onClick={() => void saveSession("live")}
+                        disabled={saving || !metrics.gait_detected}
+                        className="rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+                      >
+                        {saving ? "Saving…" : "Save this walk"}
+                      </button>
+                    </div>
+                  )}
+                  {saveNote && (
+                    <p className="text-xs text-foreground">{saveNote}</p>
+                  )}
+                </div>
+              ) : null
+            }
+          />
+        </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <WebcamFeed onMetrics={handleMetrics} onInputReset={handleInputReset} />
-
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
-            <MetricCard
-              title="Stride Length"
-              value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
-              icon={<Footprints className="h-4 w-4" />}
-              sub={
-                metrics?.stride_ratio
-                  ? `×${metrics.stride_ratio.toFixed(2)} leg`
-                  : undefined
-              }
-            />
-            <MetricCard
-              title="Asymmetry"
-              value={metrics ? `${metrics.asymmetry_pct.toFixed(1)}%` : "—"}
-              icon={<Gauge className="h-4 w-4" />}
-            />
-            <MetricCard
-              title="Velocity Degradation"
-              value={
-                metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"
-              }
-              icon={<TrendingDown className="h-4 w-4" />}
-            />
-            <MetricCard
-              title="Fall Risk"
-              value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
-              icon={<AlertTriangle className="h-4 w-4" />}
-              badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
-            />
-          </div>
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <MetricCard
+            title="Stride Length"
+            value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
+            icon={<Footprints className="h-4 w-4" />}
+            sub={
+              metrics?.stride_ratio
+                ? `×${metrics.stride_ratio.toFixed(2)} leg`
+                : undefined
+            }
+          />
+          <MetricCard
+            title="Asymmetry"
+            value={metrics ? `${metrics.asymmetry_pct.toFixed(1)}%` : "—"}
+            icon={<Gauge className="h-4 w-4" />}
+          />
+          <MetricCard
+            title="Velocity Degradation"
+            value={
+              metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"
+            }
+            icon={<TrendingDown className="h-4 w-4" />}
+          />
+          <MetricCard
+            title="Fall Risk"
+            value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
+            icon={<AlertTriangle className="h-4 w-4" />}
+            badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
+          />
           <MetricCard
             title="Cadence"
             value={
@@ -380,84 +515,50 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             }
             icon={<Activity className="h-4 w-4" />}
           />
+        </section>
 
-          {metrics && !metrics.gait_detected && (
-            <p className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
-              No walking detected — walk across the frame (or upload a clip
-              with walking) to record a session.
-            </p>
-          )}
-
-          {metricsSource === "live" && metrics && (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3">
-              <Save className="h-4 w-4 shrink-0 text-slate-400" />
-              <span className="text-xs text-slate-400">
-                Save this walk to your record
-              </span>
-              <button
-                onClick={() => void saveSession("live")}
-                disabled={saving || !metrics.gait_detected}
-                className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Save this walk"}
-              </button>
-            </div>
-          )}
-          {saveNote && (
-            <p
-              className={`text-xs ${
-                saveNote.startsWith("Save failed")
-                  ? "text-rose-300"
-                  : "text-emerald-300"
-              }`}
-            >
-              {saveNote}
-            </p>
-          )}
-
+        <section className="grid gap-6 lg:grid-cols-2">
           <TrendGraph sessions={sessions} />
 
-          <TokenEfficiency refresh={summaryCount} lastResult={summary} />
-
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <h2 className="text-sm font-medium text-slate-200">
+          <div className="rounded-3xl bg-card p-5 shadow-pillow">
+            <h2 className="text-sm font-medium text-foreground">
               AI Patient Summary
             </h2>
-            <p className="mb-3 text-xs text-slate-400">
+            <p className="mb-3 text-xs text-muted-foreground">
               Plain-language clinical summary for patients & care teams
             </p>
             <button
               onClick={handleSummary}
               disabled={summaryLoading || !hasSessions}
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               {summaryLoading ? "Generating…" : "Generate Patient Summary"}
             </button>
             {!hasSessions && (
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="mt-1 text-[11px] text-muted-foreground">
                 Complete a walk or upload first — no sessions on file yet.
               </p>
             )}
             {summaryError && (
-              <p className="mt-3 text-xs text-rose-300">{summaryError}</p>
+              <p className="mt-3 text-xs text-foreground">{summaryError}</p>
             )}
             {summary && (
               <div className="mt-3">
-                <p className="text-sm leading-relaxed text-slate-200">
+                <p className="text-sm leading-relaxed text-foreground">
                   {summary.summary}
                 </p>
                 <div className="mt-2 flex gap-2 text-[10px]">
-                  <span className="rounded-full border border-slate-600 px-2 py-0.5 uppercase text-slate-300">
+                  <span className="rounded-full border-0 bg-muted px-2 py-0.5 uppercase text-muted-foreground">
                     {summary.source}
                   </span>
                   {summary.cached && (
-                    <span className="rounded-full border border-sky-500/40 bg-sky-600/20 px-2 py-0.5 uppercase text-sky-300">
+                    <span className="rounded-full border-0 bg-pastel-sage px-2 py-0.5 uppercase text-foreground">
                       served from cache
                     </span>
                   )}
                   {summary.estimated_tokens_saved > 0 && (
-                    <span className="rounded-full border border-slate-600 px-2 py-0.5 text-slate-400">
+                    <span className="rounded-full border-0 bg-muted px-2 py-0.5 text-muted-foreground">
                       ~{summary.estimated_tokens_saved} tokens saved
                     </span>
                   )}
@@ -465,7 +566,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );

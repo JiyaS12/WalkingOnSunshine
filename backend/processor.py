@@ -1,4 +1,4 @@
-"""Gait telemetry processing for GaitGuard AI.
+"""Gait telemetry processing for Sana.
 
 Consumes MediaPipe-style world-coordinate joint positions (meters, y vertical
 with larger y = higher) and produces clinical gait metrics.

@@ -1,4 +1,4 @@
-# GaitGuard AI
+# Sana
 
 AI-assisted gait analysis for clinical mobility monitoring. A
 Python/FastAPI backend processes MediaPipe-style joint telemetry
@@ -45,7 +45,7 @@ gaitguard-ai/
     store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
   frontend/
-    app/page.tsx              landing page with patient links
+    app/page.tsx              landing page (patient ID lookup)
     app/patient/[id]/page.tsx per-patient screening (webcam / upload)
     app/doctor/page.tsx       clinician dashboard (live-syncs)
     app/components/PatientScreening.tsx  patient screening view
