@@ -91,6 +91,12 @@ The patient UI takes `token` from its initial page URL and sends it as a bearer
 credential. It must not put the token into subsequent API query strings or
 browser storage.
 
+The implemented client captures the token in component memory and immediately
+removes it from the visible URL while preserving unrelated query parameters.
+The patient page uses a `no-referrer` policy, does not log the credential, and
+does not use local or session storage. Reloading the scrubbed URL therefore
+requires reopening the original link (or requesting a new one).
+
 ```http
 GET /api/patient-access/RGN-0417 HTTP/1.1
 Authorization: Bearer <signed-token>
@@ -117,6 +123,7 @@ Content-Type: application/json
 {
   "label": "Walking test",
   "source": "live",
+  "idempotency_key": "live_a24f2f4ba26c41e8b3108d57fdd03162_1",
   "metrics": {
     "stride_length_m": 1.0,
     "asymmetry_pct": 5.0,
@@ -140,7 +147,15 @@ The response has the same shape as the authenticated read and includes the
 updated `gait_sessions`. This route shares the existing session implementation:
 Pydantic metric validation, the 300-frame request cap, landmark validation,
 50-session record cap, timestamp ordering, and persistence rollback all remain
-in force.
+in force. `idempotency_key` is a non-secret, client-generated identifier that
+must remain stable when retrying the same analyzed walk. Repeating a write with
+the same key returns the existing record without appending another session.
+
+The client permits saves only when `gait_detected` is true. Upload analyses are
+auto-saved once per analysis, live saves use an in-flight/completed guard, and
+failed saves remain available for an explicit retry. Changing the patient path
+or credential aborts active reads, video work, and session writes; responses
+from the previous route are ignored.
 
 ## Authorization failures
 
@@ -157,3 +172,7 @@ Content-Type: application/json
 
 The existing `/api/patients*` routes are a separate clinician surface. Patient
 tokens are not read or accepted by those routes.
+
+The patient UI presents the same invalid-link state for expired, malformed,
+wrong-patient, and record-not-found responses. It does not fall back to the
+clinician surface or reveal which condition occurred.

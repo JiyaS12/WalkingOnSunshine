@@ -166,6 +166,7 @@ export interface Survey {
 
 export interface GaitSession {
   label: string;
+  idempotency_key?: string | null;
   recorded_at?: string | null;
   source: string;
   metrics: GaitMetrics;
@@ -193,6 +194,79 @@ export interface PatientRecord {
   cohort?: string | null;
   surveys: Survey[];
   gait_sessions: GaitSession[];
+}
+
+/** Minimum record exposed by a signed patient link. */
+export interface PatientAccessRecord {
+  patient_id: string;
+  name?: string | null;
+  gait_sessions: GaitSession[];
+}
+
+export interface PatientSessionInput {
+  label: string;
+  source: "live" | "upload";
+  idempotency_key: string;
+  metrics: GaitMetrics;
+  frames?: JointFrame[] | null;
+}
+
+async function patientAccessRequest<T>(
+  path: string,
+  token: string,
+  init?: RequestInit
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+  });
+  if (!res.ok) {
+    let detail = "Patient access request failed";
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      /* keep the non-sensitive fallback */
+    }
+    throw new ApiError(detail, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function fetchPatientAccess(
+  id: string,
+  token: string,
+  signal?: AbortSignal
+): Promise<PatientAccessRecord> {
+  return patientAccessRequest<PatientAccessRecord>(
+    `/api/patient-access/${encodeURIComponent(id)}`,
+    token,
+    { signal }
+  );
+}
+
+export async function addPatientAccessSession(
+  id: string,
+  token: string,
+  body: PatientSessionInput,
+  signal?: AbortSignal
+): Promise<PatientAccessRecord> {
+  return patientAccessRequest<PatientAccessRecord>(
+    `/api/patient-access/${encodeURIComponent(id)}/sessions`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    }
+  );
 }
 
 export async function fetchPatients(q?: string): Promise<PatientSummary[]> {

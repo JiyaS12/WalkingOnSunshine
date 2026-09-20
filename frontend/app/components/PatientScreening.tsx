@@ -1,44 +1,56 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
+  CheckCircle2,
   Footprints,
   Gauge,
   Loader2,
+  RefreshCw,
   Save,
-  Sparkles,
-  Stethoscope,
+  ShieldAlert,
   TrendingDown,
   User,
+  WifiOff,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
 import TrendGraph, { TrendSession } from "./TrendGraph";
-import TokenEfficiency from "./TokenEfficiency";
 import {
+  ApiError,
   GaitMetrics,
   JointFrame,
-  PatientRecord,
-  SummaryResponse,
-  ApiError,
-  addPatientSession,
-  ensureDemoPatient,
-  fetchPatient,
-  generateSummary,
+  PatientAccessRecord,
+  addPatientAccessSession,
+  fetchPatientAccess,
 } from "../lib/api";
 
-// trend labels for a reading that has not been saved to the record yet;
-// saved sessions carry a timestamped label, so these never collide
 const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
-function riskLevel(score: number): { label: string; classes: string } {
-  if (score < 0.3)
-    return { label: "LOW", classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40" };
-  if (score < 0.5)
-    return { label: "MODERATE", classes: "bg-amber-600/20 text-amber-300 border-amber-500/40" };
-  return { label: "HIGH", classes: "bg-rose-600/20 text-rose-300 border-rose-500/40" };
+type AccessStatus = "loading" | "ready" | "missing" | "invalid" | "offline" | "unavailable";
+
+interface MemoryCredential {
+  patientId: string;
+  token: string;
+}
+
+interface MetricReading {
+  epoch: number;
+  id: string;
+  source: "live" | "upload";
+  metrics: GaitMetrics;
+  frames: JointFrame[] | null;
+  saved: boolean;
+}
+
+interface SaveMessage {
+  epoch: number;
+  kind: "success" | "error";
+  text: string;
+  retry?: MetricReading;
 }
 
 interface CardProps {
@@ -49,13 +61,30 @@ interface CardProps {
   sub?: string;
 }
 
+function riskLevel(score: number): { label: string; classes: string } {
+  if (score < 0.3) {
+    return {
+      label: "LOW",
+      classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40",
+    };
+  }
+  if (score < 0.5) {
+    return {
+      label: "MODERATE",
+      classes: "bg-amber-600/20 text-amber-300 border-amber-500/40",
+    };
+  }
+  return {
+    label: "HIGH",
+    classes: "bg-rose-600/20 text-rose-300 border-rose-500/40",
+  };
+}
+
 function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-400">
-          {title}
-        </span>
+        <span className="text-xs uppercase tracking-wide text-slate-400">{title}</span>
         <span className="text-slate-500">{icon}</span>
       </div>
       <div className="mt-2 flex items-end gap-2">
@@ -73,214 +102,382 @@ function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   );
 }
 
+function AccessPanel({
+  status,
+  onRetry,
+}: {
+  status: Exclude<AccessStatus, "loading" | "ready">;
+  onRetry: () => void;
+}) {
+  const content = {
+    missing: {
+      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-amber-300" />,
+      title: "Secure link required",
+      detail:
+        "Open the complete link sent by your care team. A patient ID by itself cannot open a screening.",
+    },
+    invalid: {
+      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-amber-300" />,
+      title: "This link is no longer valid",
+      detail:
+        "The link may be expired or incomplete. Ask your care team to send a new secure link.",
+    },
+    offline: {
+      icon: <WifiOff className="mx-auto mb-3 h-9 w-9 text-rose-300" />,
+      title: "You appear to be offline",
+      detail: "Check your connection, then try opening the screening again.",
+    },
+    unavailable: {
+      icon: <AlertTriangle className="mx-auto mb-3 h-9 w-9 text-rose-300" />,
+      title: "Screening is temporarily unavailable",
+      detail: "Please try again. If the problem continues, contact your care team.",
+    },
+  }[status];
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
+      <div role="alert" className="max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6 text-center">
+        {content.icon}
+        <h1 className="text-lg font-semibold text-slate-100">{content.title}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">{content.detail}</p>
+        {(status === "offline" || status === "unavailable") && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mx-auto mt-4 flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Try again
+          </button>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function toTrendSessions(record: PatientAccessRecord | null): TrendSession[] {
+  return (record?.gait_sessions ?? []).map((session) => ({
+    label: session.label,
+    asymmetry_pct: session.metrics.asymmetry_pct,
+    fall_risk_score: session.metrics.fall_risk_score,
+    stride_length_m: session.metrics.stride_length_m,
+  }));
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export default function PatientScreening({ patientId }: { patientId: string }) {
-  const [patient, setPatient] = useState<PatientRecord | null>(null);
-  const [notFound, setNotFound] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const searchParams = useSearchParams();
+  const queryToken = searchParams.get("token");
+  const [memoryCredential, setMemoryCredential] = useState<MemoryCredential | null>(
+    () => (queryToken !== null ? { patientId, token: queryToken } : null)
+  );
 
-  const [metrics, setMetrics] = useState<GaitMetrics | null>(null);
-  const [metricsFrames, setMetricsFrames] = useState<JointFrame[] | null>(null);
-  const [metricsSource, setMetricsSource] = useState<
-    "live" | "upload" | null
-  >(null);
-  const [sessions, setSessions] = useState<TrendSession[]>([]);
-  const [summary, setSummary] = useState<SummaryResponse | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [summaryCount, setSummaryCount] = useState(0);
-  const [saveNote, setSaveNote] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [demoBusy, setDemoBusy] = useState(false);
-  const [demoError, setDemoError] = useState<string | null>(null);
-  const patientGenRef = useRef(0);
+  const credential = useMemo(
+    () =>
+      queryToken !== null
+        ? { patientId, token: queryToken }
+        : memoryCredential?.patientId === patientId
+          ? memoryCredential
+          : null,
+    [memoryCredential, patientId, queryToken]
+  );
 
-  const loadPatient = useCallback(async () => {
-    const gen = ++patientGenRef.current;
-    try {
-      const rec = await fetchPatient(patientId);
-      if (gen !== patientGenRef.current) return;
-      setPatient(rec);
-      setNotFound(false);
-      setLoadError(null);
-      setSessions(
-        rec.gait_sessions.map((s) => ({
-          label: s.label,
-          asymmetry_pct: s.metrics.asymmetry_pct,
-          fall_risk_score: s.metrics.fall_risk_score,
-          stride_length_m: s.metrics.stride_length_m,
-        }))
-      );
-    } catch (err) {
-      if (gen !== patientGenRef.current) return;
-      if (err instanceof ApiError && err.status === 404) {
-        setNotFound(true);
-      } else {
-        setLoadError(err instanceof Error ? err.message : String(err));
+  // Capture the credential in component memory, then remove it from the
+  // address bar so browser history, copied URLs, and referrers do not retain it.
+  useEffect(() => {
+    setMemoryCredential((current) => {
+      if (queryToken !== null) {
+        if (current?.patientId === patientId && current.token === queryToken) return current;
+        return { patientId, token: queryToken };
       }
-    } finally {
-      if (gen === patientGenRef.current) setLoading(false);
+      return current?.patientId === patientId ? current : null;
+    });
+
+    if (queryToken !== null) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("token");
+      window.history.replaceState(
+        null,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
     }
-  }, [patientId]);
+  }, [patientId, queryToken]);
+
+  const identitySignature = `${patientId}\u0000${credential?.token ?? ""}`;
+  const identityVersionRef = useRef({ signature: "", epoch: 0 });
+  if (identityVersionRef.current.signature !== identitySignature) {
+    identityVersionRef.current = {
+      signature: identitySignature,
+      epoch: identityVersionRef.current.epoch + 1,
+    };
+  }
+  const identityEpoch = identityVersionRef.current.epoch;
+  const activeEpochRef = useRef(identityEpoch);
+  activeEpochRef.current = identityEpoch;
+  const accessToken = credential?.token ?? null;
+
+  const tokenIsUsable =
+    accessToken !== null &&
+    accessToken.length <= 4096 &&
+    TOKEN_PATTERN.test(accessToken);
+
+  const [access, setAccess] = useState<{ epoch: number; status: AccessStatus } | null>(null);
+  const [patientState, setPatientState] = useState<{
+    epoch: number;
+    record: PatientAccessRecord;
+  } | null>(null);
+  const [readingState, setReadingState] = useState<MetricReading | null>(null);
+  const [saveMessage, setSaveMessage] = useState<SaveMessage | null>(null);
+  const [savingReadingId, setSavingReadingId] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const saveControllersRef = useRef(new Set<AbortController>());
+  const metricIdsRef = useRef(new WeakMap<GaitMetrics, string>());
+  const metricSequenceRef = useRef(0);
+  const inFlightSavesRef = useRef(new Set<string>());
+  const completedSavesRef = useRef(new Set<string>());
 
   useEffect(() => {
-    setLoading(true);
-    void loadPatient();
-  }, [loadPatient]);
+    loadAbortRef.current?.abort();
+    for (const controller of saveControllersRef.current) controller.abort();
+    saveControllersRef.current.clear();
+    const identitySaveControllers = new Set<AbortController>();
+    saveControllersRef.current = identitySaveControllers;
+    metricIdsRef.current = new WeakMap<GaitMetrics, string>();
+    metricSequenceRef.current = 0;
+    inFlightSavesRef.current.clear();
+    completedSavesRef.current.clear();
+    setPatientState(null);
+    setReadingState(null);
+    setSaveMessage(null);
+    setSavingReadingId(null);
+
+    return () => {
+      loadAbortRef.current?.abort();
+      for (const controller of identitySaveControllers) controller.abort();
+      identitySaveControllers.clear();
+    };
+  }, [identityEpoch]);
+
+  useEffect(() => {
+    const epoch = identityEpoch;
+    if (accessToken === null) {
+      setAccess({ epoch, status: "missing" });
+      return;
+    }
+    if (!tokenIsUsable) {
+      setAccess({ epoch, status: "invalid" });
+      return;
+    }
+
+    const controller = new AbortController();
+    loadAbortRef.current?.abort();
+    loadAbortRef.current = controller;
+    setAccess({ epoch, status: "loading" });
+
+    void fetchPatientAccess(patientId, accessToken, controller.signal)
+      .then((record) => {
+        if (controller.signal.aborted || activeEpochRef.current !== epoch) return;
+        if (record.patient_id !== patientId) {
+          setPatientState(null);
+          setAccess({ epoch, status: "invalid" });
+          return;
+        }
+        setPatientState({ epoch, record });
+        setAccess({ epoch, status: "ready" });
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error) || controller.signal.aborted || activeEpochRef.current !== epoch) {
+          return;
+        }
+        setPatientState(null);
+        if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+          setAccess({ epoch, status: "invalid" });
+        } else if (error instanceof ApiError && error.status === 503) {
+          setAccess({ epoch, status: "unavailable" });
+        } else if (!(error instanceof ApiError) || !navigator.onLine) {
+          setAccess({ epoch, status: "offline" });
+        } else {
+          setAccess({ epoch, status: "unavailable" });
+        }
+      });
+
+    return () => controller.abort();
+  }, [accessToken, identityEpoch, patientId, retryNonce, tokenIsUsable]);
+
+  const currentAccess: AccessStatus =
+    access?.epoch === identityEpoch
+      ? access.status
+      : accessToken === null
+        ? "missing"
+        : tokenIsUsable
+          ? "loading"
+          : "invalid";
+  const patient = patientState?.epoch === identityEpoch ? patientState.record : null;
+  const reading = readingState?.epoch === identityEpoch ? readingState : null;
+  const currentSaveMessage = saveMessage?.epoch === identityEpoch ? saveMessage : null;
 
   const saveSession = useCallback(
-    async (
-      source: "live" | "upload",
-      m: GaitMetrics | null = metrics,
-      frames: JointFrame[] | null = metricsFrames
-    ) => {
-      if (!m) return;
-      setSaving(true);
-      setSaveNote(null);
+    async (candidate: MetricReading) => {
+      const epoch = candidate.epoch;
+      if (
+        epoch !== activeEpochRef.current ||
+        accessToken === null ||
+        !tokenIsUsable ||
+        !candidate.metrics.gait_detected ||
+        inFlightSavesRef.current.has(candidate.id) ||
+        completedSavesRef.current.has(candidate.id)
+      ) {
+        return;
+      }
+
+      inFlightSavesRef.current.add(candidate.id);
+      setSavingReadingId(candidate.id);
+      setSaveMessage(null);
+      const controller = new AbortController();
+      saveControllersRef.current.add(controller);
+
       try {
-        await addPatientSession(patientId, {
-          label: `${source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
-          source,
-          metrics: m,
-          frames,
-        });
-        setSaveNote("Saved — your doctor's portal is updated");
-        await loadPatient();
-      } catch (err) {
-        setSaveNote(
-          `Save failed: ${err instanceof Error ? err.message : String(err)}`
+        const record = await addPatientAccessSession(
+          patientId,
+          accessToken,
+          {
+            label: `${candidate.source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
+            source: candidate.source,
+            idempotency_key: candidate.id,
+            metrics: candidate.metrics,
+            frames: candidate.frames,
+          },
+          controller.signal
         );
+        if (controller.signal.aborted || activeEpochRef.current !== epoch) return;
+        if (record.patient_id !== patientId) {
+          setPatientState(null);
+          setAccess({ epoch, status: "invalid" });
+          return;
+        }
+
+        completedSavesRef.current.add(candidate.id);
+        setPatientState((current) =>
+          current?.epoch === epoch &&
+          current.record.gait_sessions.length > record.gait_sessions.length
+            ? current
+            : { epoch, record }
+        );
+        setReadingState((current) =>
+          current?.epoch === epoch && current.id === candidate.id
+            ? { ...current, saved: true }
+            : current
+        );
+        setSaveMessage({ epoch, kind: "success", text: "Walk saved successfully." });
+      } catch (error: unknown) {
+        if (isAbortError(error) || controller.signal.aborted || activeEpochRef.current !== epoch) {
+          return;
+        }
+        if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+          setPatientState(null);
+          setSaveMessage(null);
+          setAccess({ epoch, status: "invalid" });
+        } else if (error instanceof ApiError && error.status === 422) {
+          setSaveMessage({
+            epoch,
+            kind: "error",
+            text: "This walk could not be saved. Please record another walk.",
+          });
+        } else {
+          setSaveMessage({
+            epoch,
+            kind: "error",
+            text:
+              error instanceof ApiError && error.status === 503
+                ? "Saving is temporarily unavailable."
+                : "The walk was not saved. Check your connection and try again.",
+            retry: candidate,
+          });
+        }
       } finally {
-        setSaving(false);
+        saveControllersRef.current.delete(controller);
+        inFlightSavesRef.current.delete(candidate.id);
+        if (activeEpochRef.current === epoch) {
+          setSavingReadingId((current) => (current === candidate.id ? null : current));
+        }
       }
     },
-    [patientId, metrics, metricsFrames, loadPatient]
+    [accessToken, patientId, tokenIsUsable]
   );
 
   const handleMetrics = useCallback(
-    (m: GaitMetrics, source: "live" | "upload", frames?: JointFrame[]) => {
-      setMetrics(m);
-      setMetricsSource(source);
-      setMetricsFrames(frames ?? null);
-      setSessions((prev) => {
-        const label = UNSAVED_LABEL[source];
-        const rest = prev.filter((s) => s.label !== label);
-        if (!m.gait_detected) return rest;
-        return [
-          ...rest,
-          {
-            label,
-            asymmetry_pct: m.asymmetry_pct,
-            fall_risk_score: m.fall_risk_score,
-            stride_length_m: m.stride_length_m,
-          },
-        ];
-      });
-      if (source === "upload" && m.gait_detected) {
-        void saveSession("upload", m, frames ?? null);
+    (metrics: GaitMetrics, source: "live" | "upload", frames?: JointFrame[]) => {
+      const epoch = identityEpoch;
+      if (activeEpochRef.current !== epoch) return;
+
+      let id = metricIdsRef.current.get(metrics);
+      if (!id) {
+        id = `${source}-${crypto.randomUUID().replaceAll("-", "")}-${++metricSequenceRef.current}`;
+        metricIdsRef.current.set(metrics, id);
+      }
+      const candidate: MetricReading = {
+        epoch,
+        id,
+        source,
+        metrics,
+        frames: frames ?? null,
+        saved: completedSavesRef.current.has(id),
+      };
+      setReadingState(candidate);
+      setSaveMessage(null);
+      if (source === "upload" && metrics.gait_detected) {
+        void saveSession(candidate);
       }
     },
-    [saveSession]
+    [identityEpoch, saveSession]
   );
 
-  // switching input mode discards the previous mode's reading, so the cards
-  // never show numbers that belong to an input the user has navigated away from
   const handleInputReset = useCallback(() => {
-    setMetrics(null);
-    setMetricsSource(null);
-    setMetricsFrames(null);
-    setSaveNote(null);
-    setSessions((prev) =>
-      prev.filter(
-        (s) => s.label !== UNSAVED_LABEL.live && s.label !== UNSAVED_LABEL.upload
-      )
-    );
-  }, []);
+    setReadingState((current) => (current?.epoch === identityEpoch ? null : current));
+    setSaveMessage((current) => (current?.epoch === identityEpoch ? null : current));
+  }, [identityEpoch]);
 
-  const handleSummary = useCallback(async () => {
-    setSummaryLoading(true);
-    setSummaryError(null);
-    try {
-      setSummary(await generateSummary(patientId));
-      setSummaryCount((c) => c + 1);
-    } catch (err) {
-      setSummaryError(
-        err instanceof Error ? err.message : "summary request failed"
-      );
-    } finally {
-      setSummaryLoading(false);
+  const trendSessions = useMemo(() => {
+    const sessions = toTrendSessions(patient);
+    if (reading?.metrics.gait_detected && !reading.saved) {
+      sessions.push({
+        label: UNSAVED_LABEL[reading.source],
+        asymmetry_pct: reading.metrics.asymmetry_pct,
+        fall_risk_score: reading.metrics.fall_risk_score,
+        stride_length_m: reading.metrics.stride_length_m,
+      });
     }
-  }, [patientId]);
+    return sessions;
+  }, [patient, reading]);
 
-  if (notFound) {
+  if (currentAccess === "loading") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-        <div className="max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6 text-center">
-          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-300" />
-          <p className="text-sm text-slate-200">
-            We couldn&apos;t find this patient link.
-          </p>
-          <button
-            disabled={demoBusy}
-            onClick={() => {
-              setDemoBusy(true);
-              setDemoError(null);
-              void ensureDemoPatient(patientId)
-                .then(() => {
-                  setNotFound(false);
-                  setLoading(true);
-                  void loadPatient();
-                })
-                .catch((err) =>
-                  setDemoError(
-                    err instanceof ApiError
-                      ? err.message
-                      : "Could not reach the backend"
-                  )
-                )
-                .finally(() => setDemoBusy(false));
-            }}
-            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10 disabled:opacity-50"
-          >
-            {demoBusy ? "Creating…" : `Create demo profile for ${patientId}`}
-          </button>
-          {demoError && (
-            <p className="mt-2 text-xs text-rose-300">{demoError}</p>
-          )}
-          <Link
-            href="/"
-            className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-          >
-            Back to home
-          </Link>
-        </div>
+      <main
+        role="status"
+        className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400"
+      >
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your screening…
       </main>
     );
   }
 
-  if (loading) {
+  if (currentAccess !== "ready" || !patient) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your
-        screening…
-      </main>
+      <AccessPanel
+        status={currentAccess === "ready" ? "unavailable" : currentAccess}
+        onRetry={() => setRetryNonce((value) => value + 1)}
+      />
     );
   }
 
-  if (loadError) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-        <p className="text-sm text-rose-300">
-          Failed to load patient: {loadError}
-        </p>
-      </main>
-    );
-  }
-
-  const latestSurvey = patient?.surveys?.length
-    ? patient.surveys[patient.surveys.length - 1]
-    : null;
-  const hasSessions = (patient?.gait_sessions?.length ?? 0) > 0;
+  const metrics = reading?.metrics ?? null;
+  const isSaving = reading !== null && savingReadingId === reading.id;
 
   return (
     <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
@@ -289,58 +486,28 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           <Activity className="h-8 w-8 text-emerald-400" />
           <div>
             <h1 className="text-2xl font-bold">GaitGuard AI</h1>
-            <p className="text-xs text-slate-400">
-              Gait screening for {patient?.name ?? patientId} · {patientId}
-            </p>
+            <p className="text-xs text-slate-400">Your secure walking assessment</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-            <User className="h-3.5 w-3.5 text-slate-400" />
-            {patient?.name ?? patientId}
-          </span>
-          <Link
-            href="/doctor"
-            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-          >
-            <Stethoscope className="h-3.5 w-3.5 text-slate-400" />
-            Doctor&apos;s Portal
-          </Link>
-        </div>
+        <span className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
+          <User className="h-3.5 w-3.5 text-slate-400" />
+          {patient.name ?? "Patient"}
+        </span>
       </header>
 
-      <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900 p-4">
-        <h2 className="mb-1 text-sm font-medium text-slate-200">
-          From your phone survey
-        </h2>
-        {latestSurvey ? (
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
-            <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-2 py-0.5 text-amber-300">
-              pain {latestSurvey.pain_scale}/10
-            </span>
-            <span>
-              falls (6 mo): {latestSurvey.fall_history.falls_last_6_months}
-              {latestSurvey.fall_history.injured ? " · injured" : ""}
-            </span>
-            <span>dizziness: {latestSurvey.dizziness ? "yes" : "no"}</span>
-            <span className="flex flex-wrap gap-1">
-              {latestSurvey.primary_complaints.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300"
-                >
-                  {c}
-                </span>
-              ))}
-            </span>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400">No survey on file yet.</p>
-        )}
+      <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4">
+        <h2 className="text-sm font-medium text-emerald-200">Complete one walking test</h2>
+        <p className="mt-1 text-xs leading-relaxed text-slate-400">
+          Use the live camera or upload a walking video. A valid walk is saved securely to your care team.
+        </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <WebcamFeed onMetrics={handleMetrics} onInputReset={handleInputReset} />
+        <WebcamFeed
+          key={identityEpoch}
+          onMetrics={handleMetrics}
+          onInputReset={handleInputReset}
+        />
 
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4">
@@ -348,11 +515,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               title="Stride Length"
               value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
               icon={<Footprints className="h-4 w-4" />}
-              sub={
-                metrics?.stride_ratio
-                  ? `×${metrics.stride_ratio.toFixed(2)} leg`
-                  : undefined
-              }
+              sub={metrics?.stride_ratio ? `×${metrics.stride_ratio.toFixed(2)} leg` : undefined}
             />
             <MetricCard
               title="Asymmetry"
@@ -361,9 +524,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             />
             <MetricCard
               title="Velocity Degradation"
-              value={
-                metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"
-              }
+              value={metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"}
               icon={<TrendingDown className="h-4 w-4" />}
             />
             <MetricCard
@@ -375,96 +536,68 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           </div>
           <MetricCard
             title="Cadence"
-            value={
-              metrics ? `${metrics.cadence_steps_per_min.toFixed(0)} steps/min` : "—"
-            }
+            value={metrics ? `${metrics.cadence_steps_per_min.toFixed(0)} steps/min` : "—"}
             icon={<Activity className="h-4 w-4" />}
           />
 
           {metrics && !metrics.gait_detected && (
-            <p className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
-              No walking detected — walk across the frame (or upload a clip
-              with walking) to record a session.
+            <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
+              No walking detected — walk across the frame or upload a clip with walking before saving.
             </p>
           )}
 
-          {metricsSource === "live" && metrics && (
+          {reading?.source === "live" && (
             <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3">
-              <Save className="h-4 w-4 shrink-0 text-slate-400" />
-              <span className="text-xs text-slate-400">
-                Save this walk to your record
+              {reading.saved ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              ) : (
+                <Save className="h-4 w-4 shrink-0 text-slate-400" />
+              )}
+              <span className="flex-1 text-xs text-slate-400">
+                {reading.saved ? "This walk is saved" : "Save this walk to your record"}
               </span>
               <button
-                onClick={() => void saveSession("live")}
-                disabled={saving || !metrics.gait_detected}
+                type="button"
+                onClick={() => void saveSession(reading)}
+                disabled={isSaving || reading.saved || !reading.metrics.gait_detected}
                 className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
               >
-                {saving ? "Saving…" : "Save this walk"}
+                {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
               </button>
             </div>
           )}
-          {saveNote && (
-            <p
-              className={`text-xs ${
-                saveNote.startsWith("Save failed")
-                  ? "text-rose-300"
-                  : "text-emerald-300"
+
+          {currentSaveMessage && (
+            <div
+              role={currentSaveMessage.kind === "error" ? "alert" : "status"}
+              className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+                currentSaveMessage.kind === "error"
+                  ? "border-rose-500/40 bg-rose-600/10 text-rose-300"
+                  : "border-emerald-500/40 bg-emerald-600/10 text-emerald-300"
               }`}
             >
-              {saveNote}
+              <span>{currentSaveMessage.text}</span>
+              {currentSaveMessage.retry && (
+                <button
+                  type="button"
+                  disabled={savingReadingId === currentSaveMessage.retry.id}
+                  onClick={() => void saveSession(currentSaveMessage.retry!)}
+                  className="flex shrink-0 items-center gap-1 rounded-md border border-rose-400/50 px-2 py-1 font-medium hover:bg-rose-500/10 disabled:opacity-50"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry save
+                </button>
+              )}
+            </div>
+          )}
+
+          {reading?.source === "upload" && isSaving && (
+            <p role="status" className="flex items-center gap-2 text-xs text-slate-400">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving analyzed walk…
             </p>
           )}
 
-          <TrendGraph sessions={sessions} />
-
-          <TokenEfficiency refresh={summaryCount} lastResult={summary} />
-
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <h2 className="text-sm font-medium text-slate-200">
-              AI Patient Summary
-            </h2>
-            <p className="mb-3 text-xs text-slate-400">
-              Plain-language clinical summary for patients & care teams
-            </p>
-            <button
-              onClick={handleSummary}
-              disabled={summaryLoading || !hasSessions}
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-            >
-              <Sparkles className="h-4 w-4" />
-              {summaryLoading ? "Generating…" : "Generate Patient Summary"}
-            </button>
-            {!hasSessions && (
-              <p className="mt-1 text-[11px] text-slate-500">
-                Complete a walk or upload first — no sessions on file yet.
-              </p>
-            )}
-            {summaryError && (
-              <p className="mt-3 text-xs text-rose-300">{summaryError}</p>
-            )}
-            {summary && (
-              <div className="mt-3">
-                <p className="text-sm leading-relaxed text-slate-200">
-                  {summary.summary}
-                </p>
-                <div className="mt-2 flex gap-2 text-[10px]">
-                  <span className="rounded-full border border-slate-600 px-2 py-0.5 uppercase text-slate-300">
-                    {summary.source}
-                  </span>
-                  {summary.cached && (
-                    <span className="rounded-full border border-sky-500/40 bg-sky-600/20 px-2 py-0.5 uppercase text-sky-300">
-                      served from cache
-                    </span>
-                  )}
-                  {summary.estimated_tokens_saved > 0 && (
-                    <span className="rounded-full border border-slate-600 px-2 py-0.5 text-slate-400">
-                      ~{summary.estimated_tokens_saved} tokens saved
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <TrendGraph sessions={trendSessions} />
         </div>
       </div>
     </main>

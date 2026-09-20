@@ -78,6 +78,8 @@ export default function DoctorPortal() {
   const [synthLoading, setSynthLoading] = useState(false);
   const [synthError, setSynthError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listGenRef = useRef(0);
+  const listPendingGenRef = useRef<number | null>(null);
   const detailGenRef = useRef(0);
   const synthGenRef = useRef(0);
   const queryRef = useRef(query);
@@ -88,6 +90,8 @@ export default function DoctorPortal() {
   const [copied, setCopied] = useState(false);
 
   const clearProtectedData = useCallback(() => {
+    listGenRef.current += 1;
+    listPendingGenRef.current = null;
     detailGenRef.current += 1;
     synthGenRef.current += 1;
     setPatients([]);
@@ -116,19 +120,28 @@ export default function DoctorPortal() {
   );
 
   const loadList = useCallback((q: string, showSpinner = true) => {
+    if (!showSpinner && listPendingGenRef.current === listGenRef.current) return;
+    const gen = ++listGenRef.current;
+    listPendingGenRef.current = gen;
     if (showSpinner) setLoadingList(true);
     fetchPatients(q || undefined)
       .then((rows) => {
-        setPatients(rows);
-        setListError(null);
-        setSelectedId((prev) => prev ?? (rows[0]?.patient_id ?? null));
-        setLastSyncedAt(new Date());
+        if (gen === listGenRef.current) {
+          setPatients(rows);
+          setListError(null);
+          setSelectedId((prev) => prev ?? (rows[0]?.patient_id ?? null));
+          setLastSyncedAt(new Date());
+        }
       })
       .catch((err) => {
+        if (gen !== listGenRef.current) return;
         if (!handleAuthFailure(err))
           setListError(err instanceof Error ? err.message : String(err));
       })
-      .finally(() => setLoadingList(false));
+      .finally(() => {
+        if (gen === listPendingGenRef.current) listPendingGenRef.current = null;
+        if (gen === listGenRef.current) setLoadingList(false);
+      });
   }, [handleAuthFailure]);
 
   const loadDetail = useCallback((id: string, reset = true) => {

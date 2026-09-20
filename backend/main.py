@@ -383,6 +383,12 @@ class SurveyPayload(BaseModel):
 class SessionPayload(BaseModel):
     label: str = Field(max_length=64)
     source: str = Field(max_length=32)
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=16,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
     metrics: GaitMetrics
     frames: list[dict[str, list[float]]] | None = None
     recorded_at: datetime | None = None
@@ -459,6 +465,7 @@ def _store_patient_session(pid: str, body: SessionPayload) -> dict:
             {
                 "label": body.label,
                 "source": body.source,
+                "idempotency_key": body.idempotency_key,
                 "metrics": body.metrics.model_dump(),
                 "frames": body.frames,
                 "recorded_at": (
