@@ -40,7 +40,7 @@ _INABILITY = (
 # refuses ("you can't text me", "sure, but I can't access the link", "won't be
 # able to view the message"). Punctuation or a connective ("I can't talk,
 # please text me") ends the clause, so a separate request is not swallowed.
-_CLAUSE_WORD = r"\s+(?!(?:please|yes|but|and|so|then|just)\b)\w+"
+_CLAUSE_WORD = r"\s+(?!(?:please|yes|but|and|so|then)\b)\w+"
 _CONSENT_CANNOT_TEXT = re.compile(
     _INABILITY + r"(?:" + _CLAUSE_WORD + r"){0,4}?\s+(?:text|texts|texting|message|messages|link|links)\b"
     r"|" + _INABILITY + r"\s+(?:send|open|get|receive|read|see|view|access|click|use)\s+(?:it|that)\b"
@@ -192,7 +192,10 @@ class IntegratedSession:
         else:
             intent = link_reply_intent(text)
             if intent == "missing" and not self.link_open:
-                await self._say(policy.INTEGRATED_LINK_MISSING)
+                await self._say(
+                    policy.INTEGRATED_SMS_FAILED if self._sms_failure_told
+                    else policy.INTEGRATED_LINK_MISSING
+                )
             elif intent == "ready" or clean_utterance(text) == "retry":
                 self.link_open = True
                 if self._page_active:
@@ -211,6 +214,8 @@ class IntegratedSession:
         if self.stage == "submitting":
             return policy.INTEGRATED_SAVING
         if not self.link_open:
+            if self._sms_failure_told:
+                return policy.INTEGRATED_SMS_FAILED
             return policy.INTEGRATED_LINK_SENT
         return policy.INTEGRATED_WAITING
 

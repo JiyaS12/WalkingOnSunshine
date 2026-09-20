@@ -240,7 +240,8 @@ def test_repeated_unclear_consent_replies_default_to_no(harness):
     ("sure, but I can't access the link", "no"), ("yes but I can't click the link", "no"),
     ("okay, I won't be able to view the message", "no"), ("sure, I can't open it", "no"),
     ("I can't talk, please text me", "yes"), ("can't you text me?", "yes"),
-    ("I can't hear well. Yes, send the link", "yes"),
+    ("I can't hear well. Yes, send the link", "yes"), ("I can't talk, just text me", "yes"),
+    ("yes, but I can't just open the link", "no"), ("I can't really open the link", "no"),
     ("I can't wait", "unclear"),
     ("hmm", "unclear"), ("what link", "unclear"), ("", "unclear"),
 ])
@@ -491,11 +492,17 @@ def test_carrier_undelivered_sms_is_announced_once_and_the_call_stays_open(harne
         assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
         assert store.get_call("patient1", session.call.call_id)["sms_status"] == "failed"
         assert store.get_call("patient1", session.call.call_id)["call_status"] != "completed"
+        await say(session, "repeat")
+        await say(session, "I never got a text")
+        await say(session, "what was that")
+        assert harness.spoken[-3:] == [policy.INTEGRATED_SMS_FAILED] * 3
+        assert policy.INTEGRATED_LINK_MISSING not in harness.spoken
         # A link handed over another way still completes the walk.
         harness.walks = [harness.view("page_ready", 2, "page_ready"), harness.view("saved", 3, "saved", session_id="gait-1")]
+        told = harness.spoken.count(policy.INTEGRATED_SMS_FAILED)
         await asyncio.wait_for(session._background, 1)
         assert session.finished
-        assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
+        assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == told
         assert harness.spoken[-1] == policy.INTEGRATED_SAVED
     asyncio.run(scenario())
 
@@ -511,6 +518,10 @@ def test_sms_rejected_at_submit_still_waits_for_the_page(harness):
         assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
         await asyncio.sleep(0.02)
         assert harness.spoken.count(policy.INTEGRATED_SMS_FAILED) == 1
+        await say(session, "repeat")
+        await say(session, "it hasn't arrived")
+        assert harness.spoken[-2:] == [policy.INTEGRATED_SMS_FAILED] * 2
+        assert policy.INTEGRATED_LINK_SENT not in harness.spoken
         await say(session, "stop")
         assert session.finished
         assert harness.service.receipt(session.call.call_id).snapshot.error_code == "stopped"
