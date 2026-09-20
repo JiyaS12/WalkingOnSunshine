@@ -1,6 +1,9 @@
 .venv/
 __pycache__/
 node_modules/
+.next/
+.pytest_cache/
+.pytest-tmp-*/
 .env
 .env.*
 !.env.example
