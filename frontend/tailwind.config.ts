@@ -9,15 +9,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        clinical: {
-          950: "#0F172A",
-          900: "#1E293B",
-          800: "#334155",
-          700: "#475569",
-        },
-        medgreen: {
-          500: "#10B981",
-          600: "#059669",
+        pastel: {
+          cream: "#FBF5ED",
+          sand: "#F3E7D3",
+          blue: "#A7C7E7",
+          lavender: "#C4B5FD",
+          peach: "#F7C6B3",
+          green: "#BEEB9F",
+          teal: "#B8DDD9",
         },
         background: "var(--background)",
         foreground: "var(--foreground)",
@@ -43,6 +42,13 @@ const config: Config = {
         "chart-3": "var(--chart-3)",
         "chart-4": "var(--chart-4)",
         "chart-5": "var(--chart-5)",
+      },
+      boxShadow: {
+        pillow:
+          "0 18px 40px -12px rgba(120,100,80,0.18), 0 4px 12px -4px rgba(120,100,80,0.10), inset 0 1px 0 rgba(255,255,255,0.9)",
+        "pillow-sm":
+          "0 8px 20px -8px rgba(120,100,80,0.18), inset 0 1px 0 rgba(255,255,255,0.9)",
+        "pillow-inset": "inset 0 2px 6px rgba(120,100,80,0.12)",
       },
       borderRadius: {
         lg: "var(--radius)",

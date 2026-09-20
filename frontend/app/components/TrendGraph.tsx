@@ -32,7 +32,7 @@ export default function TrendGraph({ sessions }: Props) {
   }));
 
   return (
-    <Card className="border-border">
+    <Card>
       <CardHeader className="px-4 pb-0 pt-4">
         <CardTitle className="text-sm font-medium text-card-foreground">
           Session-over-session trend
@@ -56,7 +56,7 @@ export default function TrendGraph({ sessions }: Props) {
           aspectRatio="2.5 / 1"
           className="w-full"
         >
-          <Grid horizontal stroke="#334155" />
+          <Grid horizontal stroke="#EFE6DA" />
           <XAxis numTicks={Math.min(Math.max(sessions.length, 2), 6)} />
           <ChartTooltip
             rows={(point) => [
