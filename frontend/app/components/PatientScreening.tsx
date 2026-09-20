@@ -123,13 +123,13 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   const loadPatient = useCallback(async () => {
     const gen = ++patientGenRef.current;
+    setNotFound(false);
+    setLoadError(null);
+    setAuthRequired(false);
     try {
       const rec = await fetchPatient(patientId);
       if (gen !== patientGenRef.current) return;
       setPatient(rec);
-      setNotFound(false);
-      setLoadError(null);
-      setAuthRequired(false);
       setSessions(
         rec.gait_sessions.map((s) => ({
           label: s.label,
