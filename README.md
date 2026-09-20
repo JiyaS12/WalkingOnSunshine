@@ -55,10 +55,32 @@ python3 -m venv .venv
 
 ```bash
 cd backend
-.venv/bin/uvicorn main:app --port 8000
+cp .env.example .env
+# Fill CLINICIAN_USERNAME and CLINICIAN_PASSWORD, then generate and paste a
+# signing key with: python -c "import secrets; print(secrets.token_urlsafe(48))"
+.venv/bin/uvicorn main:app --port 8000 --env-file .env
 ```
 
-Optional environment variables:
+The three clinician values are required. Clinician APIs fail closed with `503`
+until `CLINICIAN_USERNAME`, `CLINICIAN_PASSWORD`, and a random
+`CLINICIAN_SESSION_SECRET` of at least 32 characters are all present. `/doctor`
+exchanges the credentials for a signed, HttpOnly, `SameSite=Lax` session cookie;
+neither the credentials nor signing key belong in a `NEXT_PUBLIC_*` variable.
+
+Runtime environment variables:
+
+- `CLINICIAN_USERNAME` / `CLINICIAN_PASSWORD` — local clinician sign-in.
+- `CLINICIAN_SESSION_SECRET` — random server-only session signing key (minimum
+  32 characters).
+- `CLINICIAN_SESSION_TTL_SECONDS` — session lifetime in seconds (default 28800,
+  accepted range 60–86400).
+- `CLINICIAN_COOKIE_SECURE` — use `false` only for local HTTP; set `true` on an
+  HTTPS deployment.
+- `CLINICIAN_LOGIN_MAX_ATTEMPTS` / `CLINICIAN_LOGIN_WINDOW_SECONDS` — per-process,
+  per-client login throttle (defaults 5 attempts per 60 seconds).
+- `CORS_ALLOWED_ORIGINS` — exact comma-separated frontend origins. Localhost and
+  127.0.0.1 on port 3000 are the development defaults. `*` is rejected because
+  clinician sessions use credentialed requests.
 - `OPENAI_API_KEY` — enable LLM-generated summaries/synthesis
   (deterministic template fallback without it). Summaries are cached in
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
@@ -79,7 +101,10 @@ npm run dev
 ```
 
 The app runs at http://localhost:3000 and expects the backend on
-`NEXT_PUBLIC_API_URL`.
+`NEXT_PUBLIC_API_URL`. This variable is only the public backend URL; do not add
+clinician credentials or access tokens to the frontend environment. For cookie
+delivery, deploy the frontend and API on the same site and list the frontend's
+exact origin in `CORS_ALLOWED_ORIGINS`.
 
 ## Demo flow
 
@@ -90,15 +115,20 @@ The app runs at http://localhost:3000 and expects the backend on
    profile (pain 3/10, no prior falls) so you can test right away.
 4. On `/patient/<id>`: do a **Live Camera** walk or **Upload Video** —
    metrics update, sessions save to the patient's record.
-5. Open `/doctor` — the portal live-syncs every 5 s; select the patient to
-   see the Unified Clinical Synthesis Report (survey + gait trend +
-   skeleton replay) and click **Generate synthesis**.
+5. Open `/doctor`, sign in with the backend-configured clinician credentials,
+   and select the patient. The portal live-syncs every 5 s and provides the
+   Unified Clinical Synthesis Report (survey + gait trend + skeleton replay).
 
 ## Test
 
 ```bash
 cd backend
 .venv/bin/pytest -q
+
+cd ../frontend
+npm test
+npm run lint
+npm run build
 ```
 
 ## License
