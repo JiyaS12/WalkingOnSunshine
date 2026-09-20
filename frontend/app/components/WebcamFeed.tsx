@@ -42,6 +42,26 @@ const LOWER_BODY_INDICES = new Set(
   [23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
 );
 
+// shoulders, hips, knees, ankles must all be visible for a usable gait reading
+const FULL_BODY_INDICES = [11, 12, 23, 24, 25, 26, 27, 28];
+const FRAMING_MIN_VISIBILITY = 0.5;
+const FRAMING_STREAK = 8;
+
+function fullBodyInFrame(lm: PoseResults["poseLandmarks"]): boolean {
+  if (!lm) return true;
+  return FULL_BODY_INDICES.every((i) => {
+    const p = lm[i];
+    return (
+      !!p &&
+      (p.visibility ?? 0) >= FRAMING_MIN_VISIBILITY &&
+      p.x >= 0 &&
+      p.x <= 1 &&
+      p.y >= 0 &&
+      p.y <= 1
+    );
+  });
+}
+
 // POSE_CONNECTIONS-like pairs (upper body + legs) for skeleton drawing
 const SKELETON_PAIRS: [number, number][] = [
   [11, 12],
@@ -163,6 +183,8 @@ export default function WebcamFeed({
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("idle");
   const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
   const [cameraBlocked, setCameraBlocked] = useState<string | null>(null);
+  const [bodyOutOfFrame, setBodyOutOfFrame] = useState(false);
+  const framingRef = useRef({ out: false, streak: 0 });
   const [retryNonce, setRetryNonce] = useState(0);
   const [liveGait, setLiveGait] = useState<LiveGaitMetrics | null>(null);
   const [embedded, setEmbedded] = useState(false);
@@ -234,6 +256,8 @@ export default function WebcamFeed({
     sendStartRef.current = 0;
     lastResultsRef.current = null;
     mutedSinceRef.current = 0;
+    framingRef.current = { out: false, streak: 0 };
+    setBodyOutOfFrame(false);
     if (diagIntervalRef.current !== null) {
       clearInterval(diagIntervalRef.current);
       diagIntervalRef.current = null;
@@ -318,6 +342,21 @@ export default function WebcamFeed({
     []
   );
 
+  const updateFraming = useCallback((lm: PoseResults["poseLandmarks"]) => {
+    const out = !fullBodyInFrame(lm);
+    const f = framingRef.current;
+    if (out === f.out) {
+      f.streak = 0;
+      return;
+    }
+    f.streak += 1;
+    if (f.streak >= FRAMING_STREAK) {
+      f.out = out;
+      f.streak = 0;
+      setBodyOutOfFrame(out);
+    }
+  }, []);
+
   const handleResults = useCallback(
     (results: PoseResults) => {
       if (resultsTimerRef.current !== null) {
@@ -326,6 +365,7 @@ export default function WebcamFeed({
       }
       lastResultsRef.current = results;
       setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
+      updateFraming(results.poseLandmarks);
       const world = results.poseWorldLandmarks;
       if (!world || world.length < 29) return;
 
@@ -383,7 +423,7 @@ export default function WebcamFeed({
       if (timesRef.current.length > BUFFER_MAX)
         timesRef.current.splice(0, timesRef.current.length - BUFFER_MAX);
     },
-    []
+    [updateFraming]
   );
 
   const startLive = useCallback(async () => {
@@ -930,6 +970,14 @@ export default function WebcamFeed({
           className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover opacity-0"
           style={{ display: mode === "live" ? "block" : "none" }}
         />
+        {mode === "live" && !cameraBlocked && bodyOutOfFrame && (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-4">
+            <div className="flex items-center gap-2 rounded-full bg-pastel-peach px-4 py-2 text-sm font-semibold text-foreground shadow-pillow-sm">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              Full body should be in frame
+            </div>
+          </div>
+        )}
         {mode === "live" && cameraBlocked && (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
             <div className="max-w-sm rounded-2xl bg-pastel-peach/70 p-4 text-center shadow-pillow">
