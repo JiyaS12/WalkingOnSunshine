@@ -164,6 +164,7 @@ def test_prepared_handoff_keeps_the_link_out_of_its_notes():
 def test_round_trip_with_the_real_backend_app(monkeypatch, tmp_path):
     """The voice client's request is accepted by the backend and the link it returns verifies there."""
 
+    pytest.importorskip("numpy", reason="backend requirements not installed")
     monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "test-only-patient-link-secret-32-bytes-minimum")
     monkeypatch.setenv("PATIENT_APP_BASE_URL", "https://walk.example.org")
     monkeypatch.setenv("SURVEY_INGEST_TOKEN", TOKEN)
