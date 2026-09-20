@@ -24,6 +24,8 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator, model_validator
@@ -686,6 +688,8 @@ class ProcessingRoute(APIRoute):
                 else:
                     require_clinician(request, Response())
                 response = await handler(request)
+            except RequestValidationError as exc:
+                response = await request_validation_exception_handler(request, exc)
             except HTTPException as exc:
                 exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
                 raise

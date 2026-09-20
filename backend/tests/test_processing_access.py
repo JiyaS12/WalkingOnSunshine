@@ -88,6 +88,22 @@ def test_authorized_frame_processing(client, scope):
     assert response.headers["cache-control"] == "no-store"
 
 
+@pytest.mark.parametrize("operation", ["process-frame", "process-video"])
+@pytest.mark.parametrize("scope", ["legacy", "patient"])
+def test_processing_validation_errors_are_not_cached(client, operation, scope):
+    prefix = "/api"
+    headers = {}
+    if scope == "legacy":
+        login(client)
+    else:
+        prefix += "/patient-access/RGN-0417"
+        headers["Authorization"] = f"Bearer {token()}"
+    response = client.post(f"{prefix}/{operation}", headers=headers, json={})
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    assert response.headers.get("cache-control") == "no-store"
+
+
 @pytest.mark.parametrize("scope", ["legacy", "patient"])
 def test_authorized_video_processing(client, monkeypatch, scope):
     frames = gait_gen.recovered_session()["frames"]
