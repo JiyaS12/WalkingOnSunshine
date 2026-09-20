@@ -8,6 +8,7 @@ import pytest
 from websockets.exceptions import ConnectionClosedError
 
 import phone_app
+from app import gait_handoff
 from app.conversation_policy import sms_body
 from app.patient_repository import InMemoryPatientRepository
 from app.survey_engine import SafeSurveyEngine
@@ -25,6 +26,18 @@ ENV = {
     "TWILIO_FROM_NUMBER": "+15005550006",
     "PUBLIC_BASE_URL": "https://tunnel.example.com/",
 }
+
+
+FAKE_LINK = "https://walk.example.org/patient/RGN-0417?token=stub-token"
+
+
+def _stub_backend_link(monkeypatch, link: str = FAKE_LINK):
+    """Stand in for the backend's ``POST /api/voice/patient-link``."""
+
+    async def fetch(self, patient_code: str, call_id: str | None = None) -> str:
+        return link
+
+    monkeypatch.setattr(gait_handoff.BackendLinkClient, "fetch", fetch)
 
 
 def build_session(patient_code: str = "RGN-0417"):
@@ -225,8 +238,7 @@ def test_call_session_completes_and_prepares_handoff():
 
 
 def test_call_session_texts_the_gait_link_and_walks_through_setup(monkeypatch):
-    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
-    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+    _stub_backend_link(monkeypatch)
     sent: list[tuple[str, str]] = []
 
     async def sms_sender(to_number: str, body: str) -> None:
@@ -284,8 +296,7 @@ def test_call_session_texts_the_gait_link_and_walks_through_setup(monkeypatch):
 
 
 def test_call_session_closes_honestly_when_the_caller_never_confirms_the_link(monkeypatch):
-    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
-    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+    _stub_backend_link(monkeypatch)
 
     async def sms_sender(to_number: str, body: str) -> None:
         return None
@@ -327,8 +338,7 @@ def test_call_session_closes_honestly_when_the_caller_never_confirms_the_link(mo
 
 
 def test_call_session_owns_up_when_the_gait_text_fails(monkeypatch):
-    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
-    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+    _stub_backend_link(monkeypatch)
 
     async def failing_sms_sender(to_number: str, body: str) -> None:
         raise RuntimeError("Twilio is down")
@@ -648,8 +658,7 @@ def test_link_replies_are_read_for_intent_not_just_noise(said, intent):
 
 
 def _session_waiting_on_the_link(monkeypatch):
-    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
-    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+    _stub_backend_link(monkeypatch)
     texts: list[str] = []
 
     async def sms_sender(to_number: str, body: str) -> None:

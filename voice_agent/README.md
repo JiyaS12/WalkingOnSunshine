@@ -214,14 +214,25 @@ Tuning what the patient hears and how well they are understood:
   can pick one by ear before changing it.
 - `UTTERANCE_END_MS`: how long a silence ends the patient's turn (default 1200).
 
-After the last answer the call texts the patient a link to the walking check.
-The link is `GAIT_CHECKER_BASE_URL/patient/<code>?token=…`, signed exactly the
-way `backend/patient_access.py` signs its own patient links, so set
-`PATIENT_LINK_SIGNING_SECRET` (32+ bytes) to the same value the backend uses and
-`GAIT_CHECKER_BASE_URL` to the patient app's HTTPS origin (`PATIENT_APP_BASE_URL`
-on the backend). `PATIENT_LINK_TTL_SECONDS` (default 900) bounds the link's life.
-If either is missing, no text is sent and the call record's handoff is marked
-`unavailable` rather than sending a placeholder or unsigned URL.
+After the last answer the call texts the patient the walking-check magic link.
+The WalkingOnSunshine backend owns that link (`backend/patient_access.py` signs
+it and builds `PATIENT_APP_BASE_URL/patient/<code>?token=…`); this server asks
+for it with `POST /api/voice/patient-link`, so it never holds the signing
+secret. Set:
+
+- `GAIT_BACKEND_URL`: the backend's origin (`http://localhost:8000` locally,
+  HTTPS anywhere else).
+- `GAIT_BACKEND_TOKEN`: the backend's `SURVEY_INGEST_TOKEN`, sent as
+  `X-Survey-Token`.
+- `PORT`: this server's port; use `8100` when the backend has `8000`, and point
+  the ngrok tunnel (`PUBLIC_BASE_URL`) at it.
+
+The backend must know the patient (`POST /api/submit-survey`, or a seeded demo
+record such as `RGN-0417`) and have `PATIENT_LINK_SIGNING_SECRET` and
+`PATIENT_APP_BASE_URL` set to the frontend origin the patient's phone can reach.
+If the link cannot be obtained (unset config, backend down, unknown patient,
+bad token), no text is sent, the call closes honestly, and the call record's
+handoff is marked `unavailable` rather than sending a placeholder URL.
 
 ## Desktop voice demo with Deepgram
 

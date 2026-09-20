@@ -12,6 +12,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -25,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from websockets.exceptions import WebSocketException
 
+from app import gait_handoff
 from app.answer_interpreter import (
     AnswerInterpreter,
     OpenAIAnswerInterpreter,
@@ -67,6 +69,15 @@ CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 DIALING_TIMEOUT_SECONDS = 90.0
 
 logger = logging.getLogger("phone_app")
+
+
+def gait_link_configured() -> bool:
+    try:
+        gait_handoff.configured_backend_origin(os.environ)
+        gait_handoff.configured_backend_token(os.environ)
+    except gait_handoff.GaitLinkUnavailable:
+        return False
+    return True
 
 
 class CallRequest(BaseModel):
@@ -516,6 +527,7 @@ def create_app(
             "public_base_url": resolved.public_base_url,
             "llm_configured": isinstance(interpreter, OpenAIAnswerInterpreter),
             "operator_token_configured": operator.configured,
+            "gait_link_configured": gait_link_configured(),
             "ready": resolved.ready and operator.configured,
         }
 
@@ -690,4 +702,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s %(message)s")
 
-    uvicorn.run(create_app(), host="0.0.0.0", port=8000)
+    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

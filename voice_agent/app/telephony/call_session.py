@@ -222,9 +222,10 @@ class PhoneCallSession:
         if self.engine.session.state not in TERMINAL_STATES:
             return False
         if self.engine.session.state == "complete" and self.handoff is None:
-            self.handoff = self.handoff_service.prepare(
+            self.handoff = await self.handoff_service.prepare(
                 self.engine.patient.patient_code,
                 self.engine.patient.condition_category.value,
+                self.session_id,
             )
             return await self._send_gait_handoff()
         if not self.finished:

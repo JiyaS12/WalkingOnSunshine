@@ -42,10 +42,13 @@ async function loadConfig() {
       return;
     }
     if (data.ready) {
+      const gait = data.gait_link_configured
+        ? "walking-check link on"
+        : "walking-check link off (set GAIT_BACKEND_URL and GAIT_BACKEND_TOKEN)";
       configLine.textContent = data.llm_configured
-        ? `Ready — Twilio, Deepgram and conversational answers configured, webhooks at ${data.public_base_url}`
-        : `Ready, but answers are matched word for word — set OPENAI_API_KEY and SURVEY_EXTRACTOR=openai so phrases like "a moderate amount" are understood.`;
-      configLine.classList.add(data.llm_configured ? "ok" : "warn");
+        ? `Ready — Twilio, Deepgram and conversational answers configured, ${gait}, webhooks at ${data.public_base_url}`
+        : `Ready, but answers are matched word for word — set OPENAI_API_KEY and SURVEY_EXTRACTOR=openai so phrases like "a moderate amount" are understood. ${gait}.`;
+      configLine.classList.add(data.llm_configured && data.gait_link_configured ? "ok" : "warn");
       return;
     }
     const missing = [];

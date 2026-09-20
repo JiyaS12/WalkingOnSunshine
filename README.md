@@ -58,8 +58,10 @@ gaitguard-ai/
 ```
 
 The automated voice agent lives in [`voice_agent/`](voice_agent/README.md) and
-has its own virtualenv, `.env`, and test suite; it points patients at this
-app's `/patient/[id]` page via `GAIT_CHECKER_BASE_URL`.
+has its own virtualenv, `.env`, and test suite. After the phone survey it asks
+this backend for the patient's magic link (`POST /api/voice/patient-link`,
+authenticated with `SURVEY_INGEST_TOKEN`) and texts it to the patient, so the
+signing secret never leaves the backend.
 
 ## Backend setup
 
@@ -116,8 +118,8 @@ Optional environment variables:
   (deterministic template fallback without it). Summaries are cached in
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
   cache stats.
-- `SURVEY_INGEST_TOKEN` — required for `POST /api/submit-survey`; callers send
-  it in `X-Survey-Token`. It also disables `POST
+- `SURVEY_INGEST_TOKEN` — required for `POST /api/submit-survey` and
+  `POST /api/voice/patient-link`; callers send it in `X-Survey-Token`. It also disables `POST
   /api/patients/{id}/ensure-demo` (403) unless `ALLOW_DEMO_PATIENTS` is set.
 - `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` — local-only escape hatch. Set to
   `1`/`true`/`yes` to run survey ingestion without a token. Never enable this
