@@ -69,6 +69,9 @@ ECHO_GRACE_SECONDS = 0.5
 # A prompt is only cut short for recognised words, never for the voice
 # detector alone: background noise and handset echo both trip that.
 BARGE_IN_MIN_WORDS = 2
+# A shorter reply over the tail of a prompt ("yes", "five") is kept as the
+# answer without cutting the prompt, and taken up this soon after it ends.
+EARLY_ANSWER_FLUSH_SECONDS = 1.0
 MULAW_SILENCE = b"\xff" * 160
 # Twilio media frames are 20ms of base64 mu-law plus framing; nothing legitimate
 # comes close to this.
@@ -138,6 +141,7 @@ class MediaStreamBridge:
         self._listen_from = 0.0
         self._interruptible = False
         self._prompt_text = ""
+        self._early_answer = False
         self._playback: asyncio.Task[None] | None = None
 
     async def run(self) -> None:
@@ -277,9 +281,13 @@ class MediaStreamBridge:
         self._active_mark = None
         self.bot_speaking = False
         self._interruptible = False
+        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
+        if self.session is not None and self._early_answer:
+            self._early_answer = False
+            self._start_silence_timer(EARLY_ANSWER_FLUSH_SECONDS)
+            return
         if self.session is not None:
             self.session.discard_pending()
-        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         self._start_silence_timer()
 
     async def _greet(self) -> None:
@@ -331,13 +339,15 @@ class MediaStreamBridge:
                 if not (
                     self._interruptible
                     and event.kind == "transcript"
-                    and self._is_barge_in(event.text)
+                    and self._is_caller_speech(event.text)
                 ):
                     continue
                 self._cancel_silence_timer()
-                await self._stop_playback()
+                if self._is_barge_in(event.text):
+                    await self._stop_playback()
                 if event.is_final:
                     self.session.add_transcript(event.text)
+                    self._early_answer = self.bot_speaking
                 continue
             if asyncio.get_running_loop().time() < self._listen_from:
                 continue
@@ -353,15 +363,20 @@ class MediaStreamBridge:
                     continue
                 await self._run_turn(self.session.flush_utterance())
 
-    def _is_barge_in(self, text: str) -> bool:
-        words = [word.strip(".,!?;:'\"").casefold() for word in text.split()]
-        words = [word for word in words if word]
-        if len(words) < BARGE_IN_MIN_WORDS:
-            return False
-        prompt_words = {
-            word.strip(".,!?;:'\"").casefold() for word in self._prompt_text.split()
-        }
+    @staticmethod
+    def _words(text: str) -> list[str]:
+        words = (word.strip(".,!?;:'\"").casefold() for word in text.split())
+        return [word for word in words if word]
+
+    def _is_caller_speech(self, text: str) -> bool:
+        """Recognised words that are not just the handset echoing our prompt."""
+
+        words = self._words(text)
+        prompt_words = set(self._words(self._prompt_text))
         return any(word not in prompt_words for word in words)
+
+    def _is_barge_in(self, text: str) -> bool:
+        return len(self._words(text)) >= BARGE_IN_MIN_WORDS
 
     async def _speak(self, text: str) -> None:
         if not self.settings.deepgram_api_key or self.stream_sid is None:
@@ -369,6 +384,7 @@ class MediaStreamBridge:
             return
         self._cancel_silence_timer()
         self._prompt_text = text
+        self._early_answer = False
         self.bot_speaking = True
         self._interruptible = False
         self._mark_counter += 1
