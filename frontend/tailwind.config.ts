@@ -10,13 +10,14 @@ const config: Config = {
     extend: {
       colors: {
         pastel: {
-          cream: "#FBF5ED",
-          sand: "#F3E7D3",
-          blue: "#A7C7E7",
-          lavender: "#C4B5FD",
-          peach: "#F7C6B3",
-          green: "#BEEB9F",
-          teal: "#B8DDD9",
+          cream: "#F9F7F2",
+          sand: "#EFEBE3",
+          blue: "#B9D4E3",
+          bluedeep: "#8FB4D2",
+          green: "#B5CDB6",
+          lavender: "#C9C4EA",
+          purple: "#B3A8DC",
+          peach: "#F2D5C4",
         },
         background: "var(--background)",
         foreground: "var(--foreground)",
@@ -45,10 +46,11 @@ const config: Config = {
       },
       boxShadow: {
         pillow:
-          "0 18px 40px -12px rgba(120,100,80,0.18), 0 4px 12px -4px rgba(120,100,80,0.10), inset 0 1px 0 rgba(255,255,255,0.9)",
+          "8px 8px 20px rgba(44,62,80,0.10), -6px -6px 16px rgba(255,255,255,0.95)",
         "pillow-sm":
-          "0 8px 20px -8px rgba(120,100,80,0.18), inset 0 1px 0 rgba(255,255,255,0.9)",
-        "pillow-inset": "inset 0 2px 6px rgba(120,100,80,0.12)",
+          "5px 5px 12px rgba(44,62,80,0.10), -4px -4px 10px rgba(255,255,255,0.95)",
+        "pillow-inset":
+          "inset 4px 4px 10px rgba(44,62,80,0.08), inset -4px -4px 10px rgba(255,255,255,0.85)",
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -283,7 +283,7 @@ export default function WebcamFeed({
       lm: PoseResults["poseLandmarks"]
     ) => {
       if (!lm) return;
-      ctx.strokeStyle = "#A7C7E7";
+      ctx.strokeStyle = "#8FB4D2";
       ctx.lineWidth = 2;
       for (const [a, b] of SKELETON_PAIRS) {
         const pa = lm[a];
@@ -303,7 +303,7 @@ export default function WebcamFeed({
         const p = lm[idx];
         if (!p) return;
         const isLeg = LOWER_BODY_INDICES.has(idx);
-        ctx.fillStyle = isLeg ? "#C4B5FD" : "#94a3b8";
+        ctx.fillStyle = isLeg ? "#B3A8DC" : "#6B7C8F";
         ctx.beginPath();
         ctx.arc(
           p.x * canvas.width,
@@ -686,7 +686,7 @@ export default function WebcamFeed({
           const toX = (x: number) =>
             canvas.width / 2 + (x - hipMidX) * scale;
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.strokeStyle = "#A7C7E7";
+          ctx.strokeStyle = "#8FB4D2";
           ctx.lineWidth = 2;
           for (const [a, b] of SIM_PAIRS) {
             const pa = f[a];
@@ -697,7 +697,7 @@ export default function WebcamFeed({
             ctx.lineTo(toX(pb[0]), toY(pb[1]));
             ctx.stroke();
           }
-          ctx.fillStyle = "#C4B5FD";
+          ctx.fillStyle = "#B3A8DC";
           for (const joint of Object.values(f)) {
             ctx.beginPath();
             ctx.arc(toX(joint[0]), toY(joint[1]), 4, 0, 2 * Math.PI);
@@ -841,7 +841,7 @@ export default function WebcamFeed({
         : "waiting for frames";
 
   return (
-    <div className="rounded-3xl border-0 bg-gradient-to-b from-white to-[#FDFBF7] p-5 shadow-pillow">
+    <div className="rounded-[1.75rem] border-0 bg-card p-5 shadow-pillow">
       <div className="mb-3">
         <div
           role="radiogroup"
@@ -858,8 +858,8 @@ export default function WebcamFeed({
             }}
             className={`flex items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "live"
-                ? "bg-pastel-blue text-slate-700 shadow-pillow-sm"
-                : "bg-white/70 text-slate-500 shadow-pillow-inset"
+                ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                : "bg-card text-muted-foreground shadow-pillow-inset"
             }`}
           >
             <Camera className="h-4 w-4" />
@@ -874,38 +874,53 @@ export default function WebcamFeed({
             }}
             className={`flex items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "upload"
-                ? "bg-pastel-blue text-slate-700 shadow-pillow-sm"
-                : "bg-white/70 text-slate-500 shadow-pillow-inset"
+                ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                : "bg-card text-muted-foreground shadow-pillow-inset"
             }`}
           >
             <Upload className="h-4 w-4" />
             Upload Video
           </button>
         </div>
-        <p className="mt-2 text-xs text-slate-400">
+        <p className="mt-2 text-xs text-muted-foreground">
           {mode === "upload"
             ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
             : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
         </p>
-        {mode === "live" && (
-          <div className="mt-2 flex items-center justify-between text-xs">
-            <span className="flex items-center gap-1.5 text-slate-600">
-              <span className={`h-2 w-2 rounded-full ${statusDot}`} />
-              {statusText}
-            </span>
-            <span className="text-slate-500">{statusDetail}</span>
-          </div>
-        )}
       </div>
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-[#FBEBD2] px-3 py-2 text-xs text-slate-600">
+        <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {error}
         </div>
       )}
 
-      <div className="relative aspect-video overflow-hidden rounded-2xl bg-[#F3EBE0] shadow-pillow-inset">
+      <div className="rounded-[2rem] bg-pastel-blue p-3 shadow-pillow">
+        <div className="mb-2 flex items-center justify-between px-1 text-xs text-foreground">
+          {mode === "live" ? (
+            <>
+              <span className="flex items-center gap-1.5">
+                <span className={`h-2 w-2 rounded-full ${statusDot}`} />
+                {statusText}
+              </span>
+              <span className="flex items-center gap-2">
+                {statusDetail && <span className="opacity-70">{statusDetail}</span>}
+                <span className="rounded-full bg-pastel-peach px-2 py-0.5 text-[10px] font-semibold tracking-wider">
+                  LIVE
+                </span>
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-medium">Uploaded video</span>
+              <span className="rounded-full bg-pastel-peach px-2 py-0.5 text-[10px] font-semibold tracking-wider">
+                UPLOAD
+              </span>
+            </>
+          )}
+        </div>
+        <div className="relative aspect-video overflow-hidden rounded-2xl">
         <video
           ref={videoRef}
           autoPlay
@@ -917,16 +932,16 @@ export default function WebcamFeed({
         />
         {mode === "live" && cameraBlocked && (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
-            <div className="max-w-sm rounded-2xl bg-[#FBEBD2] p-4 text-center shadow-pillow">
-              <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-slate-500" />
-              <p className="text-xs text-slate-600">{cameraBlocked}</p>
+            <div className="max-w-sm rounded-2xl bg-pastel-peach/70 p-4 text-center shadow-pillow">
+              <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
+              <p className="text-xs text-foreground">{cameraBlocked}</p>
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 {embedded && (
                   <button
                     onClick={() =>
                       window.open(window.location.href, "_blank", "noopener")
                     }
-                    className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-slate-700 shadow-pillow-sm"
+                    className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     Open in new tab
@@ -937,7 +952,7 @@ export default function WebcamFeed({
                     setCameraBlocked(null);
                     setRetryNonce((n) => n + 1);
                   }}
-                  className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-slate-700 shadow-pillow-sm"
+                  className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Retry camera
@@ -948,7 +963,7 @@ export default function WebcamFeed({
                     setError(null);
                     setMode("upload");
                   }}
-                  className="rounded-2xl bg-white px-3 py-1.5 text-xs text-slate-600 shadow-pillow-sm"
+                  className="rounded-2xl bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm"
                 >
                   Use Upload Video instead
                 </button>
@@ -974,7 +989,7 @@ export default function WebcamFeed({
               const f = e.dataTransfer.files?.[0];
               if (f) void analyzeVideo(f);
             }}
-            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-[#E0D5C3] text-slate-400 hover:border-pastel-blue hover:text-slate-600"
+            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground hover:border-pastel-blue hover:text-foreground"
           >
             <Upload className="h-8 w-8" />
             <span className="text-sm">
@@ -982,13 +997,13 @@ export default function WebcamFeed({
                 ? uploadName
                 : "Drag a video here or choose a file"}
             </span>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-muted-foreground">
               .mp4, .mov, or .webm — up to 100 MB
             </span>
           </button>
         )}
         {uploading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin" />
             <span className="text-sm">
               Analysing video… extracting pose landmarks
@@ -997,13 +1012,13 @@ export default function WebcamFeed({
         )}
         {mode === "upload" && uploadCaption && (
           <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
-            <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] text-slate-600 shadow-pillow-sm">
+            <span className="rounded-full bg-card/90 px-2 py-0.5 text-[10px] text-foreground shadow-pillow-sm">
               {uploadCaption}
             </span>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-medium text-slate-700 shadow-pillow-sm"
+              className="rounded-full bg-card/90 px-2 py-0.5 text-[10px] font-medium text-foreground shadow-pillow-sm"
             >
               Analyze another video
             </button>
@@ -1021,50 +1036,42 @@ export default function WebcamFeed({
             e.target.value = "";
           }}
         />
-        {mode === "upload" ? (
-          <span className="absolute right-2 top-2 rounded-full bg-pastel-blue px-2 py-0.5 text-[10px] font-semibold tracking-wider text-slate-700">
-            UPLOAD
-          </span>
-        ) : (
-          <span className="absolute right-2 top-2 rounded-full bg-pastel-peach px-2 py-0.5 text-[10px] font-semibold tracking-wider text-slate-700">
-            LIVE
-          </span>
-        )}
+        </div>
       </div>
 
       {mode === "live" && (
         <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-          <div className="rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
-            <p className="text-[10px] uppercase tracking-wide text-slate-400">
+          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Knee flex L/R °
             </p>
-            <p className="text-sm font-semibold text-slate-700">
+            <p className="text-xl font-semibold text-foreground">
               {liveGait
                 ? `${liveGait.leftKneeFlexion.toFixed(0)}/${liveGait.rightKneeFlexion.toFixed(0)}`
                 : "—"}
             </p>
           </div>
-          <div className="rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
-            <p className="text-[10px] uppercase tracking-wide text-slate-400">
+          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Knee asym %
             </p>
-            <p className="text-sm font-semibold text-slate-700">
+            <p className="text-xl font-semibold text-foreground">
               {liveGait ? liveGait.kneeAsymmetryPct.toFixed(1) : "—"}
             </p>
           </div>
-          <div className="rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
-            <p className="text-[10px] uppercase tracking-wide text-slate-400">
+          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Stride angle °
             </p>
-            <p className="text-sm font-semibold text-slate-700">
+            <p className="text-xl font-semibold text-foreground">
               {liveGait ? liveGait.strideAngleDeg.toFixed(1) : "—"}
             </p>
           </div>
-          <div className="rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
-            <p className="text-[10px] uppercase tracking-wide text-slate-400">
+          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Ankle speed L/R m/s
             </p>
-            <p className="text-sm font-semibold text-slate-700">
+            <p className="text-xl font-semibold text-foreground">
               {liveGait
                 ? `${liveGait.leftAnkleSpeed.toFixed(1)}/${liveGait.rightAnkleSpeed.toFixed(1)}`
                 : "—"}

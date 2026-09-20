@@ -45,16 +45,16 @@ function riskLevel(score: number): { label: string; classes: string } {
   if (score < 0.3)
     return {
       label: "LOW",
-      classes: "border-0 rounded-full bg-[#E4F5D6] text-[#4F7A3A]",
+      classes: "border-0 rounded-full bg-pastel-green text-foreground",
     };
   if (score < 0.5)
     return {
       label: "MODERATE",
-      classes: "border-0 rounded-full bg-[#FBEBD2] text-[#9A6B2F]",
+      classes: "border-0 rounded-full bg-pastel-peach/70 text-foreground",
     };
   return {
     label: "HIGH",
-    classes: "border-0 rounded-full bg-pastel-peach text-[#9A4B32]",
+    classes: "border-0 rounded-full bg-pastel-peach text-foreground",
   };
 }
 
@@ -68,7 +68,7 @@ interface CardProps {
 
 function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
-    <Card>
+    <Card className="[--card-spacing:1.5rem]">
       <CardHeader className="pb-0">
         <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {title}
@@ -77,22 +77,22 @@ function MetricCard({ title, value, icon, badge, sub }: CardProps) {
           <span className="text-muted-foreground">{icon}</span>
         </CardAction>
       </CardHeader>
-      <CardContent className="pt-1">
+      <CardContent className="pt-2">
         <div className="flex items-end gap-2">
-          <span className="text-2xl font-semibold text-card-foreground">
+          <span className="text-3xl font-semibold text-foreground">
             {value}
           </span>
           {badge && (
             <Badge
               variant="outline"
-              className={`mb-0.5 text-[10px] font-semibold ${badge.classes}`}
+              className={`mb-1 text-[10px] font-semibold ${badge.classes}`}
             >
               {badge.label}
             </Badge>
           )}
         </div>
         {sub && (
-          <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
         )}
       </CardContent>
     </Card>
@@ -240,10 +240,10 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   if (notFound) {
     return (
-      <main className="flex min-h-screen items-center justify-center p-6 text-slate-600">
-        <div className="max-w-sm rounded-3xl bg-white p-8 text-center shadow-pillow">
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="max-w-sm rounded-3xl bg-card p-8 text-center shadow-pillow">
           <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-pastel-peach" />
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-foreground">
             We couldn&apos;t find this patient link.
           </p>
           <button
@@ -266,16 +266,16 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                 )
                 .finally(() => setDemoBusy(false));
             }}
-            className="mt-4 block w-full rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-slate-700 shadow-pillow-sm disabled:opacity-50"
+            className="mt-4 block w-full rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
           >
             {demoBusy ? "Creating…" : `Create demo profile for ${patientId}`}
           </button>
           {demoError && (
-            <p className="mt-2 text-xs text-[#9A4B32]">{demoError}</p>
+            <p className="mt-2 text-xs text-foreground">{demoError}</p>
           )}
           <Link
             href="/"
-            className="mt-4 inline-block rounded-2xl bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-pillow-sm"
+            className="mt-4 inline-block rounded-2xl bg-card px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm"
           >
             Back to home
           </Link>
@@ -286,7 +286,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center text-slate-400">
+      <main className="flex min-h-screen items-center justify-center text-muted-foreground">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your
         screening…
       </main>
@@ -295,8 +295,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   if (loadError) {
     return (
-      <main className="flex min-h-screen items-center justify-center p-6 text-slate-600">
-        <p className="text-sm text-[#9A4B32]">
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <p className="text-sm text-foreground">
           Failed to load patient: {loadError}
         </p>
       </main>
@@ -309,39 +309,42 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const hasSessions = (patient?.gait_sessions?.length ?? 0) > 0;
 
   return (
-    <main className="min-h-screen p-6 text-slate-600">
+    <main className="min-h-screen p-6 text-foreground">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Activity className="h-8 w-8 text-pastel-blue" />
           <div>
-            <h1 className="text-2xl font-bold text-slate-700">GaitGuard AI</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="text-2xl font-bold text-foreground">GaitGuard AI</h1>
+            <p className="text-xs text-muted-foreground">
               Gait screening for {patient?.name ?? patientId} · {patientId}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-2 rounded-full border-0 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-pillow-sm">
-            <User className="h-3.5 w-3.5 text-slate-400" />
+          <span className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
             {patient?.name ?? patientId}
           </span>
           <Link
             href="/doctor"
-            className="flex items-center gap-2 rounded-full border-0 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-pillow-sm hover:bg-pastel-sand"
+            className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
           >
-            <Stethoscope className="h-3.5 w-3.5 text-slate-400" />
+            <Stethoscope className="h-3.5 w-3.5 text-muted-foreground" />
             Doctor&apos;s Portal
           </Link>
         </div>
       </header>
 
-      <div className="mb-6 rounded-3xl bg-white p-5 shadow-pillow">
-        <h2 className="mb-1 text-sm font-medium text-slate-700">
-          From your phone survey
-        </h2>
+      <div className="mb-6 overflow-hidden rounded-[1.75rem] bg-card shadow-pillow">
+        <div className="rounded-t-[1.75rem] bg-pastel-green px-6 py-3">
+          <h2 className="text-sm font-medium text-foreground">
+            Survey details
+          </h2>
+        </div>
+        <div className="px-6 py-4">
         {latestSurvey ? (
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-            <span className="rounded-full border-0 bg-pastel-peach px-2 py-0.5 text-[#9A4B32]">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-foreground">
+            <span className="rounded-full border-0 bg-pastel-peach px-2 py-0.5 text-foreground">
               pain {latestSurvey.pain_scale}/10
             </span>
             <span>
@@ -353,7 +356,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               {latestSurvey.primary_complaints.map((c) => (
                 <span
                   key={c}
-                  className="rounded-full border-0 bg-muted px-2 py-0.5 text-[10px] text-slate-500"
+                  className="rounded-full border-0 bg-pastel-lavender/60 px-2 py-0.5 text-[10px] text-foreground"
                 >
                   {c}
                 </span>
@@ -361,8 +364,9 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             </span>
           </div>
         ) : (
-          <p className="text-xs text-slate-400">No survey on file yet.</p>
+          <p className="text-xs text-muted-foreground">No survey on file yet.</p>
         )}
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -408,22 +412,22 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           />
 
           {metrics && !metrics.gait_detected && (
-            <p className="rounded-2xl border-0 bg-[#FBEBD2] px-3 py-2 text-xs text-slate-600">
+            <p className="rounded-2xl border-0 bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
               No walking detected — walk across the frame (or upload a clip
               with walking) to record a session.
             </p>
           )}
 
           {metricsSource === "live" && metrics && (
-            <div className="flex items-center gap-2 rounded-3xl bg-white p-4 shadow-pillow">
-              <Save className="h-4 w-4 shrink-0 text-slate-400" />
-              <span className="text-xs text-slate-400">
+            <div className="flex items-center gap-2 rounded-3xl bg-card p-4 shadow-pillow">
+              <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">
                 Save this walk to your record
               </span>
               <button
                 onClick={() => void saveSession("live")}
                 disabled={saving || !metrics.gait_detected}
-                className="rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-slate-700 shadow-pillow-sm disabled:opacity-50"
+                className="rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
               >
                 {saving ? "Saving…" : "Save this walk"}
               </button>
@@ -433,8 +437,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             <p
               className={`text-xs ${
                 saveNote.startsWith("Save failed")
-                  ? "text-[#9A4B32]"
-                  : "text-[#4F7A3A]"
+                  ? "text-foreground"
+                  : "text-foreground"
               }`}
             >
               {saveNote}
@@ -445,45 +449,45 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
           <TokenEfficiency refresh={summaryCount} lastResult={summary} />
 
-          <div className="rounded-3xl bg-white p-5 shadow-pillow">
-            <h2 className="text-sm font-medium text-slate-700">
+          <div className="rounded-3xl bg-card p-5 shadow-pillow">
+            <h2 className="text-sm font-medium text-foreground">
               AI Patient Summary
             </h2>
-            <p className="mb-3 text-xs text-slate-400">
+            <p className="mb-3 text-xs text-muted-foreground">
               Plain-language clinical summary for patients & care teams
             </p>
             <button
               onClick={handleSummary}
               disabled={summaryLoading || !hasSessions}
-              className="flex items-center gap-2 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-slate-700 shadow-pillow-sm disabled:opacity-50"
+              className="flex items-center gap-2 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               {summaryLoading ? "Generating…" : "Generate Patient Summary"}
             </button>
             {!hasSessions && (
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="mt-1 text-[11px] text-muted-foreground">
                 Complete a walk or upload first — no sessions on file yet.
               </p>
             )}
             {summaryError && (
-              <p className="mt-3 text-xs text-[#9A4B32]">{summaryError}</p>
+              <p className="mt-3 text-xs text-foreground">{summaryError}</p>
             )}
             {summary && (
               <div className="mt-3">
-                <p className="text-sm leading-relaxed text-slate-600">
+                <p className="text-sm leading-relaxed text-foreground">
                   {summary.summary}
                 </p>
                 <div className="mt-2 flex gap-2 text-[10px]">
-                  <span className="rounded-full border-0 bg-muted px-2 py-0.5 uppercase text-slate-500">
+                  <span className="rounded-full border-0 bg-muted px-2 py-0.5 uppercase text-muted-foreground">
                     {summary.source}
                   </span>
                   {summary.cached && (
-                    <span className="rounded-full border-0 bg-pastel-blue px-2 py-0.5 uppercase text-slate-600">
+                    <span className="rounded-full border-0 bg-pastel-blue px-2 py-0.5 uppercase text-foreground">
                       served from cache
                     </span>
                   )}
                   {summary.estimated_tokens_saved > 0 && (
-                    <span className="rounded-full border-0 bg-muted px-2 py-0.5 text-slate-400">
+                    <span className="rounded-full border-0 bg-muted px-2 py-0.5 text-muted-foreground">
                       ~{summary.estimated_tokens_saved} tokens saved
                     </span>
                   )}

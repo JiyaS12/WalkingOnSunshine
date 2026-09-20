@@ -34,12 +34,12 @@ function riskBand(score: number | null | undefined): string {
 function riskBadge(score: number | null | undefined) {
   const band = riskBand(score);
   if (band === "high")
-    return "border-0 bg-pastel-peach text-[#9A4B32]";
+    return "border-0 bg-pastel-peach text-foreground";
   if (band === "moderate")
-    return "border-0 bg-[#FBEBD2] text-[#9A6B2F]";
+    return "border-0 bg-pastel-peach/70 text-foreground";
   if (band === "low")
-    return "border-0 bg-[#E4F5D6] text-[#4F7A3A]";
-  return "border-0 bg-muted text-slate-400";
+    return "border-0 bg-pastel-green text-foreground";
+  return "border-0 bg-muted text-muted-foreground";
 }
 
 export default function DoctorPortal() {
@@ -196,15 +196,15 @@ export default function DoctorPortal() {
 
   const stat = (label: string, value: string, d?: number | null) => (
     <div className="rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
-      <p className="text-[10px] uppercase tracking-wide text-slate-400">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className="text-sm font-semibold text-slate-700">
+      <p className="text-sm font-semibold text-foreground">
         {value}
         {d !== null && d !== undefined && (
           <span
             className={`ml-1 text-[10px] ${
-              d <= 0 ? "text-[#4F7A3A]" : "text-[#9A4B32]"
+              d <= 0 ? "text-foreground" : "text-foreground"
             }`}
           >
             {d > 0 ? "+" : ""}
@@ -216,35 +216,35 @@ export default function DoctorPortal() {
   );
 
   return (
-    <main className="min-h-screen p-6 text-slate-600">
+    <main className="min-h-screen p-6 text-foreground">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Stethoscope className="h-8 w-8 text-pastel-blue" />
           <div>
-            <h1 className="text-2xl font-bold text-slate-700">Doctor&apos;s Portal</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="text-2xl font-bold text-foreground">Doctor&apos;s Portal</h1>
+            <p className="text-xs text-muted-foreground">
               Unified clinical synthesis — surveys + gait telemetry
             </p>
           </div>
         </div>
         <Link
           href="/"
-          className="flex items-center gap-2 rounded-full border-0 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-pillow-sm hover:bg-pastel-sand"
+          className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
         >
-          <User className="h-3.5 w-3.5 text-slate-400" />
+          <User className="h-3.5 w-3.5 text-muted-foreground" />
           Patient view
         </Link>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="rounded-3xl border-0 bg-gradient-to-b from-white to-[#FDFBF7] p-5 shadow-pillow">
+        <div className="rounded-[1.75rem] border-0 bg-card p-5 shadow-pillow">
           <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
-            <Search className="h-4 w-4 text-slate-400" />
+            <Search className="h-4 w-4 text-muted-foreground" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search id, name, complaint…"
-              className="w-full bg-transparent text-sm text-slate-600 outline-none placeholder:text-slate-400"
+              className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>
           <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
@@ -261,8 +261,8 @@ export default function DoctorPortal() {
                 onClick={() => setRiskFilter(k)}
                 className={`rounded-full border-0 px-2 py-0.5 ${
                   riskFilter === k
-                    ? "bg-pastel-blue text-slate-700 shadow-pillow-sm"
-                    : "bg-white text-slate-500 shadow-pillow-inset"
+                    ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                    : "bg-card text-muted-foreground shadow-pillow-inset"
                 }`}
               >
                 {label}
@@ -272,8 +272,8 @@ export default function DoctorPortal() {
               onClick={() => setDizzyOnly((v) => !v)}
               className={`rounded-full border-0 px-2 py-0.5 ${
                 dizzyOnly
-                  ? "bg-pastel-blue text-slate-700 shadow-pillow-sm"
-                  : "bg-white text-slate-500 shadow-pillow-inset"
+                  ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                  : "bg-card text-muted-foreground shadow-pillow-inset"
               }`}
             >
               Dizziness
@@ -282,8 +282,8 @@ export default function DoctorPortal() {
               onClick={() => setFallsOnly((v) => !v)}
               className={`rounded-full border-0 px-2 py-0.5 ${
                 fallsOnly
-                  ? "bg-pastel-blue text-slate-700 shadow-pillow-sm"
-                  : "bg-white text-slate-500 shadow-pillow-inset"
+                  ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                  : "bg-card text-muted-foreground shadow-pillow-inset"
               }`}
             >
               Recent falls
@@ -291,15 +291,15 @@ export default function DoctorPortal() {
           </div>
 
           {loadingList && (
-            <p className="flex items-center gap-2 text-xs text-slate-400">
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading patients…
             </p>
           )}
           {listError && (
-            <p className="text-xs text-[#9A4B32]">{listError}</p>
+            <p className="text-xs text-foreground">{listError}</p>
           )}
           {!loadingList && !listError && filtered.length === 0 && (
-            <p className="text-xs text-slate-400">No patients match.</p>
+            <p className="text-xs text-muted-foreground">No patients match.</p>
           )}
           <ul className="flex flex-col gap-2">
             {filtered.map((p) => (
@@ -308,12 +308,12 @@ export default function DoctorPortal() {
                   onClick={() => setSelectedId(p.patient_id)}
                   className={`w-full rounded-2xl border-0 p-2.5 text-left transition-colors ${
                     selectedId === p.patient_id
-                      ? "bg-[#EAF2FA] shadow-pillow"
+                      ? "bg-pastel-blue/60 shadow-pillow"
                       : "bg-muted shadow-pillow-inset hover:bg-pastel-sand"
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-700">
+                    <span className="text-sm font-medium text-foreground">
                       {p.name ?? p.patient_id}
                     </span>
                     {p.latest_fall_risk !== null &&
@@ -325,17 +325,17 @@ export default function DoctorPortal() {
                         </span>
                       )}
                   </div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                     <span>{p.patient_id}</span>
                     {p.age != null && <span>· {p.age} y/o</span>}
                     {p.pain_scale != null && (
-                      <span className="rounded-full border-0 bg-pastel-peach px-1.5 py-px text-[#9A4B32]">
+                      <span className="rounded-full border-0 bg-pastel-peach px-1.5 py-px text-foreground">
                         pain {p.pain_scale}
                       </span>
                     )}
                   </div>
                   {p.latest_survey_at && (
-                    <p className="mt-0.5 text-[10px] text-slate-500">
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
                       survey {p.latest_survey_at.slice(0, 10)}
                     </p>
                   )}
@@ -345,12 +345,15 @@ export default function DoctorPortal() {
           </ul>
         </div>
 
-        <div className="rounded-3xl border-0 bg-gradient-to-b from-white to-[#FDFBF7] p-5 shadow-pillow">
-          <h2 className="mb-1 text-sm font-medium text-slate-700">
-            Unified Clinical Synthesis Report
-          </h2>
+        <div className="overflow-hidden rounded-[1.75rem] border-0 bg-card shadow-pillow">
+          <div className="rounded-t-[1.75rem] bg-pastel-green px-6 py-3">
+            <h2 className="text-sm font-medium text-foreground">
+              Unified Clinical Synthesis Report
+            </h2>
+          </div>
+          <div className="p-5">
           <div className="mb-4 flex items-center justify-between text-xs">
-            <p className="text-slate-400">
+            <p className="text-muted-foreground">
               {record
                 ? `${record.name ?? record.patient_id} · ${record.patient_id}${
                     record.age ? ` · ${record.age} y/o` : ""
@@ -369,14 +372,14 @@ export default function DoctorPortal() {
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 }}
-                className="flex items-center gap-1 rounded-2xl border-0 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-pillow-sm hover:bg-pastel-sand"
+                className="flex items-center gap-1 rounded-2xl border-0 bg-card px-2 py-0.5 text-[10px] text-muted-foreground shadow-pillow-sm hover:bg-pastel-sand"
               >
                 <Copy className="h-3 w-3" />
                 {copied ? "Copied" : "Copy patient link"}
               </button>
             )}
             {lastSyncedAt && (
-              <span className="flex items-center gap-1.5 text-slate-500">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
                 <span className="h-1.5 w-1.5 rounded-full bg-pastel-green" />
                 Live · updated{" "}
                 {lastSyncedAt.toLocaleTimeString("en-GB", { hour12: false })}
@@ -384,30 +387,30 @@ export default function DoctorPortal() {
             )}
           </div>
           {detailError && (
-            <p className="text-xs text-[#9A4B32]">{detailError}</p>
+            <p className="text-xs text-foreground">{detailError}</p>
           )}
           {!record && selectedId && !detailError && (
-            <p className="flex items-center gap-2 text-xs text-slate-400">
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading record…
             </p>
           )}
           {!record && !selectedId && (
-            <p className="text-xs text-slate-400">No patient selected.</p>
+            <p className="text-xs text-muted-foreground">No patient selected.</p>
           )}
 
           {record && (
             <div className="grid gap-4 md:grid-cols-3">
               <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Subjective — Phone Survey
                 </h3>
                 {latestSurvey ? (
                   <div className="flex flex-col gap-2 text-xs">
                     <div>
-                      <p className="text-slate-500">
+                      <p className="text-muted-foreground">
                         Pain: {latestSurvey.pain_scale}/10
                       </p>
-                      <div className="mt-1 h-2 w-full rounded-full bg-white">
+                      <div className="mt-1 h-2 w-full rounded-full bg-card">
                         <div
                           className="h-2 rounded-full bg-pastel-peach"
                           style={{
@@ -416,21 +419,21 @@ export default function DoctorPortal() {
                         />
                       </div>
                     </div>
-                    <p className="text-slate-600">
+                    <p className="text-foreground">
                       Falls (6 mo):{" "}
                       {latestSurvey.fall_history.falls_last_6_months}
                       {latestSurvey.fall_history.injured && " · injured"}
                     </p>
                     {latestSurvey.fall_history.last_fall_description && (
-                      <p className="text-slate-500">
+                      <p className="text-muted-foreground">
                         “{latestSurvey.fall_history.last_fall_description}”
                       </p>
                     )}
-                    <p className="text-slate-600">
+                    <p className="text-foreground">
                       Dizziness: {latestSurvey.dizziness ? "yes" : "no"}
                     </p>
                     {latestSurvey.dizziness_notes && (
-                      <p className="text-slate-500">
+                      <p className="text-muted-foreground">
                         {latestSurvey.dizziness_notes}
                       </p>
                     )}
@@ -438,24 +441,24 @@ export default function DoctorPortal() {
                       {latestSurvey.primary_complaints.map((c) => (
                         <span
                           key={c}
-                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] text-slate-500"
+                          className="rounded-full border-0 bg-card px-2 py-0.5 text-[10px] text-muted-foreground"
                         >
                           {c}
                         </span>
                       ))}
                     </div>
-                    <p className="text-[10px] text-slate-400">
+                    <p className="text-[10px] text-muted-foreground">
                       Recorded {latestSurvey.recorded_at?.slice(0, 10) ?? "—"}
                       {latestSurvey.call_id && ` · ${latestSurvey.call_id}`}
                     </p>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400">No survey on file.</p>
+                  <p className="text-xs text-muted-foreground">No survey on file.</p>
                 )}
               </div>
 
               <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Objective — Gait Analysis
                 </h3>
                 {latestSession ? (
@@ -495,26 +498,26 @@ export default function DoctorPortal() {
                         fps={30}
                       />
                     ) : (
-                      <p className="rounded-2xl border-2 border-dashed border-[#E0D5C3] p-3 text-center text-[11px] text-slate-400">
+                      <p className="rounded-2xl border-2 border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">
                         No skeleton replay available
                       </p>
                     )}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-muted-foreground">
                     No gait sessions on file.
                   </p>
                 )}
               </div>
 
               <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   AI Clinical Summary
                 </h3>
                 <button
                   onClick={runSynthesis}
                   disabled={synthLoading}
-                  className="flex items-center gap-2 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-slate-700 shadow-pillow-sm disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
                 >
                   {synthLoading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -524,19 +527,19 @@ export default function DoctorPortal() {
                   {synthLoading ? "Generating…" : "Generate synthesis"}
                 </button>
                 {synthError && (
-                  <p className="mt-2 text-xs text-[#9A4B32]">{synthError}</p>
+                  <p className="mt-2 text-xs text-foreground">{synthError}</p>
                 )}
                 {synthesis && (
                   <div className="mt-3">
-                    <p className="text-xs leading-relaxed text-slate-600">
+                    <p className="text-xs leading-relaxed text-foreground">
                       {synthesis.summary}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
-                      <span className="rounded-full border-0 bg-white px-2 py-0.5 uppercase text-slate-500">
+                      <span className="rounded-full border-0 bg-card px-2 py-0.5 uppercase text-muted-foreground">
                         {synthesis.source === "openai" ? "OpenAI" : "template"}
                       </span>
                       {synthesis.cached && (
-                        <span className="rounded-full border-0 bg-pastel-blue px-2 py-0.5 uppercase text-slate-600">
+                        <span className="rounded-full border-0 bg-pastel-blue px-2 py-0.5 uppercase text-foreground">
                           cached
                         </span>
                       )}
@@ -546,6 +549,7 @@ export default function DoctorPortal() {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </main>
