@@ -328,7 +328,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   return (
     <main className="min-h-screen p-6 text-foreground">
-      <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <header className="mx-auto mb-8 flex max-w-6xl flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
@@ -353,40 +353,74 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <WebcamFeed onMetrics={handleMetrics} onInputReset={handleInputReset} />
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        <section>
+          <WebcamFeed onMetrics={handleMetrics} onInputReset={handleInputReset} />
+        </section>
 
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
-            <MetricCard
-              title="Stride Length"
-              value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
-              icon={<Footprints className="h-4 w-4" />}
-              sub={
-                metrics?.stride_ratio
-                  ? `×${metrics.stride_ratio.toFixed(2)} leg`
-                  : undefined
-              }
-            />
-            <MetricCard
-              title="Asymmetry"
-              value={metrics ? `${metrics.asymmetry_pct.toFixed(1)}%` : "—"}
-              icon={<Gauge className="h-4 w-4" />}
-            />
-            <MetricCard
-              title="Velocity Degradation"
-              value={
-                metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"
-              }
-              icon={<TrendingDown className="h-4 w-4" />}
-            />
-            <MetricCard
-              title="Fall Risk"
-              value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
-              icon={<AlertTriangle className="h-4 w-4" />}
-              badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
-            />
+        {metrics && !metrics.gait_detected && (
+          <p className="rounded-2xl border-0 bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
+            No walking detected — walk across the frame (or upload a clip
+            with walking) to record a session.
+          </p>
+        )}
+
+        {metricsSource === "live" && metrics && (
+          <div className="flex items-center gap-2 rounded-3xl bg-card p-4 shadow-pillow">
+            <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">
+              Save this walk to your record
+            </span>
+            <button
+              onClick={() => void saveSession("live")}
+              disabled={saving || !metrics.gait_detected}
+              className="rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save this walk"}
+            </button>
           </div>
+        )}
+        {saveNote && (
+          <p
+            className={`text-xs ${
+              saveNote.startsWith("Save failed")
+                ? "text-foreground"
+                : "text-foreground"
+            }`}
+          >
+            {saveNote}
+          </p>
+        )}
+
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <MetricCard
+            title="Stride Length"
+            value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
+            icon={<Footprints className="h-4 w-4" />}
+            sub={
+              metrics?.stride_ratio
+                ? `×${metrics.stride_ratio.toFixed(2)} leg`
+                : undefined
+            }
+          />
+          <MetricCard
+            title="Asymmetry"
+            value={metrics ? `${metrics.asymmetry_pct.toFixed(1)}%` : "—"}
+            icon={<Gauge className="h-4 w-4" />}
+          />
+          <MetricCard
+            title="Velocity Degradation"
+            value={
+              metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"
+            }
+            icon={<TrendingDown className="h-4 w-4" />}
+          />
+          <MetricCard
+            title="Fall Risk"
+            value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
+            icon={<AlertTriangle className="h-4 w-4" />}
+            badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
+          />
           <MetricCard
             title="Cadence"
             value={
@@ -394,41 +428,9 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             }
             icon={<Activity className="h-4 w-4" />}
           />
+        </section>
 
-          {metrics && !metrics.gait_detected && (
-            <p className="rounded-2xl border-0 bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
-              No walking detected — walk across the frame (or upload a clip
-              with walking) to record a session.
-            </p>
-          )}
-
-          {metricsSource === "live" && metrics && (
-            <div className="flex items-center gap-2 rounded-3xl bg-card p-4 shadow-pillow">
-              <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                Save this walk to your record
-              </span>
-              <button
-                onClick={() => void saveSession("live")}
-                disabled={saving || !metrics.gait_detected}
-                className="rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Save this walk"}
-              </button>
-            </div>
-          )}
-          {saveNote && (
-            <p
-              className={`text-xs ${
-                saveNote.startsWith("Save failed")
-                  ? "text-foreground"
-                  : "text-foreground"
-              }`}
-            >
-              {saveNote}
-            </p>
-          )}
-
+        <section className="grid gap-6 lg:grid-cols-2">
           <TrendGraph sessions={sessions} />
 
           <div className="rounded-3xl bg-card p-5 shadow-pillow">
@@ -477,7 +479,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );
