@@ -57,9 +57,25 @@ gaitguard-ai/
     app/             survey engine, conversation policy, telephony bridge
 ```
 
-The automated voice agent lives in [`voice_agent/`](voice_agent/README.md) and
-has its own virtualenv, `.env`, and test suite; it points patients at this
-app's `/patient/[id]` page via `GAIT_CHECKER_BASE_URL`.
+The automated voice agent lives in [`voice_agent/`](voice_agent/README.md).
+Main runs on **8000**, phone on **8001**, and the frontend on **3000**.
+Use separate Python virtualenvs: main pins `openai==3.16.1`, while voice
+requires `openai<3`. Main starts and tests without any telephony credentials.
+
+The authenticated clinician selects an existing patient and explicitly supplies
+`orthopedic` or `stroke` condition metadata. Main reserves the call; phone
+collects the generic intake and confirmed HOOS JR/stroke items separately.
+Main persists both in its JSON patient store and issues the signed patient
+URL. Phone texts that exact URL, then polls the patient's walking events.
+Only a persisted session with matching call/attempt IDs confirms completion.
+The clinician timeline and synthesis join that saved result to its survey.
+Unknown condition metadata is never inferred from complaints, age, or cohort.
+
+See the [integration/operator runbook](docs/integration-runbook.md) for setup,
+the offline deterministic demo, failure recovery and live validation steps.
+The [API/data contract](docs/patient-access-contract.md) describes all three
+authentication boundaries and the call/survey/walking payloads. Supabase remains
+an optional standalone voice-demo integration, not the integrated patient store.
 
 ## Backend setup
 
@@ -111,7 +127,7 @@ Required patient-link configuration:
 - `PATIENT_LINK_TTL_SECONDS` — link lifetime from 60 to 604800 seconds (default
   `900`).
 
-Optional environment variables:
+Service authentication and optional environment variables:
 - `OPENAI_API_KEY` — enable LLM-generated summaries/synthesis
   (deterministic template fallback without it). Summaries are cached in
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
@@ -119,6 +135,8 @@ Optional environment variables:
 - `SURVEY_INGEST_TOKEN` — required for `POST /api/submit-survey`; callers send
   it in `X-Survey-Token`. It also disables `POST
   /api/patients/{id}/ensure-demo` (403) unless `ALLOW_DEMO_PATIENTS` is set.
+- `PHONE_SERVICE_BASE_URL` — optional phone origin (local `http://127.0.0.1:8001`).
+  `OPERATOR_TOKEN` must match the phone service's server-only bearer token.
 - `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` — local-only escape hatch. Set to
   `1`/`true`/`yes` to run survey ingestion without a token. Never enable this
   in a shared or production environment.
@@ -172,14 +190,19 @@ demo records. A local demo uses the same signed handshake as production:
 
 ## Verify a clean checkout
 
-From the repository root, create a fresh Python 3.12 environment and run the
-backend suite:
+From the repository root, use separate Python 3.12 environments:
 
 ```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install -r backend/requirements.txt
-python -m pytest -q backend/tests
+python3.12 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+OPENAI_API_KEY= backend/.venv/bin/python -m pytest -q backend/tests
+python3.12 -m venv voice_agent/.venv
+voice_agent/.venv/bin/pip install -r voice_agent/requirements.txt
+(cd voice_agent && OPENAI_API_KEY= RUN_LIVE_SURVEY_TESTS= SURVEY_EXTRACTOR=exact \
+  .venv/bin/python -m pytest -q -m 'not live')
+node --test voice_agent/tests/*.cjs
+mkdir -p .cache
+backend/.venv/bin/python -m pytest -q tests/integration/test_handshake.py --basetemp=.cache/handshake
 ```
 
 Then use Node 20.19.x to install exactly the locked frontend dependencies,
@@ -195,8 +218,13 @@ npm run type-check
 npm run build
 ```
 
-These checks require no repository secrets. GitHub Actions runs the same gates
-for every push and pull request with npm and pip dependency caching enabled.
+These checks require no repository secrets. The handshake starts real main and
+phone HTTP processes on ephemeral loopback ports, using their separate
+virtualenvs, fake telephony and synthetic gait frames. It covers both conditions,
+unknown generic answers, SMS failure/ambiguity, retries, event ordering, scoped
+authorization and saved-session synthesis without cameras or paid providers.
+GitHub Actions preserves backend/frontend gates and adds offline voice Python,
+voice JavaScript and the integrated handshake.
 
 ## License
 

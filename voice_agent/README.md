@@ -173,6 +173,11 @@ The repo is intentionally designed as a staged, reviewable stack rather than a g
 
 ## Integrated phone runtime and downstream contract
 
+The root [operator runbook](../docs/integration-runbook.md) covers the combined
+runtime and real-process offline harness. The canonical API/data contract is
+in [patient access](../docs/patient-access-contract.md). Keep `voice_agent/.venv`
+separate from `backend/.venv` because their OpenAI requirements conflict.
+
 Run main on **8000**, phone on **8001**, frontend on **3000**. Use one phone
 process/worker with a persistent receipt volume. Run `python phone_app.py`, or
 `uvicorn phone_app:create_app --factory --port 8001 --no-access-log`.

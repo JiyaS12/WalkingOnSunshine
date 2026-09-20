@@ -145,7 +145,10 @@ class IntegratedService:
             if not self.store.reserve(receipt):
                 raise HTTPException(409, "Call reservation already exists.")
             self.numbers[payload.call_id] = payload.to_number
-        await self.publish(payload.call_id, required=True)
+        try:
+            await self.publish(payload.call_id, required=True)
+        except BackendError:
+            return await self.end(payload.call_id, "failed", "provider_unavailable")
         query = urlencode({"call_id": payload.call_id})
         try:
             result = await self.provider.call(
@@ -297,10 +300,13 @@ class IntegratedService:
         return await self.dispatch_sms(call_id, attempt, url)
 
     async def dispatch_sms(self, call_id: str, attempt: int, url: str) -> PhoneSnapshot:
-        await self.publish(call_id, required=True)
+        try:
+            await self.publish(call_id, required=True)
+        except BackendError:
+            return await self.sms_event(call_id, attempt, None, "failed", error="provider_unavailable")
         number = self.numbers.get(call_id)
         if number is None:
-            return await self.sms_event(call_id, attempt, None, "failed")
+            return await self.sms_event(call_id, attempt, None, "failed", error="provider_unavailable")
         query = urlencode({"call_id": call_id, "attempt": attempt})
         try:
             result = await self.provider.sms(number, sms_body(url), f"{self.public_base_url}/twilio/sms-status?{query}")
@@ -313,7 +319,10 @@ class IntegratedService:
             return snapshot
         return await self.sms_event(call_id, attempt, result.sid, message_status(result.status) or "unknown")
 
-    async def sms_event(self, call_id: str, attempt: int, sid: str | None, status: SMSStatus) -> PhoneSnapshot:
+    async def sms_event(
+        self, call_id: str, attempt: int, sid: str | None, status: SMSStatus,
+        *, error: PhoneError | None = None,
+    ) -> PhoneSnapshot:
         def change(value: Receipt) -> None:
             snapshot = value.snapshot
             if attempt > snapshot.sms_attempt or snapshot.survey_status != "stored":
@@ -332,5 +341,5 @@ class IntegratedService:
                 snapshot.message_id = sid
             if snapshot.sms_status not in {"failed", "delivered"} and SMS_RANK[status] >= SMS_RANK[snapshot.sms_status]:
                 snapshot.sms_status = status
-                snapshot.error_code = "provider_rejected" if status == "failed" else None
+                snapshot.error_code = (error or "provider_rejected") if status == "failed" else None
         return await self.update(call_id, change)

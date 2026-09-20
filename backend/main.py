@@ -701,4 +701,26 @@ def patient_synthesis(pid: str) -> dict:
             status_code=422,
             detail="patient needs at least one survey and one gait session",
         )
+    if record.get("active_call_id"):
+        call = store.get_call(pid, record["active_call_id"])
+        surveys = [
+            survey for survey in record["surveys"]
+            if survey.get("call_id") == call["call_id"]
+        ]
+        session_index = next((
+            index for index, session in enumerate(record["gait_sessions"])
+            if session.get("session_id") == call["walking"]["session_id"]
+            and session.get("call_id") == call["call_id"]
+            and session.get("attempt_id") == call["attempt_id"]
+        ), None)
+        if call["walking"]["status"] != "saved" or not surveys or session_index is None:
+            raise HTTPException(
+                status_code=422,
+                detail="active call needs its confirmed survey and saved walking session",
+            )
+        record = {
+            **record,
+            "surveys": surveys,
+            "gait_sessions": record["gait_sessions"][:session_index + 1],
+        }
     return agent.generate_synthesis(record)

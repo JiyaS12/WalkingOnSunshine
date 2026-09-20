@@ -157,7 +157,7 @@ class IntegratedSession:
         if self.finished:
             return
         if snapshot.sms_status == "failed":
-            await self.finish("completed", "Your intake is saved, but the text failed. Please contact your care team if you need help with the link.")
+            await self.finish("completed", "Your intake is saved, but the text failed. Please contact your care team if you need help with the link.", snapshot.error_code)
             return
         self.stage = "walking"
         await self._say(
@@ -197,11 +197,11 @@ class IntegratedSession:
                         elif view.last_event == "recoverable_error":
                             await self._say("The page reports a problem. Please follow its retry instructions, or say stop. A saved test is not confirmed.")
                         elif view.status == "ready":
-                            await self._say("The page confirms calibration is ready. When safe, start capture on the page and walk in view of the camera. About 15 seconds is a guide; I will wait for the saved result.")
+                            await self._say("The page confirms calibration is ready. Live capture starts automatically. Walk in view of the camera only if safe, then choose Save this walk. About 15 seconds is a guide; I will wait for the saved result.")
                         elif view.status == "capturing":
-                            await self._say("The page reports capture is running. Stop if you feel unsafe. I will wait for the saved result.")
+                            await self._say("The page reports capture is running. Stop if you feel unsafe. When you have a walking result, choose Save this walk. I will wait for the saved result.")
                         elif view.status == "captured":
-                            await self._say("Capture has finished. I am waiting for confirmation that the result is saved.")
+                            await self._say("A walking result is available. For live capture, choose Save this walk. Uploaded results save automatically. I am waiting for confirmation that the result is saved.")
             await asyncio.sleep(self.poll_seconds)
         if not self.finished:
             await self.finish("completed", "The waiting time has ended. I cannot confirm that a walking test was saved. You may check the page.")

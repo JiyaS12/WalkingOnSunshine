@@ -28,6 +28,72 @@ jobs:
       - name: Run backend tests
         run: python -m pytest -q backend/tests
 
+      - name: Check integration Python contracts
+        run: |
+          python -m pip install ruff==0.12.12 mypy==1.17.1
+          ruff check backend/integration_api.py backend/integration_models.py backend/phone_client.py tests/integration
+          mypy --check-untyped-defs --follow-imports=silent --ignore-missing-imports backend/integration_api.py backend/integration_models.py backend/phone_client.py
+
+  voice-python:
+    name: Voice offline (Python 3.12)
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ""
+      RUN_LIVE_SURVEY_TESTS: ""
+      SURVEY_EXTRACTOR: exact
+    defaults:
+      run:
+        working-directory: voice_agent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: voice_agent/requirements.txt
+      - name: Install independent voice dependencies
+        run: python -m pip install -r requirements.txt ruff==0.12.12 mypy==1.17.1
+      - name: Run all offline voice tests
+        run: python -m pytest -q -m "not live"
+      - name: Check voice integration contracts
+        run: |
+          ruff check --select E4,E7,E9,F app/integrated_service.py app/integrated_session.py app/integration_contract.py app/generic_intake.py app/main_backend.py app/phone_receipts.py app/telephony/integrated_provider.py tests/test_dispatch_preconditions.py
+          mypy --check-untyped-defs --follow-imports=silent --ignore-missing-imports app/integrated_service.py app/integrated_session.py app/integration_contract.py app/generic_intake.py app/main_backend.py app/phone_receipts.py app/telephony/integrated_provider.py
+
+  voice-js:
+    name: Voice JavaScript (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20.19.0"
+      - name: Run voice JavaScript tests
+        run: node --test voice_agent/tests/*.cjs
+
+  integration:
+    name: Authenticated main and phone handshake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            voice_agent/requirements.txt
+      - name: Install separate backend and phone environments
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install -r backend/requirements.txt
+          python -m venv voice_agent/.venv
+          voice_agent/.venv/bin/pip install -r voice_agent/requirements.txt
+      - name: Run deterministic HTTP handshake with fake providers
+        run: |
+          mkdir -p .cache
+          backend/.venv/bin/python -m pytest -q tests/integration/test_handshake.py --basetemp=.cache/handshake
+
   frontend:
     name: Frontend (Node 20)
     runs-on: ubuntu-latest
