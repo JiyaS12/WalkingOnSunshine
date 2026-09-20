@@ -612,6 +612,10 @@ def test_place_call_reports_whether_twilio_will_send_status_callbacks(monkeypatc
         ("no it's not open yet", "unclear"),
         ("I don't have it up", "unclear"),
         ("it isn't loading", "unclear"),
+        ("I can't find it", "unclear"),
+        ("no problem, I'm ready", "ready"),
+        ("no, now I'm ready", "ready"),
+        ("not bad, it's open now", "ready"),
         ("hello", "unclear"),
     ],
 )

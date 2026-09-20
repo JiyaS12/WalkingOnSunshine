@@ -32,8 +32,10 @@ _MISSING_WORDS = re.compile(
 )
 # "I'm not ready" / "don't have it open yet": a no dressed up in ready words.
 _NOT_READY = re.compile(
-    r"\b(not|don'?t|do not|can'?t|cannot|isn'?t|haven'?t|hasn'?t|won'?t|no)\b[^.!?]{0,25}?"
-    r"\b(ready|open(?:ed)?|up|have it|see it|set|loaded|done|work(?:ing)?)\b"
+    r"\b(?:(?:not|isn'?t|ain'?t|hasn'?t)\s+(?:quite\s+|yet\s+|really\s+)?"
+    r"(?:ready|open(?:ed)?|up|loaded|loading|working|set|done)"
+    r"|(?:don'?t|do not|haven'?t|can'?t|cannot|couldn'?t)\s+(?:seem to\s+)?"
+    r"(?:have|see|find|get|open|load)\b)"
 )
 _READY_WORDS = re.compile(
     r"\b(ready|got it|open(?:ed)?|it'?s up|have it|see it|i'?m (?:set|on|there|in)|"
