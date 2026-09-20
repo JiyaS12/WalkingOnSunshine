@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import time
 
 import pytest
@@ -111,6 +112,55 @@ def test_voice_webhook_returns_stream_twiml(client):
     assert 'value="RGN-0417"' in response.text
 
 
+def test_voice_webhook_issues_a_stream_ticket_the_media_socket_redeems(client):
+    response = client.post(
+        "/twilio/voice?patient_code=RGN-0417&session_id=sess-1", data={"CallSid": "CA1"}
+    )
+    match = re.search(r'name="streamToken" value="([^"]+)"', response.text)
+    assert match is not None
+    token = match.group(1)
+    assert client.app.state.stream_tickets.redeem("sess-1", token) is True
+    # Tickets are single use.
+    assert client.app.state.stream_tickets.redeem("sess-1", token) is False
+
+
+def test_media_stream_without_a_ticket_is_dropped_before_the_survey_starts(client):
+    """Anyone can reach the public websocket; only Twilio, answering our TwiML, has a ticket."""
+
+    client.app.state.stream_tickets.issue("sess-1")
+    for forged in ({}, {"streamToken": "guess"}):
+        websocket = StubWebSocket(
+            [
+                {
+                    "event": "start",
+                    "streamSid": "MZ1",
+                    "start": {
+                        "streamSid": "MZ1",
+                        "callSid": "CA1",
+                        "customParameters": {
+                            "patientCode": "RGN-0417",
+                            "sessionId": "sess-1",
+                            **forged,
+                        },
+                    },
+                }
+            ]
+        )
+        bridge = phone_app.MediaStreamBridge(
+            websocket,
+            client.app.state.settings,
+            phone_app.InMemoryPatientRepository(),
+            client.app.state.persistence,
+            client.app.state.stream_tickets,
+            transcriber_factory=ScriptedTranscriber,
+        )
+        asyncio.run(asyncio.wait_for(bridge.run(), 5))
+        assert websocket.closed
+        assert bridge.session is None
+        assert websocket.sent == []
+        assert "sess-1" not in client.app.state.persistence.calls
+
+
 def test_voice_webhook_hangs_up_on_unknown_patient(client):
     response = client.post("/twilio/voice?patient_code=NOPE", data={"CallSid": "CA1"})
     assert "<Hangup/>" in response.text
@@ -207,7 +257,11 @@ def test_media_stream_answers_and_records_the_survey(client, monkeypatch):
                     "start": {
                         "streamSid": "MZ1",
                         "callSid": "CA1",
-                        "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-1"},
+                        "customParameters": {
+                            "patientCode": "RGN-0417",
+                            "sessionId": "sess-1",
+                            "streamToken": client.app.state.stream_tickets.issue("sess-1"),
+                        },
                     },
                 }
             )
@@ -248,7 +302,11 @@ def test_media_stream_ignores_what_it_hears_while_it_is_still_talking(client):
                     "start": {
                         "streamSid": "MZ1",
                         "callSid": "CA1",
-                        "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-1"},
+                        "customParameters": {
+                            "patientCode": "RGN-0417",
+                            "sessionId": "sess-1",
+                            "streamToken": client.app.state.stream_tickets.issue("sess-1"),
+                        },
                     },
                 }
             )
@@ -300,7 +358,11 @@ def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
         "start": {
             "streamSid": "MZ1",
             "callSid": "CA1",
-            "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-2"},
+            "customParameters": {
+                "patientCode": "RGN-0417",
+                "sessionId": "sess-2",
+                "streamToken": client.app.state.stream_tickets.issue("sess-2"),
+            },
         },
     }
     websocket = StubWebSocket([start])
@@ -309,6 +371,7 @@ def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
         client.app.state.settings,
         phone_app.InMemoryPatientRepository(),
         client.app.state.persistence,
+        client.app.state.stream_tickets,
         transcriber_factory=ScriptedTranscriber,
     )
 
@@ -356,7 +419,11 @@ def test_the_mic_feed_is_muted_while_a_prompt_plays(client, monkeypatch):
         "start": {
             "streamSid": "MZ1",
             "callSid": "CA1",
-            "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-3"},
+            "customParameters": {
+                "patientCode": "RGN-0417",
+                "sessionId": "sess-3",
+                "streamToken": client.app.state.stream_tickets.issue("sess-3"),
+            },
         },
     }
     speech = base64.b64encode(b"\x01" * 160).decode("ascii")
@@ -367,6 +434,7 @@ def test_the_mic_feed_is_muted_while_a_prompt_plays(client, monkeypatch):
         client.app.state.settings,
         phone_app.InMemoryPatientRepository(),
         client.app.state.persistence,
+        client.app.state.stream_tickets,
         transcriber_factory=ScriptedTranscriber,
     )
 
@@ -404,6 +472,7 @@ def test_prompt_audio_is_sent_ahead_of_playback_without_an_opening_gap(client, m
         client.app.state.settings,
         phone_app.InMemoryPatientRepository(),
         client.app.state.persistence,
+        client.app.state.stream_tickets,
         transcriber_factory=ScriptedTranscriber,
     )
     bridge.stream_sid = "MZ1"
@@ -445,7 +514,11 @@ def test_a_speech_failure_ends_the_call_instead_of_muting_it(client, monkeypatch
         "start": {
             "streamSid": "MZ9",
             "callSid": "CA9",
-            "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-9"},
+            "customParameters": {
+                "patientCode": "RGN-0417",
+                "sessionId": "sess-9",
+                "streamToken": client.app.state.stream_tickets.issue("sess-9"),
+            },
         },
     }
     media = {"event": "media", "media": {"track": "inbound", "payload": base64.b64encode(b"\x01" * 160).decode("ascii")}}
@@ -455,6 +528,7 @@ def test_a_speech_failure_ends_the_call_instead_of_muting_it(client, monkeypatch
         client.app.state.settings,
         phone_app.InMemoryPatientRepository(),
         client.app.state.persistence,
+        client.app.state.stream_tickets,
         transcriber_factory=ScriptedTranscriber,
     )
 

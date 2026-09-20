@@ -10,6 +10,14 @@ import pytest
 from unittest.mock import Mock
 from voice_app import create_app, transcribe_with_deepgram
 
+TOKEN = "operator-secret-0123456789"
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
+
+
+@pytest.fixture(autouse=True)
+def operator_token(monkeypatch):
+    monkeypatch.setenv("OPERATOR_TOKEN", TOKEN)
+
 
 def test_voice_app_exposes_desktop_routes(monkeypatch):
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
@@ -36,7 +44,7 @@ def test_audio_route_uses_interpreter_and_exposes_only_confirmed_answers(monkeyp
     monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
     transcripts = iter(["It was mild all week on stairs", "yes", "stop"])
     monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: next(transcripts))
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers=AUTH) as client:
         started = client.post("/api/sessions").json()
         url = f"/api/sessions/{started['session_id']}/audio"
         files = {"audio": ("answer.webm", b"synthetic-audio", "audio/webm")}
@@ -62,7 +70,7 @@ def test_speech_only_reads_current_server_prompt_and_caches_audio(monkeypatch):
     monkeypatch.setattr(voice_app, "stream_speech_with_deepgram", synthesize)
     monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
     monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: "mild")
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers=AUTH) as client:
         started = client.post("/api/sessions").json()
         url = f"/api/sessions/{started['session_id']}"
         speech_url = f"{url}/speech?prompt_id={started['prompt_id']}"
@@ -91,7 +99,7 @@ def test_transcription_failure_does_not_consume_question_or_confirmation(monkeyp
     monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
     transcribe = Mock(side_effect=[RuntimeError("No speech was detected."), "mild"])
     monkeypatch.setattr(voice_app, "transcribe_with_deepgram", transcribe)
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers=AUTH) as client:
         started = client.post("/api/sessions").json()
         url = f"/api/sessions/{started['session_id']}/audio"
         files = {"audio": ("answer.webm", b"audio", "audio/webm")}
@@ -116,7 +124,7 @@ def test_speech_failure_preserves_current_prompt_for_retry(monkeypatch):
         yield result
     synthesize = Mock(side_effect=stream)
     monkeypatch.setattr(voice_app, "stream_speech_with_deepgram", synthesize)
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers=AUTH) as client:
         started = client.post("/api/sessions").json()
         url = f"/api/sessions/{started['session_id']}/speech?prompt_id={started['prompt_id']}"
         assert client.post(url).status_code == 502
@@ -166,7 +174,7 @@ def test_partial_stream_is_not_cached_as_a_finished_prompt(monkeypatch):
         yield b"last"
 
     monkeypatch.setattr(voice_app, "stream_speech_with_deepgram", stream)
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers=AUTH) as client:
         session = client.post("/api/sessions").json()
         url = f"/api/sessions/{session['session_id']}/speech?prompt_id={session['prompt_id']}"
         with pytest.raises(RuntimeError, match="Connection lost"):
@@ -189,7 +197,7 @@ def test_preloaded_opening_is_immediately_available_on_first_session(monkeypatch
     assert calls == []  # Import/factory construction alone does not spend on TTS.
     app.state.prewarm_speech()
     assert len(calls) == 2
-    with TestClient(app) as client:
+    with TestClient(app, headers=AUTH) as client:
         for code in ("RGN-0417", "RGN-0500"):
             session = client.post("/api/sessions", params={"patient_code": code}).json()
             response = client.get(f"/api/sessions/{session['session_id']}/speech?prompt_id={session['prompt_id']}")
@@ -205,14 +213,17 @@ def test_voice_turns_persist_patient_id_transcript_and_survey_results(monkeypatc
     monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
     monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: "mild")
     app = create_app(persistence=store, auth=OperatorAuth("operator-secret-0123456789"))
-    with TestClient(app) as client:
+    with TestClient(app, headers=AUTH) as client:
         started = client.post("/api/sessions", params={"patient_code": "RGN-0417"}).json()
         url = f"/api/sessions/{started['session_id']}/audio"
         files = {"audio": ("answer.webm", b"synthetic-audio", "audio/webm")}
         client.post(url, files=files)
         # Transcripts and answers are operator-only.
-        assert client.get("/api/results").status_code == 401
+        assert client.get("/api/results", headers={"Authorization": ""}).status_code == 401
         assert client.get("/api/results", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        # Starting a survey or sending audio spends provider credit, so those are operator-only too.
+        assert client.post("/api/sessions", headers={"Authorization": ""}).status_code == 401
+        assert client.post(url, files=files, headers={"Authorization": "Bearer wrong"}).status_code == 401
         payload = client.get(
             "/api/results",
             params={"patient_code": "RGN-0417"},

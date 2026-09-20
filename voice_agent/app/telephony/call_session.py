@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 TERMINAL_STATES = {"complete", "escalated", "stopped"}
 # How long the caller walks in front of the camera before we sign off.
 WALK_SECONDS = 15.0
+# Silence intervals a paused caller gets before the call ends for review; the
+# phone bridge fires one every SILENCE_TIMEOUT_SECONDS, so this is minutes, not
+# the handful of reprompts an unanswered question gets.
+MAX_PAUSED_SILENCES = 12
 
 Speaker = Callable[[str], Awaitable[None]]
 SmsSender = Callable[[str, str], Awaitable[None]]
@@ -41,6 +45,7 @@ class PhoneCallSession:
         to_number: str | None = None,
         sms_sender: SmsSender | None = None,
         walk_seconds: float = WALK_SECONDS,
+        max_paused_silences: int = MAX_PAUSED_SILENCES,
     ):
         self.engine = engine
         self.speak = speak
@@ -52,10 +57,12 @@ class PhoneCallSession:
         self.to_number = to_number
         self.sms_sender = sms_sender
         self.walk_seconds = walk_seconds
+        self.max_paused_silences = max_paused_silences
         self.handoff: GaitHandoff | None = None
         self._buffer: list[str] = []
         self._last_prompt = ""
         self._silent_reprompts = 0
+        self._paused_silences = 0
         self._awaiting_link = False
 
     @property
@@ -97,6 +104,7 @@ class PhoneCallSession:
         if not transcript:
             return self.finished
         self._silent_reprompts = 0
+        self._paused_silences = 0
         self.persistence.append_transcript(self.session_id, f"patient: {transcript}")
         if self._awaiting_link:
             return await self._walk_the_caller_through_it()
@@ -119,6 +127,16 @@ class PhoneCallSession:
 
         if self.finished:
             return True
+        if self.engine.session.state == "paused":
+            # The caller asked for this quiet, so it is not a missed answer.
+            # Stay on the line for "resume" or "stop", within reason.
+            self._paused_silences += 1
+            if self._paused_silences < self.max_paused_silences:
+                return False
+            self.engine.session.state = "escalated"
+            self.engine.session.needs_human_review = True
+            await self._say(self.voice.pause_expired().text)
+            return await self._finish_if_done()
         self._silent_reprompts += 1
         if self._awaiting_link:
             # The survey is already answered, so a quiet caller here is someone
@@ -145,35 +163,50 @@ class PhoneCallSession:
                 self.engine.patient.patient_code,
                 self.engine.patient.condition_category.value,
             )
-            await self._send_gait_handoff()
-            return False
+            return await self._send_gait_handoff()
         if not self.finished:
             return False
         self.persistence.complete_call(self.session_id, self.engine.session.state)
         return True
 
-    async def _send_gait_handoff(self) -> None:
+    async def _send_gait_handoff(self) -> bool:
         """Explain the walking video, text the link, then wait on the line for the
         caller to open it, rather than reciting instructions at a dial tone.
 
-        A failed text does not stop the call from completing or the walkthrough
-        from playing -- the patient still hears the guidance either way, and a
-        failed send is recorded on ``self.handoff`` for follow-up.
+        The camera walkthrough only makes sense with a link in the caller's
+        hand, so it is offered only once the text has actually gone out. When
+        no link can be made, or the send fails, the caller hears a closing that
+        promises nothing, the outcome is recorded on ``self.handoff`` for
+        follow-up, and the call completes. Returns True when the call is over.
         """
 
         assert self.handoff is not None
+        if not (self.sms_sender and self.to_number and self.handoff.link):
+            if self.handoff.status == "prepared":
+                self.handoff.status = "unavailable"
+                self.handoff.notes.append("Gait link not sent: no SMS route for this call.")
+            await self._say(self.voice.gait_unavailable().text)
+            return await self._complete_without_walkthrough()
         await self._say(self.voice.gait_request().text)
-        if self.sms_sender and self.to_number and self.handoff.link:
-            try:
-                await self.sms_sender(self.to_number, sms_body(self.handoff.link))
-                self.handoff.sms_sent = True
-            except Exception:
-                logger.exception(
-                    "Could not text the gait-checker link for session %s", self.session_id
-                )
+        try:
+            await self.sms_sender(self.to_number, sms_body(self.handoff.link))
+        except Exception:
+            logger.exception(
+                "Could not text the gait-checker link for session %s", self.session_id
+            )
+            self.handoff.status = "failed"
+            self.handoff.notes.append("Gait link not sent: the text message failed.")
+            await self._say(self.voice.link_failed().text)
+            return await self._complete_without_walkthrough()
+        self.handoff.sms_sent = True
         self._awaiting_link = True
         self._silent_reprompts = 0
         await self._say(self.voice.link_sent_confirmation().text)
+        return False
+
+    async def _complete_without_walkthrough(self) -> bool:
+        self.persistence.complete_call(self.session_id, self.engine.session.state)
+        return True
 
     async def _walk_the_caller_through_it(self) -> bool:
         """Camera setup, then the timed walk, once the caller says they are set."""

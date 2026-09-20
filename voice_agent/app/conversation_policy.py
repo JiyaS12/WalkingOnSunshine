@@ -192,6 +192,19 @@ LINK_SENT = (
     "you have it up."
 )
 LINK_REMINDER = "No rush at all. Just say ‘ready’ once you have the link open."
+LINK_FAILED = (
+    "I’m sorry, the text did not go through on my end, so we will leave the walking check "
+    "for another time. Your care team will send you the link separately. Thank you for your "
+    "answers today. Take care, and goodbye."
+)
+GAIT_UNAVAILABLE = (
+    "Thank you for those answers. That is everything for today. Your care team may reach "
+    "out separately about a short walking check-in. Take care of yourself, and goodbye."
+)
+PAUSE_EXPIRED = (
+    "I have not heard from you for a while, so I will let you go for now. A clinician will "
+    "follow up with you to finish. Goodbye."
+)
 WALKTHROUGH_GUIDANCE = (
     "Great. Tap the “Live Camera” mode, then prop your phone against something steady "
     "where your whole body is in view, and step back a few paces."

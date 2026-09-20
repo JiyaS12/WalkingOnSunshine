@@ -191,8 +191,8 @@ How a call flows:
 | Step | Endpoint |
 | --- | --- |
 | Operator starts the call | `POST /api/calls` places the Twilio call |
-| Twilio asks what to do | `POST /twilio/voice` returns `<Connect><Stream>` TwiML |
-| Call audio both ways | `WS /twilio/media` mu-law 8 kHz frames |
+| Twilio asks what to do | `POST /twilio/voice` returns `<Connect><Stream>` TwiML with a one-time stream ticket |
+| Call audio both ways | `WS /twilio/media` mu-law 8 kHz frames; the `start` message must present that ticket |
 | Call lifecycle | `POST /twilio/status` |
 
 The websocket bridge feeds inbound audio to Deepgram, waits for `UtteranceEnd`
@@ -258,11 +258,11 @@ keeps listening for “resume”; use the button to switch the microphone off en
 
 ```bash
 cp .env.example .env
-# Edit .env and set DEEPGRAM_API_KEY
+# Edit .env and set DEEPGRAM_API_KEY and OPERATOR_TOKEN
 python voice_app.py
 ```
 
-Open <http://127.0.0.1:8000>, choose a patient code, click **Start survey**, and
+Open <http://127.0.0.1:8000>, enter the `OPERATOR_TOKEN`, choose a patient code, click **Start survey**, and
 allow microphone access once. After each prompt, just speak and briefly pause;
 no per-answer button press is needed.
 Your transcript appears as **You:** in the conversation. Use `RGN-0417` for the

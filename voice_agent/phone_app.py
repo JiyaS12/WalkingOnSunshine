@@ -40,6 +40,7 @@ from app.telephony.config import TelephonyConfigurationError, TelephonySettings,
 from app.telephony.deepgram_stt import DeepgramTranscriber
 from app.telephony.deepgram_tts import frames, synthesize_mulaw_async
 from app.telephony.sms import send_sms_async
+from app.telephony.stream_tickets import StreamTickets
 
 ROOT = Path(__file__).resolve().parent
 VOICE_PATH = "/twilio/voice"
@@ -73,6 +74,7 @@ class MediaStreamBridge:
         settings: TelephonySettings,
         repository: InMemoryPatientRepository,
         persistence: InMemoryPersistence,
+        tickets: StreamTickets,
         transcriber_factory=None,
         interpreter: AnswerInterpreter | None = None,
         sms_sender: Callable[[str, str], Awaitable[None]] | None = None,
@@ -81,6 +83,7 @@ class MediaStreamBridge:
         self.settings = settings
         self.repository = repository
         self.persistence = persistence
+        self.tickets = tickets
         self.interpreter = interpreter
         self.sms_sender = sms_sender
         self.transcriber_factory = transcriber_factory or DeepgramTranscriber
@@ -136,6 +139,16 @@ class MediaStreamBridge:
         parameters = start.get("customParameters", {}) or {}
         patient_code = parameters.get("patientCode", "")
         session_id = parameters.get("sessionId") or start.get("callSid") or str(uuid4())
+        # Only a stream Twilio opened in answer to our own TwiML carries the
+        # ticket the voice webhook issued for this call.
+        if not self.tickets.redeem(session_id, parameters.get("streamToken")):
+            logger.warning(
+                "Stream %s for call %s presented no valid ticket; closing",
+                self.stream_sid,
+                start.get("callSid"),
+            )
+            await self._close()
+            return
         logger.info(
             "Stream %s started for call %s (patient %s, format %s)",
             self.stream_sid,
@@ -380,6 +393,10 @@ class MediaStreamBridge:
         if self.session is None:
             return
         await self._run_turn(self.session.handle_silence())
+        # A paused caller is left in peace rather than reprompted, so no mark
+        # will come back to re-arm the timer; keep counting the quiet ourselves.
+        if not self.bot_speaking and not self._closed:
+            self._start_silence_timer()
 
     async def _send(self, message: dict[str, Any]) -> None:
         async with self._send_lock:
@@ -442,6 +459,7 @@ def create_app(
     persistence = InMemoryPersistence()
     interpreter = build_answer_interpreter()
     sessions_by_call_sid: dict[str, str] = {}
+    tickets = StreamTickets()
 
     async def sms_sender(to_number: str, body: str) -> None:
         await send_sms_async(
@@ -453,6 +471,7 @@ def create_app(
         )
     app.state.settings = resolved
     app.state.persistence = persistence
+    app.state.stream_tickets = tickets
 
     @app.get("/api/config")
     def config() -> dict[str, object]:
@@ -547,7 +566,11 @@ def create_app(
         return Response(
             content=twilio.media_stream_twiml(
                 resolved.websocket_url(MEDIA_PATH),
-                {"patientCode": patient_code, "sessionId": str(session_id)},
+                {
+                    "patientCode": patient_code,
+                    "sessionId": str(session_id),
+                    "streamToken": tickets.issue(str(session_id)),
+                },
             ),
             media_type="application/xml",
         )
@@ -576,6 +599,7 @@ def create_app(
             resolved,
             repository,
             persistence,
+            tickets,
             interpreter=interpreter,
             sms_sender=sms_sender,
         ).run()

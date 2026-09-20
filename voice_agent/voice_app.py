@@ -112,7 +112,7 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
     def results(patient_code: str | None = None) -> dict[str, object]:
         return {"results": store.list_results(patient_code)}
 
-    @app.post("/api/sessions")
+    @app.post("/api/sessions", dependencies=[Depends(operator)])
     def create_session(patient_code: str = "RGN-0417") -> dict[str, object]:
         try:
             engine = SafeSurveyEngine(InMemoryPatientRepository(), patient_code, interpreter=interpreter)
@@ -130,7 +130,7 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
             **engine.snapshot(),
         }
 
-    @app.post("/api/sessions/{session_id}/audio")
+    @app.post("/api/sessions/{session_id}/audio", dependencies=[Depends(operator)])
     async def handle_audio(session_id: str, audio: UploadFile = File(...)) -> dict[str, object]:
         with lock:
             engine = sessions.get(session_id)

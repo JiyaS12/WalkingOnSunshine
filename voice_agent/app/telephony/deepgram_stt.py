@@ -11,6 +11,10 @@ import websockets
 
 DEEPGRAM_LISTEN_URL = "wss://api.deepgram.com/v1/listen"
 KEEPALIVE_TIMEOUT_SECONDS = 60.0
+# A dropped socket is retried with growing pauses; a DNS blip half a second
+# after Deepgram hangs up should not cost the caller their survey.
+RECONNECT_ATTEMPTS = 5
+RECONNECT_BACKOFF_SECONDS = (0.5, 1.0, 2.0, 4.0)
 # Words the survey lives or dies on, boosted so a narrowband phone line does not
 # turn "mild" into "my old". Nova-3 takes them as ``keyterm``; older models
 # (including the phone-tuned ``nova-2-phonecall``) as weighted ``keywords``.
@@ -112,13 +116,17 @@ class DeepgramTranscriber:
         model: str = "nova-3",
         utterance_end_ms: int = 1200,
         connect: Callable[..., Awaitable[object]] | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self.api_key = api_key
         self.model = model
         self.utterance_end_ms = utterance_end_ms
         self._connect = connect or websockets.connect
+        self._sleep = sleep
         self._socket = None
         self._closed = False
+        self._reconnecting: asyncio.Task[None] | None = None
+        self._unreachable = False
 
     async def _open(self) -> object:
         return await self._connect(
@@ -128,13 +136,44 @@ class DeepgramTranscriber:
         )
 
     async def _reconnect(self, dead: object) -> None:
-        """Replace a socket that dropped mid-call, unless someone beat us to it."""
+        """Replace a socket that dropped mid-call, unless someone beat us to it.
 
-        if self._closed or self._socket is not dead:
+        The audio sender and the event reader both land here when one socket
+        dies. The first starts the reopen; the second waits on the same attempt,
+        so a transient failure is retried once with backoff rather than twice
+        with none. Retries are bounded: a real outage raises ``OSError``.
+        """
+
+        if self._closed:
             return
+        if self._reconnecting is None:
+            if self._socket is not dead:
+                return
+            self._socket = None
+            self._reconnecting = asyncio.create_task(self._reopen())
+        task = self._reconnecting
+        try:
+            await asyncio.shield(task)
+        finally:
+            if self._reconnecting is task:
+                self._reconnecting = None
+
+    async def _reopen(self) -> None:
         logger.warning("Deepgram socket dropped; reconnecting")
-        self._socket = None
-        self._socket = await self._open()
+        for attempt in range(RECONNECT_ATTEMPTS):
+            if self._closed:
+                return
+            try:
+                self._socket = await self._open()
+                return
+            except (OSError, websockets.exceptions.WebSocketException) as error:
+                if attempt + 1 == RECONNECT_ATTEMPTS:
+                    self._unreachable = True
+                    logger.error("Deepgram reconnect gave up: %s", error)
+                    raise OSError(f"Deepgram reconnect failed: {error}") from error
+                pause = RECONNECT_BACKOFF_SECONDS[min(attempt, len(RECONNECT_BACKOFF_SECONDS) - 1)]
+                logger.warning("Deepgram reconnect failed (%s); retrying in %.1fs", error, pause)
+                await self._sleep(pause)
 
     async def __aenter__(self) -> "DeepgramTranscriber":
         self._socket = await self._open()
@@ -147,7 +186,13 @@ class DeepgramTranscriber:
         """Push one audio frame, reopening the socket if Deepgram dropped it."""
 
         if self._socket is None:
-            raise RuntimeError("Transcriber is not connected.")
+            if self._unreachable:
+                raise OSError("Deepgram could not be reached; transcription is off.")
+            if self._reconnecting is None:
+                raise RuntimeError("Transcriber is not connected.")
+            # The reader is already reopening the socket; this frame is lost,
+            # the next one lands once it is back.
+            raise OSError("Deepgram socket is reconnecting.")
         socket = self._socket
         try:
             await socket.send(frame)
@@ -162,6 +207,8 @@ class DeepgramTranscriber:
 
     async def close(self) -> None:
         self._closed = True
+        if self._reconnecting is not None:
+            self._reconnecting.cancel()
         socket, self._socket = self._socket, None
         if socket is None:
             return
@@ -178,18 +225,23 @@ class DeepgramTranscriber:
             raise RuntimeError("Transcriber is not connected.")
         while not self._closed:
             socket = self._socket
-            if socket is None:
-                return
             try:
-                async for raw in socket:
-                    event = parse_message(raw)
-                    if event is not None:
-                        yield event
-            except websockets.exceptions.WebSocketException:
-                pass
-            if self._closed:
-                return
-            try:
+                if socket is None:
+                    if self._reconnecting is None:
+                        return
+                    # The sender is already reopening the socket; wait with it.
+                    await self._reconnect(None)
+                    continue
+                try:
+                    async for raw in socket:
+                        event = parse_message(raw)
+                        if event is not None:
+                            yield event
+                except websockets.exceptions.WebSocketException:
+                    pass
+                if self._closed:
+                    return
                 await self._reconnect(socket)
             except OSError:
-                await asyncio.sleep(0.5)
+                logger.error("Transcription ended: Deepgram could not be reached")
+                return

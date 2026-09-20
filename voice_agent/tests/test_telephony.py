@@ -16,6 +16,7 @@ from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, load_settings
 from app.telephony.deepgram_stt import DeepgramTranscriber, listen_url, parse_message
 from app.telephony.deepgram_tts import MULAW_FRAME_BYTES, frames, speak_url
+from app.telephony.stream_tickets import StreamTickets
 
 ENV = {
     "DEEPGRAM_API_KEY": "dg-key",
@@ -217,10 +218,10 @@ def test_call_session_completes_and_prepares_handoff():
 
     asyncio.run(scenario())
     assert session.handoff is not None
-    # The survey's own closing is dropped in favour of the gait request, so the
+    # The survey's own closing is dropped in favour of the gait closing, so the
     # caller is not thanked and sent off twice in a row.
     assert not any("survey is complete" in line for line in spoken)
-    assert any("short video of you walking" in line for line in spoken)
+    assert spoken[-1].startswith("Thank you for those answers.")
 
 
 def test_call_session_texts_the_gait_link_and_walks_through_setup(monkeypatch):
@@ -282,7 +283,13 @@ def test_call_session_texts_the_gait_link_and_walks_through_setup(monkeypatch):
     assert session.persistence.calls["sess-2"].final_status == "complete"
 
 
-def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link():
+def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link(monkeypatch):
+    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
+    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+
+    async def sms_sender(to_number: str, body: str) -> None:
+        return None
+
     engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
     spoken: list[str] = []
 
@@ -290,7 +297,13 @@ def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link():
         spoken.append(text)
 
     session = PhoneCallSession(
-        engine, speak, session_id="sess-4", max_silent_reprompts=1, walk_seconds=0.0
+        engine,
+        speak,
+        session_id="sess-4",
+        to_number="+14155550123",
+        sms_sender=sms_sender,
+        max_silent_reprompts=1,
+        walk_seconds=0.0,
     )
 
     async def scenario() -> bool:
@@ -298,6 +311,7 @@ def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link():
         for _ in range(len(session.engine.session.questions)):
             session.add_transcript("none")
             await session.flush_utterance()
+        assert session.handoff is not None and session.handoff.sms_sent
         assert await session.handle_silence() is False
         assert "say ‘ready’" in spoken[-1]
         return await session.handle_silence()
@@ -308,7 +322,10 @@ def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link():
     assert "Take care of yourself" in spoken[-1]
 
 
-def test_call_session_still_completes_when_sms_sending_fails():
+def test_call_session_owns_up_when_the_gait_text_fails(monkeypatch):
+    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
+    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+
     async def failing_sms_sender(to_number: str, body: str) -> None:
         raise RuntimeError("Twilio is down")
 
@@ -327,21 +344,85 @@ def test_call_session_still_completes_when_sms_sending_fails():
         walk_seconds=0.0,
     )
 
-    async def scenario() -> None:
+    async def scenario() -> bool:
         await session.begin()
+        done = False
         for _ in range(len(session.engine.session.questions)):
             session.add_transcript("none")
-            await session.flush_utterance()
-        session.add_transcript("ready")
-        await session.flush_utterance()
+            done = await session.flush_utterance()
+        return done
 
-    asyncio.run(scenario())
-
+    assert asyncio.run(scenario()) is True
     assert session.finished
     assert session.handoff is not None
     assert session.handoff.sms_sent is False
-    assert "Take care of yourself" in spoken[-1]
+    assert session.handoff.status == "failed"
+    # The caller is told the truth and never asked to open a text that never came.
+    assert "did not go through" in spoken[-1]
+    assert not any("You should have the text" in line for line in spoken)
+    assert not any("Live Camera" in line for line in spoken)
     assert session.persistence.calls["sess-3"].final_status == "complete"
+
+
+def test_call_session_promises_no_text_when_no_link_can_be_made():
+    session, spoken = build_session()
+    session.walk_seconds = 0.0
+
+    async def scenario() -> bool:
+        await session.begin()
+        done = False
+        for _ in range(len(session.engine.session.questions)):
+            session.add_transcript("none")
+            done = await session.flush_utterance()
+        return done
+
+    assert asyncio.run(scenario()) is True
+    assert session.handoff is not None
+    assert session.handoff.status == "unavailable"
+    assert session.handoff.sms_sent is False
+    assert not any("texting you" in line for line in spoken)
+    assert not any("You should have the text" in line for line in spoken)
+    assert "everything for today" in spoken[-1]
+    assert session.persistence.calls["sess-1"].final_status == "complete"
+
+
+def test_call_session_waits_quietly_while_the_caller_is_paused():
+    session, spoken = build_session()
+    session.max_paused_silences = 3
+
+    async def scenario() -> bool:
+        await session.begin()
+        session.add_transcript("please pause")
+        assert await session.flush_utterance() is False
+        assert session.engine.session.state == "paused"
+        assert await session.handle_silence() is False
+        assert await session.handle_silence() is False
+        # Paused quiet is neither reprompted nor counted as an unanswered question.
+        assert "Take your time" in spoken[-1]
+        assert session.engine.session.state == "paused"
+        session.add_transcript("resume")
+        return await session.flush_utterance()
+
+    assert asyncio.run(scenario()) is False
+    assert session.engine.session.state == "asking"
+    assert session.engine.session.needs_human_review is False
+
+
+def test_call_session_lets_a_long_paused_caller_go_for_review():
+    session, spoken = build_session()
+    session.max_paused_silences = 2
+
+    async def scenario() -> bool:
+        await session.begin()
+        session.add_transcript("pause")
+        await session.flush_utterance()
+        assert await session.handle_silence() is False
+        return await session.handle_silence()
+
+    assert asyncio.run(scenario()) is True
+    assert session.engine.session.needs_human_review
+    assert "clinician will follow up" in spoken[-1]
+    assert session.persistence.calls["sess-1"].final_status == "escalated"
 
 
 def test_speech_chunks_split_long_prompts_into_sentence_groups():
@@ -409,3 +490,79 @@ def test_transcriber_reopens_a_socket_that_dropped_mid_call():
     assert len(opened) == 2
     assert opened[1].sent[0] == b"\xff" * 160
     assert opened[1].closed
+
+
+def test_transcriber_retries_a_reconnect_that_fails_transiently():
+    """A DNS blip during the reconnect is retried with backoff, not fatal."""
+
+    sockets = [DroppingSocket(fails=True), DroppingSocket(fails=False)]
+    attempts: list[int] = []
+    pauses: list[float] = []
+
+    async def connect(url, **kwargs):
+        attempts.append(len(attempts))
+        if len(attempts) == 2:
+            raise OSError("temporary failure in name resolution")
+        return sockets[min(len(attempts) - 1, 1)]
+
+    async def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+
+    async def run() -> None:
+        async with DeepgramTranscriber("dg-key", connect=connect, sleep=sleep) as transcriber:
+            await transcriber.send_audio(b"\xff" * 160)
+            await transcriber.send_audio(b"\x00" * 160)
+
+    asyncio.run(run())
+
+    assert attempts == [0, 1, 2]
+    assert pauses == [0.5]
+    assert sockets[1].sent[:2] == [b"\xff" * 160, b"\x00" * 160]
+
+
+def test_transcriber_gives_up_after_bounded_reconnects_without_crashing_the_call():
+    """An outage surfaces as OSError, which the media bridge drops per frame."""
+
+    attempts: list[int] = []
+
+    async def connect(url, **kwargs):
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            return DroppingSocket(fails=True)
+        raise OSError("connection refused")
+
+    async def sleep(seconds: float) -> None:
+        return None
+
+    async def run() -> list[type[BaseException]]:
+        errors: list[type[BaseException]] = []
+        async with DeepgramTranscriber("dg-key", connect=connect, sleep=sleep) as transcriber:
+            for _ in range(2):
+                try:
+                    await transcriber.send_audio(b"\xff" * 160)
+                except OSError as error:
+                    errors.append(type(error))
+        return errors
+
+    errors = asyncio.run(run())
+
+    assert errors == [OSError, OSError]
+    assert len(attempts) == 1 + 5
+
+
+def test_stream_tickets_are_single_use_and_expire():
+    now = [100.0]
+    tickets = StreamTickets(ttl_seconds=60, clock=lambda: now[0])
+
+    token = tickets.issue("sess-1")
+    assert tickets.redeem("sess-1", "not-it") is False
+    # A wrong guess burns the ticket rather than leaving it up for another try.
+    assert tickets.redeem("sess-1", token) is False
+
+    token = tickets.issue("sess-1")
+    now[0] += 61
+    assert tickets.redeem("sess-1", token) is False
+
+    token = tickets.issue("sess-2")
+    assert tickets.redeem("sess-2", token) is True
+    assert tickets.redeem("sess-2", token) is False

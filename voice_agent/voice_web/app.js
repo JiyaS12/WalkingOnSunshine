@@ -22,6 +22,15 @@ function updateControls() {
   listenButton.textContent = micPaused ? "Resume listening" : "Pause microphone";
 }
 
+const tokenField = document.querySelector("#token");
+tokenField.value = sessionStorage.getItem("operatorToken") || "";
+
+function operatorHeaders() {
+  const token = tokenField.value.trim();
+  sessionStorage.setItem("operatorToken", token);
+  return { Authorization: `Bearer ${token}` };
+}
+
 async function readResponse(response) {
   const data = await response.json();
   if (!response.ok) {
@@ -149,7 +158,11 @@ async function sendRecording(blob, recordedSessionId) {
     if (!blob.size) throw new Error("The recording was empty.");
     const form = new FormData();
     form.append("audio", blob, "answer.webm");
-    const response = await fetch(`/api/sessions/${recordedSessionId}/audio`, { method: "POST", body: form });
+    const response = await fetch(`/api/sessions/${recordedSessionId}/audio`, {
+      method: "POST",
+      body: form,
+      headers: operatorHeaders(),
+    });
     const data = await readResponse(response);
     addLine("user", data.transcript);
     addLine("assistant", data.prompt);
@@ -243,7 +256,10 @@ startButton.addEventListener("click", async () => {
   try {
     await openMicrophone();
     const patientCode = document.querySelector("#patient").value.trim();
-    const response = await fetch(`/api/sessions?patient_code=${encodeURIComponent(patientCode)}`, { method: "POST" });
+    const response = await fetch(`/api/sessions?patient_code=${encodeURIComponent(patientCode)}`, {
+      method: "POST",
+      headers: operatorHeaders(),
+    });
     const data = await readResponse(response);
     sessionId = data.session_id;
     addLine("assistant", data.prompt);

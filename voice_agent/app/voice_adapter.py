@@ -6,9 +6,12 @@ from typing import Callable
 from .conversation_policy import (
     COMPLETE,
     GAIT_INTRO,
+    GAIT_UNAVAILABLE,
     INTRO,
+    LINK_FAILED,
     LINK_REMINDER,
     LINK_SENT,
+    PAUSE_EXPIRED,
     WALKTHROUGH_CLOSING,
     WALKTHROUGH_COUNTDOWN,
     WALKTHROUGH_GUIDANCE,
@@ -57,6 +60,18 @@ class VoiceAdapter:
     def link_reminder(self) -> VoiceTurn:
         """For a caller still finding the text; asked again, gently."""
         return VoiceTurn("assistant", self.tts(LINK_REMINDER))
+
+    def link_failed(self) -> VoiceTurn:
+        """The text was promised but did not send; own it and close the call."""
+        return VoiceTurn("assistant", self.tts(LINK_FAILED))
+
+    def gait_unavailable(self) -> VoiceTurn:
+        """Closing for a call that cannot text a link at all; promises nothing."""
+        return VoiceTurn("assistant", self.tts(GAIT_UNAVAILABLE))
+
+    def pause_expired(self) -> VoiceTurn:
+        """A paused caller never came back; end truthfully and hand to a clinician."""
+        return VoiceTurn("assistant", self.tts(PAUSE_EXPIRED))
 
     def walkthrough_guidance(self) -> VoiceTurn:
         """Live, step-by-step camera setup guidance -- fixed script, not model-generated."""
