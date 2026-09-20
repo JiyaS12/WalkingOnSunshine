@@ -5,14 +5,14 @@ from collections.abc import Awaitable, Callable
 
 from . import conversation_policy as policy
 from .answer_interpreter import AnswerInterpreter, clean_utterance, control_intent
-from .generic_intake import GenericIntake
+from .generic_intake import GenericIntake, build_intake_interpreter
 from .integrated_service import IntegratedService
 from .integration_contract import CallStatus, PhoneError, RegisteredCall
 from .main_backend import BackendError
 from .models import ConditionCategory, PatientRecord
 from .patient_repository import InMemoryPatientRepository
 from .survey_engine import SafeSurveyEngine
-from .telephony.call_session import _TRAILING_FILLER, _spoken, link_reply_intent
+from .telephony.call_session import _TRAILING_FILLER, _spoken, link_reply_intent, lowest_confidence
 
 Speaker = Callable[[str], Awaitable[None]]
 
@@ -33,7 +33,7 @@ class IntegratedSession:
         self.engine = SafeSurveyEngine(
             InMemoryPatientRepository({patient.patient_code: patient}), patient.patient_code, interpreter,
         )
-        self.generic = GenericIntake()
+        self.generic = GenericIntake(build_intake_interpreter())
         self.service = service
         self.call = call
         self.session_id = service.receipt(call.call_id).snapshot.phone_session_id or call.call_id
@@ -48,6 +48,7 @@ class IntegratedSession:
         self.link_open = False
         self._page_active = False
         self._buffer: list[str] = []
+        self._confidence: float | None = None
         self._last_prompt = ""
         self._silences = 0
         self._link_reminders = 0
@@ -60,12 +61,14 @@ class IntegratedSession:
     def pending_transcript(self) -> str:
         return " ".join(self._buffer).strip()
 
-    def add_transcript(self, text: str) -> None:
+    def add_transcript(self, text: str, confidence: float | None = None) -> None:
         if len(self.pending_transcript) < 12000:
             self._buffer.append(text[:12000])
+            self._confidence = lowest_confidence(self._confidence, confidence)
 
     def discard_pending(self) -> None:
         self._buffer.clear()
+        self._confidence = None
 
     def trailing_off(self) -> bool:
         return bool(_TRAILING_FILLER.search(self.pending_transcript.lower()))
@@ -80,6 +83,7 @@ class IntegratedSession:
 
     async def flush_utterance(self) -> bool:
         text = self.pending_transcript
+        confidence = self._confidence
         self.discard_pending()
         if self.finished or not text:
             return self.finished
@@ -102,7 +106,7 @@ class IntegratedSession:
             await self._say(self._current_prompt())
             return False
         if self.stage == "generic":
-            prompt = self.generic.handle(text)
+            prompt = await asyncio.to_thread(self.generic.handle, text)
             if self.generic.state in {"stopped", "needs_review"}:
                 await self.finish("stopped" if self.generic.state == "stopped" else "completed", prompt, "needs_review")
                 return True
@@ -111,7 +115,7 @@ class IntegratedSession:
                 prompt = _spoken(self.engine.start())
             await self._say(prompt)
         elif self.stage == "condition":
-            prompt, _ = await asyncio.to_thread(self.engine.handle_response, text)
+            prompt, _ = await asyncio.to_thread(self.engine.handle_response, text, confidence)
             if self.engine.session.state in {"stopped", "escalated"}:
                 await self.finish("stopped" if self.engine.session.state == "stopped" else "completed", _spoken(prompt), "needs_review")
                 return True

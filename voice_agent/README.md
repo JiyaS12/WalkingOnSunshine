@@ -253,9 +253,11 @@ timeout, redirects disabled and no automatic transport retries:
 | `POST /api/submit-survey` | Complete confirmed generic and condition survey |
 | `GET /api/integration/patients/{patient_id}/calls/{call_id}/walking` | Patient/attempt-scoped walking state |
 
-Survey submission is frozen only after all seven generic questions and all six
-condition questions are complete. Generic questions each require a read-back
-and explicit yes; unknown/refused values are explicitly confirmed as null.
+Survey submission is frozen only after the three spoken generic questions
+(pain 1–10, falls in the last six months, dizziness) and all six condition
+questions are complete. Clear answers are accepted directly; inferred readings
+get a read-back and explicit yes; unknown/refused values are stored as null.
+The remaining generic fields below are sent as null by the phone flow.
 Three unsuccessful clarification/rejection attempts end intake without
 submitting an incomplete record. Pause/repeat/resume preserve pending answers.
 No Likert value supplies a numeric pain score, fall count or dizziness value.
@@ -268,12 +270,12 @@ No Likert value supplies a numeric pain score, fall count or dizziness value.
   "pain_scale": 7,
   "fall_history": {
     "falls_last_6_months": 2,
-    "injured": true,
-    "last_fall_description": "Patient-confirmed description"
+    "injured": null,
+    "last_fall_description": null
   },
   "dizziness": false,
-  "dizziness_notes": "Patient-confirmed notes",
-  "primary_complaints": ["Patient-confirmed complaint"],
+  "dizziness_notes": null,
+  "primary_complaints": null,
   "condition_survey": {
     "instrument": "hoos_jr",
     "version": "1",

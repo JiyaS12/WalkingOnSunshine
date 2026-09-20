@@ -47,6 +47,7 @@ from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, TelephonySettings, load_settings
 from app.telephony.deepgram_stt import DeepgramTranscriber
 from app.telephony.deepgram_tts import frames, synthesize_mulaw_async
+from app.telephony.prompt_cache import SpeechCache, fixed_prompts
 from app.telephony.sms import send_sms_async
 from app.telephony.stream_tickets import StreamTickets
 from app.telephony.integrated_provider import TwilioProvider
@@ -66,6 +67,12 @@ LINE_OPEN_TIMEOUT_SECONDS = 3.0
 GREETING_DELAY_SECONDS = 1.5
 PARAGRAPH_PAUSE_SECONDS = 0.8
 ECHO_GRACE_SECONDS = 0.5
+# A prompt is only cut short for recognised words, never for the voice
+# detector alone: background noise and handset echo both trip that.
+BARGE_IN_MIN_WORDS = 2
+# A shorter reply over the tail of a prompt ("yes", "five") is kept as the
+# answer without cutting the prompt, and taken up this soon after it ends.
+EARLY_ANSWER_FLUSH_SECONDS = 1.0
 MULAW_SILENCE = b"\xff" * 160
 # Twilio media frames are 20ms of base64 mu-law plus framing; nothing legitimate
 # comes close to this.
@@ -76,6 +83,32 @@ CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 DIALING_TIMEOUT_SECONDS = 90.0
 
 logger = logging.getLogger("phone_app")
+
+
+def prompt_cache_enabled(env: dict[str, str] | None = None) -> bool:
+    """Whether fixed prompts are pre-synthesized at startup (``PROMPT_CACHE=0`` disables)."""
+
+    source = env if env is not None else os.environ
+    return (source.get("PROMPT_CACHE") or "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def warm_prompt_cache(cache: SpeechCache, settings: TelephonySettings) -> asyncio.Task[int] | None:
+    """Start filling ``cache`` in the background; the server never waits on it."""
+
+    if not settings.deepgram_api_key or not prompt_cache_enabled():
+        return None
+
+    async def warm() -> int:
+        try:
+            return await cache.warm(
+                fixed_prompts(), settings.deepgram_api_key or "", settings.tts_model,
+                lambda text: [chunk for chunk, _ in speech_plan(text)],
+            )
+        except Exception:
+            logger.exception("Prompt cache warm-up failed; prompts will be synthesized live")
+            return 0
+
+    return asyncio.create_task(warm())
 
 
 def gait_link_configured() -> bool:
@@ -106,8 +139,10 @@ class MediaStreamBridge:
         interpreter: AnswerInterpreter | None = None,
         sms_sender: Callable[[str, str], Awaitable[None]] | None = None,
         integrated_service: IntegratedService | None = None,
+        speech_cache: SpeechCache | None = None,
     ):
         self.websocket = websocket
+        self.speech_cache = speech_cache
         self.settings = settings
         self.repository = repository
         self.persistence = persistence
@@ -134,6 +169,8 @@ class MediaStreamBridge:
         self._greeted = asyncio.Event()
         self._listen_from = 0.0
         self._interruptible = False
+        self._prompt_text = ""
+        self._early_answer = False
         self._playback: asyncio.Task[None] | None = None
 
     async def run(self) -> None:
@@ -273,9 +310,19 @@ class MediaStreamBridge:
         self._active_mark = None
         self.bot_speaking = False
         self._interruptible = False
+        if self.session is not None and self._early_answer:
+            # The caller was already talking over the tail: keep listening
+            # through the echo tail so their final transcript is not lost, and
+            # take what has already been recognised as the answer.
+            self._early_answer = False
+            if self.session.pending_transcript:
+                self._start_silence_timer(EARLY_ANSWER_FLUSH_SECONDS)
+            else:
+                self._start_silence_timer()
+            return
+        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         if self.session is not None:
             self.session.discard_pending()
-        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         self._start_silence_timer()
 
     async def _greet(self) -> None:
@@ -321,20 +368,29 @@ class MediaStreamBridge:
             # The handset feeds our own voice back down the inbound track, so
             # anything heard mid-prompt, or in its echo tail, would otherwise be
             # transcribed as the caller's answer. Only the closing chunk of a
-            # prompt, the question itself, can be talked over.
-            if self.bot_speaking and not (
-                self._interruptible and event.kind == "speech_started"
-            ):
+            # prompt, the question itself, can be talked over, and only by
+            # words that are clearly the caller's.
+            if self.bot_speaking:
+                if not (
+                    self._interruptible
+                    and event.kind == "transcript"
+                    and self._is_caller_speech(event.text)
+                ):
+                    continue
+                self._cancel_silence_timer()
+                self._early_answer = True
+                if self._is_barge_in(event.text):
+                    await self._stop_playback()
+                if event.is_final:
+                    self.session.add_transcript(event.text)
                 continue
             if asyncio.get_running_loop().time() < self._listen_from:
                 continue
             if event.kind == "speech_started":
                 self._cancel_silence_timer()
-                if self.bot_speaking:
-                    await self._stop_playback()
             elif event.kind == "transcript" and event.is_final:
                 self._cancel_silence_timer()
-                self.session.add_transcript(event.text)
+                self.session.add_transcript(event.text, event.confidence)
             elif event.kind == "utterance_end":
                 if self.session.trailing_off():
                     # Caller is still thinking; the watchdog flushes if not.
@@ -342,11 +398,28 @@ class MediaStreamBridge:
                     continue
                 await self._run_turn(self.session.flush_utterance())
 
+    @staticmethod
+    def _words(text: str) -> list[str]:
+        words = (word.strip(".,!?;:'\"").casefold() for word in text.split())
+        return [word for word in words if word]
+
+    def _is_caller_speech(self, text: str) -> bool:
+        """Recognised words that are not just the handset echoing our prompt."""
+
+        words = self._words(text)
+        prompt_words = set(self._words(self._prompt_text))
+        return any(word not in prompt_words for word in words)
+
+    def _is_barge_in(self, text: str) -> bool:
+        return len(self._words(text)) >= BARGE_IN_MIN_WORDS
+
     async def _speak(self, text: str) -> None:
         if not self.settings.deepgram_api_key or self.stream_sid is None:
             logger.warning("Cannot speak: deepgram key or stream missing")
             return
         self._cancel_silence_timer()
+        self._prompt_text = text
+        self._early_answer = False
         self.bot_speaking = True
         self._interruptible = False
         self._mark_counter += 1
@@ -438,9 +511,17 @@ class MediaStreamBridge:
     async def _synthesize(self, text: str) -> bytes:
         if self.settings.deepgram_api_key is None:
             raise TelephonyConfigurationError("DEEPGRAM_API_KEY is not configured.")
-        return await synthesize_mulaw_async(
+        cache = self.speech_cache
+        if cache is not None:
+            cached = cache.get(self.settings.tts_model, text)
+            if cached is not None:
+                return cached
+        audio = await synthesize_mulaw_async(
             text, self.settings.deepgram_api_key, self.settings.tts_model
         )
+        if cache is not None:
+            cache.put(self.settings.tts_model, text, audio)
+        return audio
 
     async def _end_after_playback(self) -> None:
         self.hangup_mark = self._last_mark
@@ -535,7 +616,16 @@ def create_app(
     operator = auth or OperatorAuth.from_env()
     if integrated_service is not None or settings is None:
         return create_integrated_app(resolved, operator, integrated_service)
-    app = FastAPI(title="VoiceAIThing phone survey")
+    speech_cache = SpeechCache()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        warming = warm_prompt_cache(speech_cache, resolved)
+        yield
+        if warming is not None:
+            warming.cancel()
+
+    app = FastAPI(title="VoiceAIThing phone survey", lifespan=lifespan)
     repository = InMemoryPatientRepository()
     persistence = InMemoryPersistence()
     interpreter = build_answer_interpreter()
@@ -554,6 +644,7 @@ def create_app(
     app.state.settings = resolved
     app.state.persistence = persistence
     app.state.stream_tickets = tickets
+    app.state.speech_cache = speech_cache
 
     @app.get("/api/config")
     def config() -> dict[str, object]:
@@ -708,6 +799,7 @@ def create_app(
             tickets,
             interpreter=interpreter,
             sms_sender=sms_sender,
+            speech_cache=speech_cache,
         ).run()
 
     @app.get("/")
@@ -738,11 +830,16 @@ def create_integrated_app(
         except (ValueError, TelephonyConfigurationError):
             service = None
 
+    speech_cache = SpeechCache()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if service is not None:
             await service.recover()
+        warming = warm_prompt_cache(speech_cache, settings)
         yield
+        if warming is not None:
+            warming.cancel()
 
     app = FastAPI(title="Integrated phone survey", lifespan=lifespan)
     tickets = StreamTickets()
@@ -750,6 +847,7 @@ def create_integrated_app(
     app.state.integration = service
     app.state.settings = settings
     app.state.stream_tickets = tickets
+    app.state.speech_cache = speech_cache
 
     def configured() -> IntegratedService:
         if service is None:
@@ -848,7 +946,7 @@ def create_integrated_app(
             return
         await MediaStreamBridge(
             websocket, settings, InMemoryPatientRepository(), InMemoryPersistence(), tickets,
-            interpreter=interpreter, integrated_service=service,
+            interpreter=interpreter, integrated_service=service, speech_cache=speech_cache,
         ).run()
 
     return app

@@ -5,6 +5,7 @@ https://www.twilio.com/docs/messaging/api/message-resource
 """
 
 import asyncio
+import logging
 from typing import Protocol
 
 import httpx
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .config import TelephonySettings
 from .twilio import TWILIO_API_ROOT
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderRejected(RuntimeError):
@@ -51,6 +54,10 @@ class TwilioProvider:
                         data=fields,
                     )
                     if 400 <= response.status_code < 500 and response.status_code != 408:
+                        logger.warning(
+                            "Twilio rejected %s dispatch (%d): error code %s",
+                            resource, response.status_code, _rejection_code(response),
+                        )
                         raise ProviderRejected("Provider rejected dispatch.")
                     if response.status_code not in {200, 201}:
                         raise ProviderUnknown("Provider outcome unknown.")
@@ -71,6 +78,17 @@ class TwilioProvider:
             "To": to_number, "From": self.settings.twilio_from_number or "",
             "Body": body, "StatusCallback": status_url,
         })
+
+
+def _rejection_code(response: httpx.Response) -> str:
+    """Twilio's numeric error code only; the message may echo the destination number."""
+
+    try:
+        body = response.json()
+    except ValueError:
+        return "unknown"
+    code = body.get("code") if isinstance(body, dict) else None
+    return str(code) if isinstance(code, int) else "unknown"
 
 
 class FakePhoneProvider:
