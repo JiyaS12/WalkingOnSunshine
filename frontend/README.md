@@ -1,6 +1,6 @@
 # GaitGuard AI frontend
 
-This App Router frontend requires Node.js 20.19 or newer and npm 10 or newer.
+This App Router frontend requires Node.js 20.19.x and npm 10 or newer.
 The root `.nvmrc` selects the supported Node 20 release.
 
 ## Getting started

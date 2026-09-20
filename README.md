@@ -28,7 +28,7 @@ today.
 
 ## Supported runtimes
 
-- Node.js 20.19 or newer (the repository's `.nvmrc` selects 20.19).
+- Node.js 20.19.x (the repository's `.nvmrc` selects 20.19.0).
 - npm 10 or newer.
 - Python 3.12 (the pinned MediaPipe build does not install on Python 3.13).
 
@@ -115,7 +115,7 @@ python -m pip install -r backend/requirements.txt
 python -m pytest -q backend/tests
 ```
 
-Then use Node 20.19+ to install exactly the locked frontend dependencies,
+Then use Node 20.19.x to install exactly the locked frontend dependencies,
 audit production packages, lint, type-check, and build:
 
 ```bash
