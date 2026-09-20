@@ -28,8 +28,15 @@ _CONSENT_YES = re.compile(
     r"sounds good|fine|absolutely|definitely|send it|text me|you can)\b"
 )
 _CONSENT_NO = re.compile(
-    r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later|"
-    r"can't|cannot|can not|won't|will not|unable|stop)\b"
+    r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later|stop)\b"
+)
+_CONSENT_CANNOT = re.compile(r"\b(?:can't|cannot|can not|won't|will not|unable)\b")
+# "can't"/"won't" aimed at the text itself ("you can't text me", "sure, but I
+# won't get the message") always refuses; a bare "can't" only refuses when
+# nothing agreed first, so "yes, I can't wait" stays agreement.
+_CONSENT_CANNOT_TEXT = re.compile(
+    r"\b(?:can't|cannot|can not|won't|will not|unable to)\b"
+    r"(?:\W+\w+){0,3}?\W+(?:text|texts|texting|send|message|messages|link|receive|get|open|do that)\b"
 )
 _CURLY_APOSTROPHES = str.maketrans("\u2019\u2018\u02bc", "'''")
 # "no problem" / "not a problem" are agreement, not refusal.
@@ -44,10 +51,12 @@ def consent_intent(transcript: str) -> str:
     misheard or hedged answer.
     """
     text = _CONSENT_NOT_REFUSAL.sub(" yes ", transcript.lower().translate(_CURLY_APOSTROPHES))
-    if _CONSENT_NO.search(text):
+    if _CONSENT_NO.search(text) or _CONSENT_CANNOT_TEXT.search(text):
         return "no"
     if _CONSENT_YES.search(text):
         return "yes"
+    if _CONSENT_CANNOT.search(text):
+        return "no"
     return "unclear"
 
 
