@@ -51,7 +51,15 @@ gaitguard-ai/
     app/components/PatientScreening.tsx  patient screening view
   data/
     mock_patients.json  seed patients for the doctor's portal
+  voice_agent/
+    phone_app.py     Twilio + Deepgram outbound phone survey and gait SMS handoff
+    voice_app.py     desktop push-to-talk variant of the same survey
+    app/             survey engine, conversation policy, telephony bridge
 ```
+
+The automated voice agent lives in [`voice_agent/`](voice_agent/README.md) and
+has its own virtualenv, `.env`, and test suite; it points patients at this
+app's `/patient/[id]` page via `GAIT_CHECKER_BASE_URL`.
 
 ## Backend setup
 
