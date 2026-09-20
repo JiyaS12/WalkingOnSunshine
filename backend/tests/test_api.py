@@ -197,6 +197,38 @@ def test_ensure_demo_invalid_id_422(monkeypatch, tmp_path):
     assert resp.status_code == 422
 
 
+def test_ensure_patient_sequential_created_flag(monkeypatch, tmp_path):
+    record, created = store.ensure_patient(
+        "NEW-003", {"patient_name": "New", "pain_scale": 3}
+    )
+    assert created is True
+    record2, created2 = store.ensure_patient(
+        "NEW-003", {"patient_name": "New", "pain_scale": 3}
+    )
+    assert created2 is False
+    assert len(record["surveys"]) == 1
+    assert len(record2["surveys"]) == 1
+
+
+def test_ensure_demo_blocked_when_token_set(monkeypatch):
+    monkeypatch.setenv("SURVEY_INGEST_TOKEN", "secret")
+    monkeypatch.delenv("ALLOW_DEMO_PATIENTS", raising=False)
+    resp = client.post("/api/patients/NEW-004/ensure-demo")
+    assert resp.status_code == 403
+    assert "ALLOW_DEMO_PATIENTS" in resp.json()["detail"]
+    existing = client.post("/api/patients/RGN-0417/ensure-demo")
+    assert existing.status_code == 200
+    assert existing.json()["created"] is False
+
+
+def test_ensure_demo_allowed_with_opt_in(monkeypatch):
+    monkeypatch.setenv("SURVEY_INGEST_TOKEN", "secret")
+    monkeypatch.setenv("ALLOW_DEMO_PATIENTS", "1")
+    resp = client.post("/api/patients/NEW-005/ensure-demo")
+    assert resp.status_code == 200
+    assert resp.json()["created"] is True
+
+
 def test_generate_summary_unknown_patient_404(monkeypatch, tmp_path):
     _use_tmp_cache(monkeypatch, tmp_path)
     resp = client.post("/api/generate-summary", json={"patient_id": "NOPE"})

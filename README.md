@@ -75,7 +75,10 @@ Optional environment variables:
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
   cache stats.
 - `SURVEY_INGEST_TOKEN` — when set, `POST /api/submit-survey` requires the
-  `X-Survey-Token` header to match.
+  `X-Survey-Token` header to match. It also disables `POST
+  /api/patients/{id}/ensure-demo` (403) unless `ALLOW_DEMO_PATIENTS` is set.
+- `ALLOW_DEMO_PATIENTS` — set to `1`/`true`/`yes` to keep auto-created demo
+  patient profiles enabled while survey ingestion is token-protected.
 
 See [the patient access contract](docs/patient-access-contract.md) for stable
 request/response examples used by the patient UI and voice/SMS integrations.
