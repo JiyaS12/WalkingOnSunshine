@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import re
 from collections.abc import Awaitable, Callable
 
 from . import conversation_policy as policy
@@ -21,6 +22,33 @@ Speaker = Callable[[str], Awaitable[None]]
 _CAMERA_STATUSES = {"calibrating", "ready", "capturing", "captured"}
 _PAGE_OPEN_STATUSES = _CAMERA_STATUSES | {"page_ready"}
 MAX_LINK_REMINDERS = 2
+MAX_CONSENT_RETRIES = 2
+_CONSENT_YES = re.compile(
+    r"\b(?:yes|yeah|yep|yup|sure|okay|ok|of course|go ahead|please do|that's fine|that is fine|"
+    r"sounds good|fine|absolutely|definitely|send it|text me|you can)\b"
+)
+_CONSENT_NO = re.compile(
+    r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later)\b"
+)
+# "no problem" / "not a problem" are agreement, not refusal.
+_CONSENT_NOT_REFUSAL = re.compile(r"\b(?:no|not a|not really a) (?:problem|worries|issue)\b")
+
+
+def consent_intent(transcript: str) -> str:
+    """Read a reply to the SMS consent question as ``"yes"``, ``"no"`` or ``"unclear"``.
+
+    Any refusal wins over agreement ("yes but not now" is a no); agreement only
+    counts when nothing in the reply refuses, so the text never goes out on a
+    misheard or hedged answer.
+    """
+    text = _CONSENT_NOT_REFUSAL.sub(" yes ", transcript.lower())
+    if _CONSENT_NO.search(text):
+        return "no"
+    if _CONSENT_YES.search(text):
+        return "yes"
+    return "unclear"
+
+
 # The phone call asks only the condition questions; the generic intake fields
 # stay in the submission contract as explicit nulls so main never infers them.
 EMPTY_INTAKE: dict[str, object] = {
@@ -60,6 +88,7 @@ class IntegratedSession:
         self._last_prompt = ""
         self._silences = 0
         self._link_reminders = 0
+        self._consent_retries = 0
         self._background: asyncio.Task[None] | None = None
         self._deadline: asyncio.Task[None] | None = None
         self._speech_lock = asyncio.Lock()
@@ -120,11 +149,21 @@ class IntegratedSession:
                 return True
             if self.engine.session.state == "complete":
                 self.submission = self._payload()
-                self.stage = "submitting"
+                self.stage = "consent"
                 await self._say(policy.INTEGRATED_GAIT_INTRO)
-                self._background = asyncio.create_task(self._submit_and_wait())
             else:
                 await self._say(_spoken(prompt))
+        elif self.stage == "consent":
+            intent = consent_intent(text)
+            if intent == "yes":
+                self.stage = "submitting"
+                await self._say(policy.INTEGRATED_CONSENT_GIVEN)
+                self._background = asyncio.create_task(self._submit_and_wait())
+            elif intent == "no" or self._consent_retries >= MAX_CONSENT_RETRIES:
+                await self._decline_link()
+            else:
+                self._consent_retries += 1
+                await self._say(policy.INTEGRATED_CONSENT_UNCLEAR)
         elif self.stage == "submitting":
             await self._say(policy.INTEGRATED_SAVING)
         else:
@@ -144,6 +183,8 @@ class IntegratedSession:
     def _current_prompt(self) -> str:
         if self.stage == "condition":
             return _spoken(self.engine.start(greet=False))
+        if self.stage == "consent":
+            return policy.INTEGRATED_CONSENT_QUESTION
         if self.stage == "submitting":
             return policy.INTEGRATED_SAVING
         if not self.link_open:
@@ -168,6 +209,17 @@ class IntegratedSession:
                 } for a in answers],
             },
         }
+
+    async def _decline_link(self) -> None:
+        """No spoken yes: store the confirmed answers, never text, and close."""
+        assert self.submission is not None
+        self.stage = "submitting"
+        try:
+            await self.service.submit(self.call.call_id, self.submission, send_link=False)
+        except BackendError:
+            await self.finish("completed", policy.INTEGRATED_SUBMIT_FAILED, "provider_unavailable")
+            return
+        await self.finish("completed", policy.INTEGRATED_CONSENT_DECLINED)
 
     async def _submit_and_wait(self) -> None:
         assert self.submission is not None
@@ -195,9 +247,6 @@ class IntegratedSession:
                 except BackendError:
                     view = None
                 if self.finished:
-                    return
-                if not self.link_open and self.service.receipt(self.call.call_id).snapshot.sms_status == "failed":
-                    await self.finish("completed", policy.INTEGRATED_SMS_FAILED)
                     return
                 if view is not None:
                     if view.call_id != self.call.call_id or view.attempt_id != self.call.attempt_id:
@@ -232,6 +281,11 @@ class IntegratedSession:
                             await self._say(policy.INTEGRATED_CAPTURING)
                         elif view.status == "captured":
                             await self._say(policy.INTEGRATED_CAPTURED)
+                if not self.link_open:
+                    snapshot = self.service.receipt(self.call.call_id).snapshot
+                    if snapshot.sms_status == "failed":
+                        await self.finish("completed", policy.INTEGRATED_SMS_FAILED, snapshot.error_code)
+                        return
             await asyncio.sleep(self.poll_seconds)
         if not self.finished:
             await self.finish("completed", policy.INTEGRATED_TIMED_OUT)
@@ -248,7 +302,10 @@ class IntegratedSession:
             return self.finished
         self._silences += 1
         if self._silences >= (12 if self.paused else 3):
-            await self.finish("completed", policy.INTEGRATED_NO_RESPONSE, "needs_review")
+            if self.stage == "consent":
+                await self._decline_link()
+            else:
+                await self.finish("completed", policy.INTEGRATED_NO_RESPONSE, "needs_review")
         elif not self.paused:
             await self._say(self._current_prompt())
         return self.finished

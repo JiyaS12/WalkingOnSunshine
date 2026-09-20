@@ -22,7 +22,7 @@ from app.generic_intake import (
     QUESTIONS, GenericIntake, IntakeQuestion, IntakeReading, OpenAIIntakeInterpreter, lenient_parse, parse_value,
 )
 from app.integrated_service import IntegratedService
-from app.integrated_session import IntegratedSession
+from app.integrated_session import IntegratedSession, consent_intent
 from app.integration_contract import CallStart, SMSRetry
 from app.main_backend import BackendError, MainBackend
 from app.operator_auth import OperatorAuth
@@ -145,9 +145,97 @@ async def say(session, text):
     return await session.flush_utterance()
 
 
-async def answer_survey(session):
+async def answer_questions(session):
     for _ in range(6):
         await say(session, "mild")
+
+
+async def answer_survey(session, consent: str = "yes"):
+    await answer_questions(session)
+    await say(session, consent)
+
+
+def test_text_waits_for_a_spoken_yes(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_questions(session)
+        assert session.stage == "consent"
+        assert harness.spoken[-1] == policy.INTEGRATED_GAIT_INTRO
+        assert harness.spoken[-1].endswith(policy.INTEGRATED_CONSENT_QUESTION)
+        await asyncio.sleep(0.01)
+        assert harness.submissions == []
+        assert harness.provider.messages == 0
+        await say(session, "um, what?")
+        assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_UNCLEAR
+        await say(session, "repeat")
+        assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_QUESTION
+        await say(session, "yes, no problem")
+        assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_GIVEN
+        await harness.walk_requested.wait()
+        assert len(harness.submissions) == 1
+        assert harness.provider.messages == 1
+        assert policy.INTEGRATED_LINK_SENT in harness.spoken
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_declining_the_text_still_stores_the_answers_and_never_texts(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_questions(session)
+        await say(session, "yes but not right now")
+        assert session.finished
+        assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_DECLINED
+        assert len(harness.submissions) == 1
+        assert len(harness.submissions[0]["condition_survey"]["answers"]) == 6
+        assert harness.provider.messages == 0
+        snapshot = harness.service.receipt(session.call.call_id).snapshot
+        assert snapshot.survey_status == "stored"
+        assert snapshot.sms_status == "not_requested"
+        assert snapshot.call_status == "completed"
+        assert snapshot.error_code is None
+        await harness.service.retry_submission(session.call.call_id)
+        assert harness.provider.messages == 0
+    asyncio.run(scenario())
+
+
+def test_no_answer_to_consent_is_treated_as_no(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_questions(session)
+        for _ in range(2):
+            await session.handle_silence()
+            assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_QUESTION
+        await session.handle_silence()
+        assert session.finished
+        assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_DECLINED
+        assert len(harness.submissions) == 1
+        assert harness.provider.messages == 0
+    asyncio.run(scenario())
+
+
+def test_repeated_unclear_consent_replies_default_to_no(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_questions(session)
+        await say(session, "hmm")
+        await say(session, "what do you mean")
+        assert not session.finished
+        await say(session, "the weather is nice")
+        assert session.finished
+        assert harness.spoken[-1] == policy.INTEGRATED_CONSENT_DECLINED
+        assert harness.provider.messages == 0
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("reply, intent", [
+    ("yes", "yes"), ("Sure, go ahead", "yes"), ("okay that's fine", "yes"), ("no problem", "yes"),
+    ("yeah send it", "yes"), ("no", "no"), ("no thanks", "no"), ("I'd rather not", "no"),
+    ("yes but not now", "no"), ("please don't", "no"), ("maybe later", "no"),
+    ("hmm", "unclear"), ("what link", "unclear"), ("", "unclear"),
+])
+def test_consent_intent(reply, intent):
+    assert consent_intent(reply) == intent
 
 
 def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness):
@@ -390,8 +478,25 @@ def test_carrier_undelivered_sms_ends_the_wait_honestly(harness):
         await asyncio.wait_for(session._background, 1)
         assert session.finished
         assert harness.spoken[-1] == policy.INTEGRATED_SMS_FAILED
+        assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
         assert store.get_call("patient1", session.call.call_id)["call_status"] == "completed"
         assert store.get_call("patient1", session.call.call_id)["sms_status"] == "failed"
+    asyncio.run(scenario())
+
+
+def test_open_page_outranks_a_late_sms_failure(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 2, "page_ready")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await harness.service.sms_event(session.call.call_id, 0, "SMfake1", "failed", error="provider_rejected")
+        await asyncio.sleep(0.02)
+        assert session.link_open
+        assert not session.finished
+        assert policy.INTEGRATED_SMS_FAILED not in harness.spoken
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_OPENED
+        await session.disconnect()
     asyncio.run(scenario())
 
 
@@ -476,7 +581,8 @@ def test_warm_gait_handoff_waits_for_ready_before_camera_setup(harness):
         await harness.walk_requested.wait()
         intro = next(text for text in harness.spoken if "Thank you for those answers" in text)
         assert "short video of you walking" in intro
-        assert "text you a secure link" in intro
+        assert "secure link to the camera page" in intro
+        assert intro.endswith(policy.INTEGRATED_CONSENT_QUESTION)
         assert harness.spoken[-1] == policy.INTEGRATED_LINK_SENT
         assert not any("Live Camera" in text for text in harness.spoken)
         # Quiet while they look for the text gets a gentle nudge, never an escalation.

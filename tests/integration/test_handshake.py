@@ -158,6 +158,7 @@ def test_real_main_phone_handshake(services, condition, sms_outcome):
     ok(phone.post(f"/fixture/calls/{call_id}/begin"))
     for _ in range(6):
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "mild"}))
+    ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "yes"}))
     state = poll(phone, call_id, lambda row: row["snapshot"]["sms_status"] in {
         "sent", "failed", "unknown",
     })
