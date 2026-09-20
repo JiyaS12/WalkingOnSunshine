@@ -1,4 +1,4 @@
-"""Clinical summary generation for GaitGuard AI.
+"""Clinical summary generation for Sana.
 
 Uses OpenAI (gpt-4o-mini) when OPENAI_API_KEY is set, otherwise falls back to
 a deterministic templated summary. Summaries are cached via a heuristic

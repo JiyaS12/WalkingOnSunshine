@@ -14,11 +14,25 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@number-flow/react": "^0.6.2",
+    "@visx/curve": "^4.0.1-alpha.0",
+    "@visx/event": "^4.0.1-alpha.0",
+    "@visx/gradient": "^4.0.1-alpha.0",
+    "@visx/grid": "^4.0.1-alpha.0",
+    "@visx/responsive": "^4.0.1-alpha.0",
+    "@visx/scale": "^4.0.1-alpha.0",
+    "@visx/shape": "^4.0.1-alpha.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "d3-array": "^3.2.4",
+    "d3-shape": "^3.2.0",
     "lucide-react": "^1.42.0",
+    "motion": "^13.4.0",
     "next": "16.3.5",
+    "radix-ui": "^1.6.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "recharts": "^3.9.2"
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "6.6.3",
@@ -26,6 +40,8 @@
     "jsdom": "25.0.1",
     "@eslint/js": "^10.0.1",
     "@next/eslint-plugin-next": "16.3.5",
+    "@types/d3-array": "^3.2.2",
+    "@types/d3-shape": "^3.2.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -1,4 +1,4 @@
-"""Video upload processing for GaitGuard AI.
+"""Video upload processing for Sana.
 
 Runs MediaPipe Pose (legacy solutions API) over an uploaded video and returns
 joint frames compatible with GaitProcessor (6 joints, y flipped so up is
@@ -23,6 +23,10 @@ _LANDMARK_JOINTS = {
 }
 
 Frame = dict[str, list[float]]
+
+
+class VideoDecodeError(ValueError):
+    """The uploaded file could not be decoded as a video."""
 
 # lowest sample rate the gait metrics stay meaningful at (steps reach ~4/s)
 _MIN_ANALYSIS_FPS = 15.0
@@ -63,18 +67,43 @@ def _fill_gaps(detections: list[tuple[int, Frame]]) -> list[Frame]:
     return frames
 
 
+def _frame_from_landmarks(world) -> Frame | None:
+    """Build a joint frame from MediaPipe world landmarks; None when the
+    body was not detected or any required joint is missing/non-finite."""
+    if not world or not world.landmark:
+        return None
+    landmarks = world.landmark
+    frame: Frame = {}
+    for lm_idx, joint in _LANDMARK_JOINTS.items():
+        if lm_idx >= len(landmarks):
+            return None
+        lm = landmarks[lm_idx]
+        coords = [lm.x, -lm.y, lm.z]  # flip y so up is positive
+        if not all(math.isfinite(c) for c in coords):
+            return None
+        frame[joint] = coords
+    return frame
+
+
 def extract_frames(
     path: str, max_frames: int = 300
 ) -> tuple[list[Frame], float, int]:
     """Returns (joint_frames, effective_fps, total_frames_read)."""
-    cap = cv2.VideoCapture(path)
+    try:
+        cap = cv2.VideoCapture(path)
+    except cv2.error as e:
+        raise VideoDecodeError(f"could not open video: {e}") from e
     if not cap.isOpened():
-        raise ValueError(f"could not open video file: {path}")
+        raise VideoDecodeError(
+            "could not open the video — the file may be corrupt, truncated, "
+            "or use an unsupported codec"
+        )
 
     fps = cap.get(cv2.CAP_PROP_FPS)
-    if not fps or math.isnan(fps) or fps <= 0:
+    if not fps or math.isnan(fps) or math.isinf(fps) or fps <= 0:
         fps = 30.0
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    total_raw = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    total = int(total_raw) if total_raw and math.isfinite(total_raw) and total_raw > 0 else 0
     step = max(1, math.ceil(total / max_frames)) if total > 0 else 1
     # Decimating a long clip to fit max_frames can drop the sample rate below
     # what gait timing needs (~4 steps/s), which aliases stride and cadence.
@@ -105,20 +134,26 @@ def extract_frames(
                     break
                 slot = sampled
                 sampled += 1
-                rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                results = pose.process(rgb)
-                world = results.pose_world_landmarks
-                if not world:
+                if image is None or image.size == 0 or image.ndim != 3:
                     continue
-                frame: Frame = {}
-                for lm_idx, joint in _LANDMARK_JOINTS.items():
-                    lm = world.landmark[lm_idx]
-                    # flip y so up is positive, matching processor convention
-                    frame[joint] = [lm.x, -lm.y, lm.z]
-                detections.append((slot, frame))
+                try:
+                    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    results = pose.process(rgb)
+                except (cv2.error, RuntimeError, ValueError):
+                    continue
+                frame = _frame_from_landmarks(results.pose_world_landmarks)
+                if frame is not None:
+                    detections.append((slot, frame))
+    except cv2.error as e:
+        raise VideoDecodeError(f"video decoding failed: {e}") from e
     finally:
         cap.release()
 
+    if read == 0:
+        raise VideoDecodeError(
+            "no frames could be read from the video — the file may be empty, "
+            "corrupt, or use an unsupported codec"
+        )
     if len(detections) < 2:
         raise ValueError(
             f"no pose detected in enough frames (found {len(detections)} "
