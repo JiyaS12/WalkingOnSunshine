@@ -202,6 +202,8 @@ def test_call_session_hangs_up_when_the_patient_asks_to_stop():
     assert session.finished
     assert not session.engine.session.needs_human_review
     assert "stop" in spoken[-1].lower()
+    record = session.persistence.calls["sess-1"]
+    assert (record.status, record.final_status) == ("completed", "stopped")
 
 
 def test_call_session_completes_and_prepares_handoff():

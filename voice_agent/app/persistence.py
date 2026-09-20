@@ -83,7 +83,8 @@ class InMemoryPersistence:
 
     def complete_call(self, session_id: str, final_status: str = "completed") -> CallRecord:
         record = self.calls[session_id]
-        record.status = "completed" if final_status == "completed" else final_status
+        # ``status`` is the call lifecycle; ``final_status`` is the outcome.
+        record.status = "completed"
         record.final_status = final_status
         return record
 
