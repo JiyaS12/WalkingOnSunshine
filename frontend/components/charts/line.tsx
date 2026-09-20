@@ -292,7 +292,8 @@ export function Line({
   ]);
 
   const reactId = useId();
-  const gradientId = `line-gradient-${dataKey}-${reactId}`;
+  const safeDataKey = String(dataKey).replace(/[^A-Za-z0-9_-]/g, "_");
+  const gradientId = `line-gradient-${safeDataKey}-${reactId}`;
 
   const getY = useCallback(
     (d: Record<string, unknown>) => {

@@ -206,9 +206,11 @@ export function Area({
 
   // Unique IDs for this area
   const uniqueId = useId();
-  const gradientId = `area-gradient-${dataKey}-${uniqueId}`;
-  const strokeGradientId = `area-stroke-gradient-${dataKey}-${uniqueId}`;
-  const edgeMaskId = `area-edge-mask-${dataKey}-${uniqueId}`;
+  // dataKey may contain spaces/symbols that are invalid inside url(#…)
+  const safeDataKey = String(dataKey).replace(/[^A-Za-z0-9_-]/g, "_");
+  const gradientId = `area-gradient-${safeDataKey}-${uniqueId}`;
+  const strokeGradientId = `area-stroke-gradient-${safeDataKey}-${uniqueId}`;
+  const edgeMaskId = `area-edge-mask-${safeDataKey}-${uniqueId}`;
   const edgeGradientId = `${edgeMaskId}-gradient`;
 
   const isPatternFill = fill.startsWith("url(");

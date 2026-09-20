@@ -132,6 +132,8 @@ export interface TimeSeriesChartInnerProps {
   height: number;
   data: Record<string, unknown>[];
   xDataKey: string;
+  /** Optional key whose string value labels x-axis ticks/tooltips instead of the formatted date. */
+  xLabelKey?: string;
   margin: Margin;
   animationDuration: number;
   animationEasing?: string;
@@ -185,6 +187,7 @@ const TimeSeriesChartCore = memo(function TimeSeriesChartCore({
   height,
   data,
   xDataKey,
+  xLabelKey,
   margin,
   animationDuration,
   animationEasing = DEFAULT_ANIMATION_EASING,
@@ -405,8 +408,13 @@ const TimeSeriesChartCore = memo(function TimeSeriesChartCore({
   );
 
   const dateLabels = useMemo(
-    () => visiblePlotData.map((d) => shortDateFmt.format(xAccessor(d))),
-    [visiblePlotData, xAccessor]
+    () =>
+      visiblePlotData.map((d) =>
+        xLabelKey && typeof d[xLabelKey] === "string"
+          ? (d[xLabelKey] as string)
+          : shortDateFmt.format(xAccessor(d))
+      ),
+    [visiblePlotData, xAccessor, xLabelKey]
   );
 
   const canInteract = isLoaded && isChartInteractionPhase(chartPhase);

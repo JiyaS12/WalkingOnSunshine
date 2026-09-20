@@ -5,6 +5,7 @@ import {
   AreaChart,
 } from "@/components/charts";
 import { Grid } from "@/components/charts/grid";
+import { XAxis } from "@/components/charts/x-axis";
 import { ChartTooltip } from "@/components/charts/tooltip/chart-tooltip";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -26,8 +27,8 @@ export default function TrendGraph({ sessions }: Props) {
   const data = sessions.map((s, i) => ({
     date: new Date(epoch + i * 86400000),
     label: s.label,
-    "Asymmetry %": s.asymmetry_pct,
-    "Fall Risk ×100": Math.round(s.fall_risk_score * 1000) / 10,
+    asymmetry: s.asymmetry_pct,
+    fallRisk: Math.round(s.fall_risk_score * 1000) / 10,
   }));
 
   return (
@@ -51,31 +52,28 @@ export default function TrendGraph({ sessions }: Props) {
         <AreaChart
           data={data}
           xDataKey="date"
+          xLabelKey="label"
           aspectRatio="2.5 / 1"
           className="w-full"
         >
-          <Grid stroke="var(--clinical-800)" />
+          <Grid horizontal stroke="#334155" />
+          <XAxis numTicks={Math.min(Math.max(sessions.length, 2), 6)} />
           <ChartTooltip
             rows={(point) => [
               {
                 color: "var(--chart-1)",
                 label: "Asymmetry %",
-                value: `${(point["Asymmetry %"] as number).toFixed(1)}%`,
+                value: `${(point.asymmetry as number).toFixed(1)}%`,
               },
               {
                 color: "var(--chart-2)",
                 label: "Fall Risk ×100",
-                value: `${(point["Fall Risk ×100"] as number).toFixed(1)}`,
-              },
-              {
-                color: "var(--muted-foreground)",
-                label: "Session",
-                value: String(point.label ?? ""),
+                value: `${(point.fallRisk as number).toFixed(1)}`,
               },
             ]}
           />
           <Area
-            dataKey="Asymmetry %"
+            dataKey="asymmetry"
             fill="var(--chart-1)"
             fillOpacity={0.25}
             gradientToOpacity={0}
@@ -83,7 +81,7 @@ export default function TrendGraph({ sessions }: Props) {
             showMarkers={sessions.length <= 12}
           />
           <Area
-            dataKey="Fall Risk ×100"
+            dataKey="fallRisk"
             fill="var(--chart-2)"
             fillOpacity={0.25}
             gradientToOpacity={0}
