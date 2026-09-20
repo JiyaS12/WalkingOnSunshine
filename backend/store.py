@@ -129,7 +129,7 @@ def _load() -> dict:
         try:
             _persist()
         except Exception:
-            _patients = None
+            _patients = loaded
             raise
     return _patients
 
