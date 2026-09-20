@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -145,5 +145,51 @@ describe("doctor route authentication", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(signOutClinician).toHaveBeenCalled());
     expect(await screen.findByRole("heading", { name: "Clinician sign-in" })).toBeInTheDocument();
+  });
+
+  it("ignores an in-flight patient list that completes after sign-out", async () => {
+    let resolveStaleList!: (
+      rows: Awaited<ReturnType<typeof fetchPatients>>
+    ) => void;
+    const staleList = new Promise<Awaited<ReturnType<typeof fetchPatients>>>((resolve) => {
+      resolveStaleList = resolve;
+    });
+    const freshList = new Promise<Awaited<ReturnType<typeof fetchPatients>>>(() => {});
+    vi.mocked(fetchPatients)
+      .mockImplementationOnce(() => staleList)
+      .mockImplementation(() => freshList);
+    vi.mocked(getClinicianSession).mockResolvedValue(activeSession);
+    render(<DoctorPortal />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("heading", { name: "Clinician sign-in" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveStaleList([
+        {
+          patient_id: "stale-patient",
+          name: "Stale Patient",
+          age: 70,
+          latest_fall_risk: 0.8,
+          pain_scale: 5,
+          dizziness: true,
+          falls_last_6_months: 1,
+          latest_survey_at: "2026-09-19T00:00:00Z",
+          primary_complaints: ["stale data"],
+        },
+      ]);
+      await staleList;
+    });
+
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: "dr-demo" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("heading", { name: "Doctor's Portal" })).toBeInTheDocument();
+    expect(screen.queryByText("Stale Patient")).not.toBeInTheDocument();
   });
 });
