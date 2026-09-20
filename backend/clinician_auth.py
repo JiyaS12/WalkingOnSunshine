@@ -106,7 +106,7 @@ def get_auth_config() -> AuthConfig:
             60,
             24 * 60 * 60,
         ),
-        cookie_secure=_bool_setting("CLINICIAN_COOKIE_SECURE", False),
+        cookie_secure=_bool_setting("CLINICIAN_COOKIE_SECURE", True),
         login_attempts=_int_setting(
             "CLINICIAN_LOGIN_MAX_ATTEMPTS", DEFAULT_LOGIN_ATTEMPTS, 1, 100
         ),
@@ -122,8 +122,12 @@ def get_auth_config() -> AuthConfig:
 def credentials_match(username: str, password: str, config: AuthConfig) -> bool:
     """Compare both fields without short-circuiting on the username."""
 
-    username_matches = secrets.compare_digest(username, config.username)
-    password_matches = secrets.compare_digest(password, config.password)
+    username_matches = secrets.compare_digest(
+        username.encode("utf-8"), config.username.encode("utf-8")
+    )
+    password_matches = secrets.compare_digest(
+        password.encode("utf-8"), config.password.encode("utf-8")
+    )
     return username_matches and password_matches
 
 
@@ -169,11 +173,14 @@ def verify_session(
     except (ValueError, TypeError):
         raise SessionError("session_invalid") from None
 
-    expected_signature = hmac.new(
-        config.session_secret.encode("utf-8"),
-        encoded_payload.encode("ascii"),
-        hashlib.sha256,
-    ).digest()
+    try:
+        expected_signature = hmac.new(
+            config.session_secret.encode("utf-8"),
+            encoded_payload.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+    except UnicodeEncodeError:
+        raise SessionError("session_invalid") from None
     if not hmac.compare_digest(provided_signature, expected_signature):
         raise SessionError("session_invalid")
 
@@ -186,7 +193,7 @@ def verify_session(
 
     current_time = int(time.time() if now is None else now)
     if payload.get("kind") != "clinician" or not secrets.compare_digest(
-        str(username), config.username
+        str(username).encode("utf-8"), config.username.encode("utf-8")
     ):
         raise SessionError("session_invalid")
     if expires_at <= current_time:

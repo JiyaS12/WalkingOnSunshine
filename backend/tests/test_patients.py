@@ -18,6 +18,7 @@ def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setenv("CLINICIAN_USERNAME", "test-clinician")
     monkeypatch.setenv("CLINICIAN_PASSWORD", "test-password")
     monkeypatch.setenv("CLINICIAN_SESSION_SECRET", "s" * 32)
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
     clinician_auth.reset_login_rate_limits()
     client.cookies.clear()
     login = client.post(

@@ -74,8 +74,8 @@ Runtime environment variables:
   32 characters).
 - `CLINICIAN_SESSION_TTL_SECONDS` — session lifetime in seconds (default 28800,
   accepted range 60–86400).
-- `CLINICIAN_COOKIE_SECURE` — use `false` only for local HTTP; set `true` on an
-  HTTPS deployment.
+- `CLINICIAN_COOKIE_SECURE` — defaults to `true`; set `false` only for explicit
+  local HTTP development.
 - `CLINICIAN_LOGIN_MAX_ATTEMPTS` / `CLINICIAN_LOGIN_WINDOW_SECONDS` — per-process,
   per-client login throttle (defaults 5 attempts per 60 seconds).
 - `CORS_ALLOWED_ORIGINS` — exact comma-separated frontend origins. Localhost and

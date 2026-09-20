@@ -22,6 +22,7 @@ def auth_environment(monkeypatch):
     monkeypatch.setenv("CLINICIAN_LOGIN_MAX_ATTEMPTS", "5")
     monkeypatch.setenv("CLINICIAN_LOGIN_WINDOW_SECONDS", "60")
     monkeypatch.setenv("CLINICIAN_SESSION_TTL_SECONDS", "3600")
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
     clinician_auth.reset_login_rate_limits()
     client.cookies.clear()
     yield
@@ -80,6 +81,22 @@ def test_invalid_login_is_generic_and_does_not_set_cookie():
     assert "set-cookie" not in response.headers
 
 
+def test_non_ascii_credentials_are_compared_without_server_error(monkeypatch):
+    invalid = client.post(
+        "/api/clinician/session",
+        json={"username": "dr-démo", "password": "incorrect-☃"},
+    )
+    assert invalid.status_code == 401
+
+    monkeypatch.setenv("CLINICIAN_USERNAME", "dr-démo")
+    monkeypatch.setenv("CLINICIAN_PASSWORD", "correct-☃")
+    valid = client.post(
+        "/api/clinician/session",
+        json={"username": "dr-démo", "password": "correct-☃"},
+    )
+    assert valid.status_code == 200
+
+
 def test_untrusted_browser_origin_cannot_login_or_mutate():
     credentials = {
         "username": "dr-demo",
@@ -100,6 +117,13 @@ def test_untrusted_browser_origin_cannot_login_or_mutate():
     )
     assert denied_mutation.status_code == 403
 
+    denied_logout = client.delete(
+        "/api/clinician/session",
+        headers={"Origin": "https://untrusted.example"},
+    )
+    assert denied_logout.status_code == 403
+    assert client.get("/api/clinician/session").status_code == 200
+
 
 def test_expired_session_is_rejected_with_explicit_reason():
     config = clinician_auth.get_auth_config()
@@ -110,6 +134,17 @@ def test_expired_session_is_rejected_with_explicit_reason():
     response = client.get("/api/clinician/session")
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "session_expired"
+
+
+def test_unicode_session_cookie_is_rejected_as_invalid():
+    with pytest.raises(clinician_auth.SessionError) as exc_info:
+        clinician_auth.verify_session("☃.signature", clinician_auth.get_auth_config())
+    assert exc_info.value.code == "session_invalid"
+
+
+def test_cookie_secure_defaults_on(monkeypatch):
+    monkeypatch.delenv("CLINICIAN_COOKIE_SECURE", raising=False)
+    assert clinician_auth.get_auth_config().cookie_secure is True
 
 
 def test_logout_clears_session():

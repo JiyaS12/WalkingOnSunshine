@@ -222,7 +222,8 @@ def clinician_session_status(
 
 
 @app.delete("/api/clinician/session", status_code=204)
-def clinician_sign_out(response: Response) -> None:
+def clinician_sign_out(request: Request, response: Response) -> None:
+    _check_browser_origin(request)
     try:
         config = clinician_auth.get_auth_config()
         secure = config.cookie_secure
