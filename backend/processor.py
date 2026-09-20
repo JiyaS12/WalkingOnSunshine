@@ -92,8 +92,8 @@ class GaitProcessor:
     ):
         if len(frames) < 2:
             raise ValueError("at least 2 frames are required")
-        if fps <= 0:
-            raise ValueError("fps must be positive")
+        if not np.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be finite and positive")
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
@@ -101,15 +101,21 @@ class GaitProcessor:
         if not np.isfinite(capture_missing_pct) or not 0 <= capture_missing_pct <= 100:
             raise ValueError("capture_missing_pct must be between 0 and 100")
         self.capture_missing_pct = float(capture_missing_pct)
+        extended_joints = tuple(
+            joint for joint in EXTENDED_JOINTS if any(joint in frame for frame in frames)
+        )
         for i, frame in enumerate(frames):
-            for joint in JOINTS:
+            for joint in JOINTS + extended_joints:
                 coords = frame.get(joint)
                 if not isinstance(coords, (list, tuple)) or len(coords) != 3:
                     raise ValueError(
                         f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
                     )
         self._joints, repaired_pct = self._repair_dropped_landmarks()
-        self.dropped_frame_pct = max(repaired_pct, self.capture_missing_pct)
+        self.dropped_frame_pct = (
+            self.capture_missing_pct
+            + (100.0 - self.capture_missing_pct) * repaired_pct / 100.0
+        )
         if leg_length_m is not None:
             if not np.isfinite(leg_length_m) or leg_length_m <= 0:
                 raise ValueError("leg_length_m must be finite and positive")

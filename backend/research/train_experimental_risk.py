@@ -68,6 +68,18 @@ def _extractor_fingerprint() -> str:
     return hashlib.sha256(source + b"mediapipe-0.10.14").hexdigest()
 
 
+def _feature_provenance(features_path: Path, participants_path: Path) -> dict:
+    extraction_path = features_path.with_name("extraction_metrics.json")
+    extraction = json.loads(extraction_path.read_text()) if extraction_path.exists() else {}
+    return {
+        "feature_csv_sha256": hashlib.sha256(features_path.read_bytes()).hexdigest(),
+        "clinical_file_sha256": hashlib.sha256(participants_path.read_bytes()).hexdigest(),
+        "extractor_sha256": extraction.get("extractor_sha256", _extractor_fingerprint()),
+        "runtime_source_sha256": _extractor_fingerprint(),
+        "training_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    }
+
+
 def _write_json(path: Path, data: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".pending")
     temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
@@ -468,11 +480,7 @@ def train(
             "feature_names": list(FEATURE_NAMES),
             "validation": metrics,
             "dataset": {"doi": DATASET_DOI, "license": "CC0"},
-            "provenance": {
-                "feature_csv_sha256": hashlib.sha256(features_path.read_bytes()).hexdigest(),
-                "clinical_file_sha256": hashlib.sha256(participants_path.read_bytes()).hexdigest(),
-                "extractor_sha256": _extractor_fingerprint(),
-            },
+            "provenance": _feature_provenance(features_path, participants_path),
         }, metrics
     x = joined[list(FEATURE_NAMES)].to_numpy(dtype=float)
     target, target_metadata = _clinical_target(joined)
@@ -565,11 +573,7 @@ def train(
             "videos_file_url": VIDEOS_URL,
             "clinical_file_url": PARTICIPANTS_URL,
         },
-        "provenance": {
-            "feature_csv_sha256": hashlib.sha256(features_path.read_bytes()).hexdigest(),
-            "clinical_file_sha256": hashlib.sha256(participants_path.read_bytes()).hexdigest(),
-            "extractor_sha256": _extractor_fingerprint(),
-        },
+        "provenance": _feature_provenance(features_path, participants_path),
         "participant_count": int(len(joined)),
         "ridge_alpha": alpha,
         "target": target_metadata,

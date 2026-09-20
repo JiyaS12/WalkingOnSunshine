@@ -24,5 +24,6 @@ def test_heldout_clinical_outlier_cannot_change_its_prediction_or_alpha():
 
 def test_space_floor_stops_before_download(monkeypatch, tmp_path):
     monkeypatch.setattr(training, "_free_bytes", lambda _: training.MIN_FREE_BYTES - 1)
+    monkeypatch.setattr(training, "CHECKPOINT_PATH", tmp_path / "checkpoint.json")
     with pytest.raises(RuntimeError, match="at least 2.00 GB"):
         training._extract_archive_features(tmp_path)

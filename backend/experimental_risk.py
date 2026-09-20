@@ -148,6 +148,13 @@ def extract_features(
             warnings=["landmark visibility timestamps do not match pose frames"],
         )
 
+    stride = max(1, int(np.ceil(fps / 30.0)))
+    stop = min(frame_count, int(round(10 * fps)), 300 * stride)
+    joints = {name: values[:stop:stride] for name, values in joints.items()}
+    if visibility_frames is not None:
+        visibility_frames = visibility_frames[:stop:stride]
+    fps /= stride
+
     required = {
         "left_hip",
         "right_hip",

@@ -102,3 +102,32 @@ def test_live_reports_tracking_gaps_even_after_resampling():
     assert response.status_code == 200
     assert response.json()["experimental_cv_risk_status"] == "not_scorable"
     assert response.json()["experimental_cv_risk_index"] is None
+
+
+def test_disjoint_capture_and_landmark_loss_are_combined():
+    session = gait_gen.recovered_session()
+    for frame in session["frames"][60:78]:
+        frame["left_ankle"] = [np.nan, np.nan, np.nan]
+    result = GaitProcessor(session["frames"], capture_missing_pct=6).compute()
+    assert result.dropped_frame_pct == pytest.approx(11.64)
+    assert result.experimental_cv_risk_status == "not_scorable"
+    assert result.experimental_cv_risk_index is None
+
+
+@pytest.mark.parametrize("joint", ["left_heel", "right_foot_index", "left_shoulder"])
+@pytest.mark.parametrize("malformed", [[0.1], [], [[0.1], [0.2], [0.3]]])
+def test_optional_landmark_shapes_return_422(joint, malformed):
+    session = gait_gen.recovered_session()
+    for frame in session["frames"]:
+        frame[joint] = malformed
+    with TestClient(app) as client:
+        response = client.post("/api/process-frame", json=session)
+    assert response.status_code == 422
+
+
+def test_inconsistent_optional_landmarks_return_422():
+    session = gait_gen.recovered_session()
+    session["frames"][0]["left_heel"] = [0, 0, 0]
+    with TestClient(app) as client:
+        response = client.post("/api/process-frame", json=session)
+    assert response.status_code == 422

@@ -87,6 +87,16 @@ def test_fps_invariance():
     )
 
 
+def test_analysis_is_bounded_to_ten_seconds_and_300_samples():
+    session = gait_gen.recovered_session()
+    long_walk = _processor(
+        {"frames": [frame for frame in session["frames"] for _ in range(2)] * 2, "fps": 60}
+    ).experimental_feature_result()
+    short_walk = _processor(session).experimental_feature_result()
+    assert long_walk.features == pytest.approx(short_walk.features, rel=1e-6)
+    assert max(long_walk.events["left"] + long_walk.events["right"]) < 300
+
+
 def test_asymmetric_irregular_and_shuffling_patterns_are_measured():
     symmetric = _processor(
         gait_gen.recovered_session()
