@@ -349,6 +349,18 @@ after restart, missing payloads yield 409 and a reserved SMS retry without its
 destination fails without sending. Reconcile with main/provider records before
 starting a new call. Never delete a receipt to force another dispatch.
 
+### Recorded doctor greeting
+
+Orthopedic calls open with the clinician's own recorded greeting
+(`assets/doctor_greeting.ulaw`, raw 8 kHz mono mu-law) before any synthesized
+speech. The line is muted and barge-in is off while it plays, so nothing said
+during the clip becomes an answer, and the assistant then uses a one-line intro
+that does not repeat what the doctor said. Convert a new recording with
+`ffmpeg -i greeting.m4a -ar 8000 -ac 1 -f mulaw assets/doctor_greeting.ulaw`;
+`DOCTOR_GREETING_AUDIO` points at another file (empty disables the clip) and
+`DOCTOR_GREETING_CONDITIONS` lists the condition categories it applies to.
+An unreadable or over-long clip is logged and skipped rather than failing calls.
+
 ### Walking guidance
 
 Verbal “ready” is conversational only. Polling waits for main `ready`

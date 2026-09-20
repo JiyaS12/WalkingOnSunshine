@@ -17,6 +17,7 @@ from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, load_settings
 from app.telephony.deepgram_stt import DeepgramTranscriber, listen_url, parse_message
 from app.telephony.deepgram_tts import MULAW_FRAME_BYTES, frames, speak_url
+from app.telephony.greeting import MAX_GREETING_SECONDS, load_greeting_audio
 from app.telephony.stream_tickets import StreamTickets
 
 ENV = {
@@ -769,3 +770,34 @@ def test_the_walk_timer_waits_out_the_buffered_countdown(monkeypatch):
     session.persistence.start_call("sess-walk", "RGN-0417", "orthopedic")
     asyncio.run(session._walk_the_caller_through_it())
     assert slept == [17.0]
+
+
+def test_greeting_clip_settings(tmp_path):
+    base = {"DEEPGRAM_API_KEY": "k"}
+    assert load_settings({**base, "DOCTOR_GREETING_AUDIO": ""}).greeting_audio_path is None
+    custom = load_settings({**base, "DOCTOR_GREETING_AUDIO": str(tmp_path / "x.ulaw")})
+    assert custom.greeting_audio_path == str(tmp_path / "x.ulaw")
+    assert load_settings(base).greeting_conditions == frozenset({"orthopedic"})
+    both = load_settings({**base, "DOCTOR_GREETING_CONDITIONS": "Orthopedic, stroke"})
+    assert both.greeting_conditions == frozenset({"orthopedic", "stroke"})
+
+
+def test_greeting_clip_loads_only_a_usable_file(tmp_path):
+    assert load_greeting_audio(None) is None
+    assert load_greeting_audio(str(tmp_path / "missing.ulaw")) is None
+    empty = tmp_path / "empty.ulaw"
+    empty.write_bytes(b"")
+    assert load_greeting_audio(str(empty)) is None
+    long = tmp_path / "long.ulaw"
+    long.write_bytes(b"\xff" * (MAX_GREETING_SECONDS * 8000 + 1))
+    assert load_greeting_audio(str(long)) is None
+    good = tmp_path / "good.ulaw"
+    good.write_bytes(b"\x7f" * 1600)
+    assert load_greeting_audio(str(good)) == b"\x7f" * 1600
+
+
+def test_bundled_doctor_greeting_is_telephone_audio():
+    settings = load_settings({"DEEPGRAM_API_KEY": "k"})
+    audio = load_greeting_audio(settings.greeting_audio_path)
+    assert audio is not None
+    assert 5 <= len(audio) / 8000 <= MAX_GREETING_SECONDS
