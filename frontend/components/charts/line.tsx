@@ -124,7 +124,7 @@ function LineSeriesStroke({
       <path
         d={animatedPathD}
         fill="none"
-        ref={pathRef as React.RefObject<SVGPathElement>}
+        ref={pathRef}
         stroke={visibleStroke}
         strokeLinecap="round"
         strokeWidth={strokeWidth}
@@ -136,7 +136,7 @@ function LineSeriesStroke({
     <LinePath
       curve={curve}
       data={renderData}
-      innerRef={pathRef as React.RefObject<SVGPathElement>}
+      innerRef={pathRef}
       stroke={visibleStroke}
       strokeLinecap="round"
       strokeWidth={strokeWidth}

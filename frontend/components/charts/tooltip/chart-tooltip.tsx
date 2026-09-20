@@ -411,9 +411,11 @@ function DatePillTrackerInner({
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: we need to jump the animatedX when the visible prop changes
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     animatedX.set(xWithMargin);
   }, [animatedX, visible]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return (
     <motion.div

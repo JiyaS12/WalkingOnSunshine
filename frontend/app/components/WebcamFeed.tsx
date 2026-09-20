@@ -496,7 +496,8 @@ export default function WebcamFeed({
       } catch (err) {
         // stopAll (via failLive) runs closePoseRef
         throw new Error(
-          `Model download: ${err instanceof Error ? err.message : String(err)}`
+          `Model download: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err }
         );
       }
       if (isStale()) return;
