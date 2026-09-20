@@ -28,8 +28,10 @@ _CONSENT_YES = re.compile(
     r"sounds good|fine|absolutely|definitely|send it|text me|you can)\b"
 )
 _CONSENT_NO = re.compile(
-    r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later)\b"
+    r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later|"
+    r"can't|cannot|can not|won't|will not|unable|stop)\b"
 )
+_CURLY_APOSTROPHES = str.maketrans("\u2019\u2018\u02bc", "'''")
 # "no problem" / "not a problem" are agreement, not refusal.
 _CONSENT_NOT_REFUSAL = re.compile(r"\b(?:no|not a|not really a) (?:problem|worries|issue)\b")
 
@@ -41,7 +43,7 @@ def consent_intent(transcript: str) -> str:
     counts when nothing in the reply refuses, so the text never goes out on a
     misheard or hedged answer.
     """
-    text = _CONSENT_NOT_REFUSAL.sub(" yes ", transcript.lower())
+    text = _CONSENT_NOT_REFUSAL.sub(" yes ", transcript.lower().translate(_CURLY_APOSTROPHES))
     if _CONSENT_NO.search(text):
         return "no"
     if _CONSENT_YES.search(text):
@@ -82,6 +84,8 @@ class IntegratedSession:
         self.paused = False
         self.stage = "condition"
         self.link_open = False
+        # Backend-confirmed page activity; a spoken "ready" alone never sets this.
+        self._page_seen = False
         self._page_active = False
         self._buffer: list[str] = []
         self._confidence: float | None = None
@@ -264,6 +268,7 @@ class IntegratedSession:
                     was_open = self.link_open
                     if view.status in _PAGE_OPEN_STATUSES or view.last_event == "permission_denied":
                         self.link_open = True
+                        self._page_seen = True
                     if view.status in _CAMERA_STATUSES or view.last_event == "permission_denied":
                         self._page_active = True
                     if key != seen:
@@ -281,7 +286,7 @@ class IntegratedSession:
                             await self._say(policy.INTEGRATED_CAPTURING)
                         elif view.status == "captured":
                             await self._say(policy.INTEGRATED_CAPTURED)
-                if not self.link_open:
+                if not self._page_seen:
                     snapshot = self.service.receipt(self.call.call_id).snapshot
                     if snapshot.sms_status == "failed":
                         await self.finish("completed", policy.INTEGRATED_SMS_FAILED, snapshot.error_code)

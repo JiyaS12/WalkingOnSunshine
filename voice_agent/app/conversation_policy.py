@@ -368,7 +368,7 @@ def sms_body(link: str) -> str:
     return (
         "Sana: Your care team's walking check-in. Open this secure link on your phone "
         f"and follow along with the call: {link} "
-        "Link expires in 15 minutes. Msg & data rates may apply. "
+        "This link expires soon. Msg & data rates may apply. "
         "Reply STOP to opt out, HELP for help."
     )
 

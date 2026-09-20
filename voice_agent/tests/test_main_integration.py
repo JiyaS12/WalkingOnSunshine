@@ -232,6 +232,8 @@ def test_repeated_unclear_consent_replies_default_to_no(harness):
     ("yes", "yes"), ("Sure, go ahead", "yes"), ("okay that's fine", "yes"), ("no problem", "yes"),
     ("yeah send it", "yes"), ("no", "no"), ("no thanks", "no"), ("I'd rather not", "no"),
     ("yes but not now", "no"), ("please don't", "no"), ("maybe later", "no"),
+    ("you can't text me", "no"), ("you can\u2019t text me", "no"), ("you cannot text me", "no"),
+    ("I won't be able to", "no"), ("you can text me", "yes"),
     ("hmm", "unclear"), ("what link", "unclear"), ("", "unclear"),
 ])
 def test_consent_intent(reply, intent):
@@ -481,6 +483,20 @@ def test_carrier_undelivered_sms_ends_the_wait_honestly(harness):
         assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
         assert store.get_call("patient1", session.call.call_id)["call_status"] == "completed"
         assert store.get_call("patient1", session.call.call_id)["sms_status"] == "failed"
+    asyncio.run(scenario())
+
+
+def test_a_spoken_ready_does_not_hide_an_undelivered_text(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await say(session, "ready")
+        assert session.link_open
+        await harness.service.sms_event(session.call.call_id, 0, "SMfake1", "failed", error="provider_rejected")
+        await asyncio.wait_for(session._background, 1)
+        assert harness.spoken[-1] == policy.INTEGRATED_SMS_FAILED
+        assert harness.service.receipt(session.call.call_id).snapshot.error_code == "provider_rejected"
     asyncio.run(scenario())
 
 
