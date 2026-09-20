@@ -57,6 +57,12 @@ function riskBadge(score: number | null | undefined) {
   return "border-0 bg-muted text-muted-foreground";
 }
 
+function safeReturnPath(): string | null {
+  if (typeof window === "undefined") return null;
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && /^\/patient\/[^/?#]+$/.test(next) ? next : null;
+}
+
 export default function DoctorPortal() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [session, setSession] = useState<ClinicianSession | null>(null);
@@ -291,6 +297,11 @@ export default function DoctorPortal() {
     try {
       const activeSession = await signInClinician(username, password);
       setPassword("");
+      const returnPath = safeReturnPath();
+      if (returnPath) {
+        window.location.assign(returnPath);
+        return;
+      }
       setSession(activeSession);
       setAuthState("signed-in");
     } catch (err) {

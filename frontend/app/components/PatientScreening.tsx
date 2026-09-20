@@ -103,6 +103,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [metrics, setMetrics] = useState<GaitMetrics | null>(null);
@@ -129,6 +130,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       setPatient(rec);
       setNotFound(false);
       setLoadError(null);
+      setAuthRequired(false);
       setSessions(
         rec.gait_sessions.map((s) => ({
           label: s.label,
@@ -141,6 +143,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       if (gen !== patientGenRef.current) return;
       if (err instanceof ApiError && err.status === 404) {
         setNotFound(true);
+      } else if (err instanceof ApiError && err.status === 401) {
+        setAuthRequired(true);
       } else {
         setLoadError(err instanceof Error ? err.message : String(err));
       }
@@ -289,6 +293,25 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       <main className="flex min-h-screen items-center justify-center text-muted-foreground">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your
         screening…
+      </main>
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="w-full max-w-sm rounded-[1.75rem] bg-card p-6 text-center shadow-pillow">
+          <p className="text-sm">
+            Patient records are protected. Sign in as a clinician to open this
+            screening.
+          </p>
+          <Link
+            href={`/doctor?next=${encodeURIComponent(`/patient/${patientId}`)}`}
+            className="mt-4 inline-block rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-bluedeep"
+          >
+            Clinician sign-in
+          </Link>
+        </div>
       </main>
     );
   }
