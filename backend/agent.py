@@ -249,10 +249,15 @@ def _condition_summary(record: dict) -> str:
             continue
         total = sum(OPTION_WEIGHTS[answer.normalized_value] for answer in instrument.answers)
         answers = ", ".join(f"{answer.question_id}={answer.normalized_value}" for answer in instrument.answers)
+        skipped = (
+            f" Unanswered after repeated clarification: {', '.join(instrument.skipped)}."
+            if instrument.skipped else ""
+        )
         return (
             f"Confirmed condition survey ({survey.get('recorded_at')}): "
-            f"{instrument.instrument} v{instrument.version}; {answers}. "
-            f"Prototype raw item sum {total}/24; not a validated HOOS JR interval "
+            f"{instrument.instrument} v{instrument.version}; {answers or 'no confirmed items'}.{skipped} "
+            f"Prototype raw item sum {total}/{4 * len(instrument.answers)} over "
+            f"{len(instrument.answers)} of 6 items; not a validated HOOS JR interval "
             "score or validated stroke scale score."
         )
     return "No confirmed condition survey is available."

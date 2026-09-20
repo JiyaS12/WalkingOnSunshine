@@ -47,6 +47,7 @@ from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, TelephonySettings, load_settings
 from app.telephony.deepgram_stt import DeepgramTranscriber
 from app.telephony.deepgram_tts import frames, synthesize_mulaw_async
+from app.telephony.greeting import GREETING_TAIL_SECONDS, load_greeting_audio
 from app.telephony.prompt_cache import SpeechCache, fixed_prompts
 from app.telephony.sms import send_sms_async
 from app.telephony.stream_tickets import StreamTickets
@@ -140,9 +141,11 @@ class MediaStreamBridge:
         sms_sender: Callable[[str, str], Awaitable[None]] | None = None,
         integrated_service: IntegratedService | None = None,
         speech_cache: SpeechCache | None = None,
+        greeting_audio: bytes | None = None,
     ):
         self.websocket = websocket
         self.speech_cache = speech_cache
+        self.greeting_audio = greeting_audio
         self.settings = settings
         self.repository = repository
         self.persistence = persistence
@@ -172,6 +175,8 @@ class MediaStreamBridge:
         self._prompt_text = ""
         self._early_answer = False
         self._playback: asyncio.Task[None] | None = None
+        self._clip_mark: str | None = None
+        self._clip_done = asyncio.Event()
 
     async def run(self) -> None:
         await self.websocket.accept()
@@ -302,6 +307,11 @@ class MediaStreamBridge:
         if name == self.hangup_mark:
             await self._close()
             return
+        if name == self._clip_mark:
+            self._clip_mark = None
+            self.bot_speaking = False
+            self._clip_done.set()
+            return
         if name != self._active_mark:
             # Twilio still reports marks for audio we cleared after a barge-in;
             # by then a newer prompt may be playing and this one says nothing.
@@ -341,9 +351,52 @@ class MediaStreamBridge:
         # Let the caller get the handset to their ear before we start.
         await asyncio.sleep(GREETING_DELAY_SECONDS)
         try:
-            await self._run_turn(self.session.begin())
+            if self._greeting_applies():
+                assert isinstance(self.session, IntegratedSession)
+                await self._play_greeting()
+                await self._run_turn(self.session.begin(after_greeting=True))
+            else:
+                await self._run_turn(self.session.begin())
         finally:
             self._greeted.set()
+
+    def _greeting_applies(self) -> bool:
+        """The recorded clip names the surgery, so it only opens matching calls."""
+
+        if not self.greeting_audio or not isinstance(self.session, IntegratedSession):
+            return False
+        return self.session.call.condition_category.casefold() in self.settings.greeting_conditions
+
+    async def _play_greeting(self) -> None:
+        """Play the clinician's recording through, then hand over to the survey.
+
+        Nothing the caller says during it is an answer, so the line stays
+        muted to Deepgram and no barge-in applies; the survey intro starts
+        only once Twilio reports the clip has finished playing.
+        """
+
+        assert self.greeting_audio is not None
+        if self.stream_sid is None or self._closed:
+            return
+        self.bot_speaking = True
+        self._interruptible = False
+        self._mark_counter += 1
+        self._clip_mark = f"greeting-{self._mark_counter}"
+        self._clip_done.clear()
+        loop = asyncio.get_running_loop()
+        seconds = len(self.greeting_audio) / 8000
+        logger.info("Playing %.1fs doctor greeting on stream %s", seconds, self.stream_sid)
+        tail = MULAW_SILENCE * round(GREETING_TAIL_SECONDS / FRAME_SECONDS)
+        await self._send_frames(self.greeting_audio + tail, loop.time(), 0)
+        await self._send(
+            {"event": "mark", "streamSid": self.stream_sid, "mark": {"name": self._clip_mark}}
+        )
+        try:
+            await asyncio.wait_for(self._clip_done.wait(), PLAYBACK_LEAD_SECONDS + 5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Stream %s never confirmed the greeting; continuing", self.stream_sid)
+            self._clip_mark = None
+            self.bot_speaking = False
 
     async def _run_turn(self, coroutine: Awaitable[bool | None]) -> None:
         """Serialize survey turns; one prompt finishes speaking before the next."""
@@ -476,23 +529,29 @@ class MediaStreamBridge:
                 self.stream_sid,
             )
             padding = MULAW_SILENCE * round(pause / FRAME_SECONDS)
-            for frame in frames(audio + padding):
-                await self._send(
-                    {
-                        "event": "media",
-                        "streamSid": self.stream_sid,
-                        "media": {"payload": base64.b64encode(frame).decode("ascii")},
-                    }
-                )
-                sent_frames += 1
-                # Stay at most PLAYBACK_LEAD_SECONDS of audio ahead of the caller.
-                ahead = started + sent_frames * FRAME_SECONDS - PLAYBACK_LEAD_SECONDS - loop.time()
-                if ahead > 0:
-                    await asyncio.sleep(ahead)
+            sent_frames = await self._send_frames(audio + padding, started, sent_frames)
         # Everything is queued now and Twilio is a couple of seconds behind, so
         # the caller is hearing the end of the question: they may talk over it.
         self._interruptible = True
         await self._send({"event": "mark", "streamSid": self.stream_sid, "mark": {"name": mark}})
+
+    async def _send_frames(self, audio: bytes, started: float, sent_frames: int) -> int:
+        """Queue audio at speaking speed, at most PLAYBACK_LEAD_SECONDS ahead of the caller."""
+
+        loop = asyncio.get_running_loop()
+        for frame in frames(audio):
+            await self._send(
+                {
+                    "event": "media",
+                    "streamSid": self.stream_sid,
+                    "media": {"payload": base64.b64encode(frame).decode("ascii")},
+                }
+            )
+            sent_frames += 1
+            ahead = started + sent_frames * FRAME_SECONDS - PLAYBACK_LEAD_SECONDS - loop.time()
+            if ahead > 0:
+                await asyncio.sleep(ahead)
+        return sent_frames
 
     async def _stop_playback(self) -> None:
         """Drop the rest of the prompt and Twilio's buffer of it, and listen."""
@@ -831,6 +890,7 @@ def create_integrated_app(
             service = None
 
     speech_cache = SpeechCache()
+    greeting_audio = load_greeting_audio(settings.greeting_audio_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -947,6 +1007,7 @@ def create_integrated_app(
         await MediaStreamBridge(
             websocket, settings, InMemoryPatientRepository(), InMemoryPersistence(), tickets,
             interpreter=interpreter, integrated_service=service, speech_cache=speech_cache,
+            greeting_audio=greeting_audio,
         ).run()
 
     return app

@@ -19,6 +19,18 @@ it("keeps unknown generic intake independent of confirmed Likert answers", () =>
   expect(screen.getByText(/No validated HOOS JR interval score/)).toBeInTheDocument();
 });
 
+it("lists skipped questions as unanswered and needing review", () => {
+  render(<SurveyDetails survey={{
+    patient_id: "patient-1", call_id: "call-1", recorded_at: "2026-09-20T00:00:00Z",
+    condition_survey: { instrument: "hoos_jr", version: "1", condition_category: "orthopedic",
+      answers: [{ question_id: "hoos_stairs", normalized_value: "mild", confirmed: true, acceptance_method: "explicit_selection" }],
+      skipped: ["hoos_rising"] },
+  }} />);
+  expect(screen.getByText("Going up or down stairs: mild")).toBeInTheDocument();
+  expect(screen.getByText("Rising from sitting: not answered")).toBeInTheDocument();
+  expect(screen.getByText(/Skipped on the call after repeated clarification/)).toBeInTheDocument();
+});
+
 it("displays explicit false/zero values and independently unknown fall injury", () => {
   render(<SurveyDetails survey={{ patient_id: "patient-1", pain_scale: 1, fall_history: { falls_last_6_months: 0, injured: null },
     dizziness: false, dizziness_notes: "No symptoms today", primary_complaints: [] }} />);

@@ -179,6 +179,34 @@ def test_text_waits_for_a_spoken_yes(harness):
     asyncio.run(scenario())
 
 
+def test_unclear_question_is_skipped_and_the_partial_survey_is_stored(harness):
+    async def scenario():
+        session = await harness.session()
+        await say(session, "mild")
+        for _ in range(3):
+            await say(session, "banana")
+        assert not session.finished
+        assert harness.spoken[-1].startswith(policy.SKIP_QUESTION)
+        assert "Question 3 of 6" in harness.spoken[-1]
+        for _ in range(4):
+            await say(session, "mild")
+        assert session.stage == "consent"
+        await say(session, "yes")
+        await harness.walk_requested.wait()
+        assert len(harness.submissions) == 1
+        survey = harness.submissions[0]["condition_survey"]
+        assert survey["skipped"] == ["hoos_uneven_surface"]
+        assert [a["question_id"] for a in survey["answers"]] == [
+            "hoos_stairs", "hoos_rising", "hoos_bending", "hoos_lying_bed", "hoos_sitting",
+        ]
+        stored = store.get_patient("patient1")["surveys"][-1]["condition_survey"]
+        assert stored["skipped"] == ["hoos_uneven_surface"]
+        assert len(stored["answers"]) == 5
+        assert harness.provider.messages == 1
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
 def test_declining_the_text_still_stores_the_answers_and_never_texts(harness):
     async def scenario():
         session = await harness.session()
@@ -905,6 +933,108 @@ def test_integrated_media_rejects_valid_ticket_for_wrong_session_scope(harness):
         assert bridge.session is None
         assert not harness.service.receipt(harness.payload.call_id).stream_started
     asyncio.run(scenario())
+
+
+class SilentTranscriber:
+    def __init__(self, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def close(self):
+        return None
+
+    async def send_audio(self, frame):
+        return None
+
+    async def events(self):
+        await asyncio.Event().wait()
+        yield  # pragma: no cover
+
+
+async def _run_bridge_opening(harness, monkeypatch, env, greeting_audio):
+    """Open an integrated stream on a bridge and return what went down the wire."""
+
+    monkeypatch.setattr(phone_app, "GREETING_DELAY_SECONDS", 0.0)
+    spoken = []
+    sent = []
+    state_at_mark = {}
+
+    class Socket:
+        async def send_text(self, text):
+            message = json.loads(text)
+            sent.append(message)
+            if message["event"] == "mark":
+                state_at_mark[message["mark"]["name"]] = (bridge.bot_speaking, bridge._interruptible)
+                asyncio.get_running_loop().call_soon(
+                    asyncio.ensure_future, bridge._on_mark({"mark": message["mark"]})
+                )
+
+    async def fake_speech(text, mark):
+        spoken.append(text)
+        await bridge._send({"event": "mark", "streamSid": bridge.stream_sid, "mark": {"name": mark}})
+
+    await harness.service.start(harness.payload)
+    session_id = harness.service.receipt(harness.payload.call_id).snapshot.phone_session_id
+    tickets = phone_app.StreamTickets()
+    token = tickets.issue(session_id)
+    bridge = phone_app.MediaStreamBridge(
+        Socket(), load_settings(env), phone_app.InMemoryPatientRepository(),
+        phone_app.InMemoryPersistence(), tickets, transcriber_factory=SilentTranscriber,
+        integrated_service=harness.service, greeting_audio=greeting_audio,
+    )
+    bridge._line_open.set()
+    with patch.object(bridge, "_stream_speech", fake_speech):
+        await bridge._on_start({"start": {
+            "callSid": "CAfake1", "streamSid": "MZoffline",
+            "customParameters": {
+                "sessionId": session_id, "callId": harness.payload.call_id, "streamToken": token,
+            },
+        }})
+        await asyncio.wait_for(bridge._greeted.wait(), 2)
+    for task in bridge._tasks:
+        task.cancel()
+    await bridge.session.disconnect()
+    return sent, spoken, state_at_mark
+
+
+def test_doctor_greeting_plays_first_without_barge_in_then_short_intro(harness, monkeypatch):
+    clip = bytes(range(256)) * 25  # 0.8s of distinctive mu-law
+
+    async def scenario():
+        return await _run_bridge_opening(harness, monkeypatch, ENV, clip)
+
+    sent, spoken, state_at_mark = asyncio.run(scenario())
+    marks = [m["mark"]["name"] for m in sent if m["event"] == "mark"]
+    assert marks[0].startswith("greeting-") and marks[1].startswith("prompt-")
+    first_mark = next(i for i, m in enumerate(sent) if m["event"] == "mark")
+    played = b"".join(base64.b64decode(m["media"]["payload"]) for m in sent[:first_mark])
+    assert played.startswith(clip)
+    assert played[len(clip):] == b"\xff" * (len(played) - len(clip))  # only the tail pause follows
+    assert state_at_mark[marks[0]] == (True, False)  # muted line, no barge-in during the clip
+    assert spoken[0].startswith(policy.INTEGRATED_INTRO_AFTER_GREETING)
+    assert policy.INTEGRATED_INTRO not in spoken[0]
+    assert spoken[0].count(policy.INTEGRATED_INTRO_AFTER_GREETING) == 1
+
+
+def test_doctor_greeting_is_skipped_for_other_conditions(harness, monkeypatch):
+    async def scenario():
+        env = {**ENV, "DOCTOR_GREETING_CONDITIONS": "stroke"}
+        return await _run_bridge_opening(harness, monkeypatch, env, b"\x00" * 800)
+
+    sent, spoken, _ = asyncio.run(scenario())
+    assert all(not m["event"] == "media" for m in sent)  # no clip frames
+    assert spoken[0].startswith(policy.INTEGRATED_INTRO)
+
+
+def test_no_greeting_clip_means_the_full_intro(harness, monkeypatch):
+    async def scenario():
+        return await _run_bridge_opening(harness, monkeypatch, ENV, None)
+
+    sent, spoken, _ = asyncio.run(scenario())
+    assert not [m for m in sent if m["event"] == "media"]
+    assert spoken[0].startswith(policy.INTEGRATED_INTRO)
 
 
 def test_cancelled_speech_clears_provider_playback():

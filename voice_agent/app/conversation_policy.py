@@ -248,6 +248,12 @@ INTEGRATED_INTRO = (
     "It only takes a few minutes, and there are no wrong answers. "
     "Just answer in your own words, and you can ask me to repeat, pause, or stop at any time."
 )
+# After the clinician's recorded greeting has already said who is calling and
+# why, the assistant only adds what the recording did not.
+INTEGRATED_INTRO_AFTER_GREETING = (
+    "Hi, I’m the survey helper. There are no wrong answers, just answer in your own words, "
+    "and you can ask me to repeat, pause, or stop at any time."
+)
 INTEGRATED_CONSENT_QUESTION = (
     "Is it okay if I text you that link now? Please say yes or no."
 )
@@ -356,6 +362,9 @@ INTEGRATED_NO_RESPONSE = (
 REVIEW = (
     "I’m sorry I haven’t understood clearly. I don’t want to record the wrong answer. "
     "We’ll stop here. This survey needs human review."
+)
+SKIP_QUESTION = (
+    "No problem, I don’t want to record the wrong answer, so let’s leave that one and move on."
 )
 MEDICAL_BOUNDARY = (
     "I can help record your survey answers, but I can’t give medical advice. "

@@ -209,15 +209,47 @@ def test_clarification_budget_cannot_be_reset_by_new_candidates_or_rejections():
     engine.handle_response("no")
     propose(engine, "moderate")
     prompt, answer = engine.handle_response("no")
-    assert prompt == speech.REVIEW
+    assert prompt.startswith(speech.SKIP_QUESTION)
+    assert "Question 2 of 6" in prompt
     assert engine.session.needs_human_review
     assert engine.session.pending_answer is None
     assert engine.session.answers == []
-    before = engine.snapshot()
-    for response in ("yes", "mild", "resume"):
-        engine.handle_response(response)
-        assert engine.snapshot() == before
-    assert engine.start() == speech.REVIEW
+    assert engine.session.skipped == ["hoos_stairs"]
+    assert engine.session.current_index == 1
+    assert engine.session.clarification_attempts == 0
+    # A stale "yes" for the skipped question cannot resurrect it as an answer.
+    engine.handle_response("yes")
+    assert engine.session.answers == []
+    assert engine.session.skipped == ["hoos_stairs"]
+
+
+def test_skipping_never_records_a_value_and_the_survey_still_completes():
+    engine = make_engine()
+    for _ in range(3):
+        engine.handle_response("unclear")
+    assert engine.session.skipped == ["hoos_stairs"]
+    for _ in range(5):
+        engine.handle_response("mild")
+    assert engine.session.state == "complete"
+    assert [a.question_id for a in engine.session.answers] == [
+        "hoos_uneven_surface", "hoos_rising", "hoos_bending", "hoos_lying_bed", "hoos_sitting",
+    ]
+    assert all(a.confirmed for a in engine.session.answers)
+    assert engine.snapshot()["skipped"] == ["hoos_stairs"]
+    assert engine.snapshot()["needs_human_review"] is True
+
+
+def test_skipping_the_last_question_ends_the_survey():
+    engine = make_engine()
+    for _ in range(5):
+        engine.handle_response("mild")
+    for _ in range(2):
+        engine.handle_response("unclear")
+    prompt, _ = engine.handle_response("unclear")
+    assert prompt == f"{speech.SKIP_QUESTION} {speech.COMPLETE}"
+    assert engine.session.state == "complete"
+    assert engine.session.skipped == ["hoos_sitting"]
+    assert len(engine.session.answers) == 5
 
 
 @pytest.mark.parametrize("intent,transcript", [

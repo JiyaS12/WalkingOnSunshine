@@ -133,9 +133,10 @@ class IntegratedSession:
     def trailing_off(self) -> bool:
         return bool(_TRAILING_FILLER.search(self.pending_transcript.lower()))
 
-    async def begin(self) -> None:
+    async def begin(self, *, after_greeting: bool = False) -> None:
         self._deadline = asyncio.create_task(self._expire())
-        await self._say(policy.INTEGRATED_INTRO + policy.PARAGRAPH + _spoken(self.engine.start(greet=False)))
+        intro = policy.INTEGRATED_INTRO_AFTER_GREETING if after_greeting else policy.INTEGRATED_INTRO
+        await self._say(intro + policy.PARAGRAPH + _spoken(self.engine.start(greet=False)))
 
     async def _expire(self) -> None:
         await asyncio.sleep(self.max_call_seconds)
@@ -235,6 +236,7 @@ class IntegratedSession:
                     "confirmed": a.confirmed, "acceptance_method": a.acceptance_method,
                     "confidence": a.confidence, "clarification_attempts": a.clarification_attempts,
                 } for a in answers],
+                "skipped": list(self.engine.session.skipped),
             },
         }
 

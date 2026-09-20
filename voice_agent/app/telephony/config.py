@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
+
+DEFAULT_GREETING_AUDIO = Path(__file__).resolve().parents[2] / "assets" / "doctor_greeting.ulaw"
 
 
 class TelephonyConfigurationError(RuntimeError):
@@ -20,6 +23,8 @@ class TelephonySettings:
     tts_model: str
     utterance_end_ms: int
     max_call_seconds: int
+    greeting_audio_path: str | None = None
+    greeting_conditions: frozenset[str] = frozenset()
 
     @property
     def deepgram_ready(self) -> bool:
@@ -79,4 +84,18 @@ def load_settings(env: dict[str, str] | None = None) -> TelephonySettings:
         tts_model=source.get("DEEPGRAM_TTS_MODEL") or "aura-2-thalia-en",
         utterance_end_ms=int(source.get("UTTERANCE_END_MS") or 1200),
         max_call_seconds=int(source.get("MAX_CALL_SECONDS") or 600),
+        greeting_audio_path=_greeting_path(source.get("DOCTOR_GREETING_AUDIO")),
+        greeting_conditions=frozenset(
+            part.strip().casefold()
+            for part in (source.get("DOCTOR_GREETING_CONDITIONS") or "orthopedic").split(",")
+            if part.strip()
+        ),
     )
+
+
+def _greeting_path(configured: str | None) -> str | None:
+    """``DOCTOR_GREETING_AUDIO`` picks the clip; empty disables it; unset uses the bundled one."""
+
+    if configured is None:
+        return str(DEFAULT_GREETING_AUDIO) if DEFAULT_GREETING_AUDIO.is_file() else None
+    return configured.strip() or None
