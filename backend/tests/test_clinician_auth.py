@@ -179,6 +179,32 @@ def test_login_is_size_limited_and_rate_limited(monkeypatch):
     assert int(limited.headers["retry-after"]) >= 1
 
 
+def test_successful_logins_do_not_exhaust_throttle(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_LOGIN_MAX_ATTEMPTS", "2")
+    clinician_auth.reset_login_rate_limits()
+
+    for _ in range(3):
+        client.cookies.clear()
+        assert _sign_in().status_code == 200
+
+
+def test_retry_after_rounds_up_remaining_window(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_LOGIN_MAX_ATTEMPTS", "2")
+    config = clinician_auth.get_auth_config()
+    current_time = [100.1]
+    monkeypatch.setattr(
+        clinician_auth.time, "monotonic", lambda: current_time[0]
+    )
+    clinician_auth.reset_login_rate_limits()
+
+    clinician_auth.record_failed_login("rounding-client", config)
+    current_time[0] = 100.2
+    clinician_auth.record_failed_login("rounding-client", config)
+    current_time[0] = 158.3
+
+    assert clinician_auth.login_retry_after("rounding-client", config) == 2
+
+
 def test_cors_allows_configured_local_frontend_only():
     allowed = client.options(
         "/api/patients",

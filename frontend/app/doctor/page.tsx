@@ -294,6 +294,7 @@ export default function DoctorPortal() {
       setSession(activeSession);
       setAuthState("signed-in");
     } catch (err) {
+      setAuthState("signed-out");
       setAuthError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {
       setSigningIn(false);

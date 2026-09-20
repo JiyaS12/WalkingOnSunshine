@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import secrets
 import threading
@@ -206,7 +207,7 @@ _attempts_lock = threading.Lock()
 
 
 def login_retry_after(client_key: str, config: AuthConfig) -> int | None:
-    """Record a login attempt and return seconds to wait when over quota."""
+    """Return seconds to wait when the client has exhausted failed attempts."""
 
     now = time.monotonic()
     cutoff = now - config.login_window_seconds
@@ -215,9 +216,28 @@ def login_retry_after(client_key: str, config: AuthConfig) -> int | None:
         while attempts and attempts[0] <= cutoff:
             attempts.popleft()
         if len(attempts) >= config.login_attempts:
-            return max(1, int(config.login_window_seconds - (now - attempts[0])))
-        attempts.append(now)
+            remaining = config.login_window_seconds - (now - attempts[0])
+            return max(1, math.ceil(remaining))
     return None
+
+
+def record_failed_login(client_key: str, config: AuthConfig) -> None:
+    """Record one failed sign-in after pruning the client's expired attempts."""
+
+    now = time.monotonic()
+    cutoff = now - config.login_window_seconds
+    with _attempts_lock:
+        attempts = _attempts[client_key]
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        attempts.append(now)
+
+
+def clear_login_failures(client_key: str) -> None:
+    """Forget failures after a successful sign-in."""
+
+    with _attempts_lock:
+        _attempts.pop(client_key, None)
 
 
 def reset_login_rate_limits() -> None:
