@@ -146,7 +146,7 @@ gaitguard-ai/
     store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
   frontend/
-    app/page.tsx              landing page (patient links)
+    app/page.tsx              landing page (patient ID lookup)
     app/patient/[id]/page.tsx per-patient screening view
     app/doctor/page.tsx       clinician dashboard
     app/components/           WebcamFeed, PatientScreening, SkeletonReplay,
