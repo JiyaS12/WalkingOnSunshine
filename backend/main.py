@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -25,6 +26,7 @@ from typing_extensions import Annotated
 
 import agent
 import clinician_auth
+import patient_access
 import store
 from processor import GaitMetrics, GaitProcessor, validate_frames
 
@@ -387,17 +389,34 @@ class SessionPayload(BaseModel):
 
 def _check_survey_token(x_survey_token: str | None = Header(default=None)):
     token = os.getenv("SURVEY_INGEST_TOKEN")
-    if token and x_survey_token != token:
+    allow_unauthenticated = os.getenv(
+        "ALLOW_UNAUTHENTICATED_SURVEY_INGEST", ""
+    ).lower() in ("1", "true", "yes")
+    if not token:
+        if allow_unauthenticated:
+            return
+        raise HTTPException(
+            status_code=503, detail="survey ingestion is not configured"
+        )
+    if not x_survey_token or not secrets.compare_digest(x_survey_token, token):
         raise HTTPException(status_code=401, detail="invalid survey token")
 
 
 @app.post("/api/submit-survey", dependencies=[Depends(_check_survey_token)])
-def submit_survey(body: SurveyPayload) -> dict:
+def submit_survey(body: SurveyPayload, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
     try:
+        link = patient_access.create_patient_link(body.patient_id)
         return {
             "status": "stored",
             "patient": store.upsert_survey(body.model_dump(mode="json")),
+            "patient_url": link.url,
+            "patient_access_expires_at": link.expires_at.isoformat(),
         }
+    except patient_access.PatientAccessConfigurationError as exc:
+        raise HTTPException(
+            status_code=503, detail="patient access is not configured"
+        ) from exc
     except (OSError, TypeError) as exc:
         raise HTTPException(
             status_code=500, detail="failed to persist patient record"
@@ -419,11 +438,7 @@ def get_patient(pid: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post(
-    "/api/patients/{pid}/sessions",
-    dependencies=[Depends(require_clinician)],
-)
-def add_patient_session(pid: str, body: SessionPayload) -> dict:
+def _store_patient_session(pid: str, body: SessionPayload) -> dict:
     if body.frames is not None:
         if len(body.frames) > 300:
             raise HTTPException(
@@ -460,6 +475,74 @@ def add_patient_session(pid: str, body: SessionPayload) -> dict:
         raise HTTPException(
             status_code=500, detail="failed to persist patient record"
         ) from exc
+
+
+@app.post(
+    "/api/patients/{pid}/sessions",
+    dependencies=[Depends(require_clinician)],
+)
+def add_patient_session(pid: str, body: SessionPayload) -> dict:
+    return _store_patient_session(pid, body)
+
+
+def _require_patient_access(
+    pid: str, authorization: str | None = Header(default=None)
+) -> None:
+    parts = authorization.split() if authorization else []
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail="invalid or expired patient access",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        patient_access.verify_token(parts[1], pid)
+    except patient_access.PatientAccessConfigurationError as exc:
+        raise HTTPException(
+            status_code=503, detail="patient access is not configured"
+        ) from exc
+    except patient_access.PatientAccessError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="invalid or expired patient access",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+
+def _patient_view(record: dict) -> dict:
+    """Return only fields needed by the patient walking-test experience."""
+
+    return {
+        "patient_id": record["patient_id"],
+        "name": record.get("name"),
+        "gait_sessions": record.get("gait_sessions", []),
+    }
+
+
+@app.get("/api/patient-access/{pid}")
+def get_patient_with_access(
+    pid: str,
+    response: Response,
+    _: None = Depends(_require_patient_access),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return _patient_view(store.get_patient(pid))
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="patient record not found"
+        ) from exc
+
+
+@app.post("/api/patient-access/{pid}/sessions")
+def add_patient_session_with_access(
+    pid: str,
+    body: SessionPayload,
+    response: Response,
+    _: None = Depends(_require_patient_access),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return _patient_view(_store_patient_session(pid, body))
 
 
 _PID_PATH = Path(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")

@@ -65,18 +65,23 @@ The platform consists of two primary operational domains:
 
 ## 3. Data Handshake & API Endpoints
 
-The three endpoints that carry the cross-domain handshake:
+The core endpoints that carry the cross-domain handshake:
 
 - **`POST /api/submit-survey`** — Receives structured JSON from the voice agent
   containing patient symptoms and metadata, linking them securely to the
-  patient record. Gated by an `X-Survey-Token` header whenever the
-  `SURVEY_INGEST_TOKEN` environment variable is set.
+  patient record. Gated by an `X-Survey-Token` header using the required
+  `SURVEY_INGEST_TOKEN` configuration (with an explicit local-only opt-out).
+  Its response includes a
+  complete, expiring `patient_url` for the voice/SMS service.
 - **`POST /api/process-video`** — Accepts multipart video file uploads,
   executes batch MediaPipe pose extraction across frames, and returns computed
   stride and asymmetry telemetry.
 - **`POST /api/generate-summary`** — Compiles patient survey responses and
   movement data into a plain-language clinical report using an optimized local
   heuristic token-caching layer.
+- **`GET /api/patient-access/{pid}`** and **`POST
+  /api/patient-access/{pid}/sessions`** — Read the minimum patient-facing view
+  and save a session using the signed link's bearer credential.
 
 ### Full endpoint reference
 
@@ -91,6 +96,8 @@ The three endpoints that carry the cross-domain handshake:
 | `POST` | `/api/generate-summary` | Plain-language clinical summary (cached). |
 | `GET` | `/api/summary-cache-stats` | Token-cache hit rate and tokens saved. |
 | `POST` | `/api/submit-survey` | Voice-agent intake payload → patient record. |
+| `GET` | `/api/patient-access/{pid}` | Signed-link patient view (bearer token required). |
+| `POST` | `/api/patient-access/{pid}/sessions` | Signed-link session write (bearer token required). |
 | `GET` | `/api/patients` | Cohort list for the doctor's portal (`?q=` search). |
 | `GET` | `/api/patients/{pid}` | One patient: survey + session history. |
 | `POST` | `/api/patients/{pid}/sessions` | Attach a gait session to a patient. |
@@ -105,6 +112,8 @@ are not accepted as clinician credentials. CORS uses the exact origins in
 `/api/generate-summary` and `/api/patients/{pid}/synthesis` call OpenAI
 `gpt-4o-mini` when `OPENAI_API_KEY` is set and fall back to a deterministic
 template otherwise. Summaries are cached in `backend/.cache/summaries.json`.
+The signed patient-link request/response examples and configuration contract are
+defined in [`docs/patient-access-contract.md`](patient-access-contract.md).
 
 ## 4. Implementation status
 
@@ -114,18 +123,16 @@ template otherwise. Summaries are cached in `backend/.cache/summaries.json`.
 | Pre-recorded video upload (`.mp4`/`.mov`) | Implemented |
 | Auto-calibration to user proportions (leg length) | Implemented — 60-frame calibration feeds `leg_length_m` |
 | Lower-extremity biomechanics + fall-risk score | Implemented — `GaitProcessor` |
-| Survey ingestion and patient records | Implemented — `/api/submit-survey`, `backend/store.py` |
+| Survey ingestion, signed patient links, and patient-scoped APIs | Implemented — `/api/submit-survey`, `/api/patient-access/{pid}` |
 | Doctor's portal and unified synthesis report | Implemented — `/doctor` |
 | Clinician sign-in/session boundary | Implemented — signed HttpOnly session; server-only credentials |
-| Patient client at `/patient/[id]` | Implemented — per-patient screening page backed by `store.get_patient`. |
+| Patient client at `/patient/[id]` | Base flow implemented; signed-link frontend integration is tracked in #23. |
 | Automated voice agent (outbound calls, intake) | **Not implemented** — no telephony integration in the repository. |
 | SMS with personalized deep link | **Not implemented** — depends on both the voice agent and the `/patient/[id]` route. |
 | Live voice guidance during the walking test | **Not implemented** |
 
-Shipping the voice-agent domain requires a telephony provider (call + SMS
-webhooks), a dynamic `/patient/[id]` route that resolves the id server-side,
-and a token or signed-link scheme so the texted URL is usable by the patient
-without exposing patient data to anyone holding a guessable id.
+Shipping the remaining voice-agent domain requires a telephony provider (call +
+SMS webhooks) and frontend consumption of the implemented signed-link contract.
 
 ## Code map
 
@@ -133,6 +140,7 @@ without exposing patient data to anyone holding a guessable id.
 gaitguard-ai/
   backend/
     main.py          FastAPI app and route definitions
+    patient_access.py signed patient-token and link generation/verification
     processor.py     GaitProcessor: frames -> GaitMetrics
     video.py         OpenCV + MediaPipe extraction for uploaded video
     store.py         patient records: surveys, sessions, synthesis
