@@ -11,7 +11,7 @@ from .main_backend import BackendError
 from .models import ConditionCategory, PatientRecord
 from .patient_repository import InMemoryPatientRepository
 from .survey_engine import SafeSurveyEngine
-from .telephony.call_session import _spoken, link_reply_intent
+from .telephony.call_session import _TRAILING_FILLER, _spoken, link_reply_intent
 
 Speaker = Callable[[str], Awaitable[None]]
 
@@ -56,6 +56,9 @@ class IntegratedSession:
 
     def discard_pending(self) -> None:
         self._buffer.clear()
+
+    def trailing_off(self) -> bool:
+        return bool(_TRAILING_FILLER.search(self.pending_transcript.lower()))
 
     async def begin(self) -> None:
         self._deadline = asyncio.create_task(self._expire())

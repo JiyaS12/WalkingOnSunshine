@@ -56,6 +56,7 @@ def client(monkeypatch):
     monkeypatch.setattr(phone_app, "synthesize_mulaw_async", fake_tts)
     monkeypatch.setattr(phone_app, "DeepgramTranscriber", ScriptedTranscriber)
     monkeypatch.setattr(phone_app, "_signature_ok", lambda *args, **kwargs: True)
+    monkeypatch.setattr(phone_app, "GREETING_DELAY_SECONDS", 0.0)
     ScriptedTranscriber.queue = []
     client = TestClient(phone_app.create_app(load_settings(ENV), auth=OperatorAuth(TOKEN)))
     client.headers["Authorization"] = f"Bearer {TOKEN}"
@@ -583,6 +584,73 @@ def test_a_late_mark_for_a_cleared_prompt_does_not_end_the_next_one(client):
     assert any(message["event"] == "clear" for message in websocket.sent)
 
 
+def _hesitation_bridge(client, monkeypatch, grace: float) -> tuple[phone_app.MediaStreamBridge, list[str]]:
+    monkeypatch.setattr(phone_app, "HESITATION_GRACE_SECONDS", grace)
+    bridge = phone_app.MediaStreamBridge(
+        StubWebSocket([]),
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        client.app.state.stream_tickets,
+        transcriber_factory=ScriptedTranscriber,
+    )
+    bridge.stream_sid = "MZ1"
+    bridge.transcriber = ScriptedTranscriber(api_key="x")
+    engine = phone_app.SafeSurveyEngine(phone_app.InMemoryPatientRepository(), "RGN-0417")
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    bridge.session = phone_app.PhoneCallSession(engine, speak, session_id="sess-hesitate")
+    engine.start()
+    bridge._greeted.set()
+    return bridge, spoken
+
+
+def test_a_caller_who_trails_off_gets_a_moment_to_finish(client, monkeypatch):
+    """"I'd say, like..." then "moderate" is one answer, not a miss and a retry."""
+
+    bridge, spoken = _hesitation_bridge(client, monkeypatch, grace=1.0)
+
+    async def scenario() -> None:
+        pump = asyncio.create_task(bridge._pump_speech_events())
+        ScriptedTranscriber.queue.extend(
+            [SpeechEvent("transcript", "I'd say, like,", True), SpeechEvent("utterance_end")]
+        )
+        await asyncio.sleep(0.2)
+        assert spoken == []
+        assert bridge.session.pending_transcript == "I'd say, like,"
+        ScriptedTranscriber.queue.extend(
+            [SpeechEvent("transcript", "moderate.", True), SpeechEvent("utterance_end")]
+        )
+        await asyncio.sleep(0.2)
+        pump.cancel()
+        bridge._cancel_silence_timer()
+
+    asyncio.run(scenario())
+    assert bridge.session.engine.session.answers[0].normalized_value == "moderate"
+    assert bridge.session.pending_transcript == ""
+
+
+def test_a_trailing_utterance_is_still_answered_after_the_grace_period(client, monkeypatch):
+    bridge, spoken = _hesitation_bridge(client, monkeypatch, grace=0.2)
+
+    async def scenario() -> None:
+        pump = asyncio.create_task(bridge._pump_speech_events())
+        ScriptedTranscriber.queue.extend(
+            [SpeechEvent("transcript", "well, um", True), SpeechEvent("utterance_end")]
+        )
+        await asyncio.sleep(0.6)
+        pump.cancel()
+        bridge._cancel_silence_timer()
+
+    asyncio.run(scenario())
+    assert bridge.session.pending_transcript == ""
+    assert len(spoken) == 1
+    assert bridge.session.engine.session.answers == []
+
+
 def test_a_call_nobody_answers_ends_even_without_a_status_callback(monkeypatch):
     async def fake_tts(text: str, api_key: str, model: str) -> bytes:
         return b"\xff" * 320
@@ -641,3 +709,11 @@ def test_twilio_webhooks_fail_closed_without_signature_checking(monkeypatch):
         status = client.post("/twilio/status", data={"CallSid": "CA1", "CallStatus": "busy"})
     assert voice.status_code == 403
     assert status.status_code == 403
+
+
+def test_an_oversized_websocket_message_closes_the_stream(client):
+    with client.websocket_connect("/twilio/media") as websocket:
+        websocket.send_text(json.dumps({"event": "media", "media": {"payload": "A" * 100_000}}))
+        with pytest.raises(Exception):
+            websocket.receive_text()
+    assert client.app.state.persistence.calls == {}

@@ -7,7 +7,7 @@ import hmac
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -24,6 +24,7 @@ from app.main_backend import BackendError, MainBackend
 from app.operator_auth import OperatorAuth
 from app.phone_receipts import ReceiptStore
 from app.telephony.config import load_settings
+from app.telephony.deepgram_stt import SpeechEvent
 from app.telephony.integrated_provider import FakePhoneProvider, ProviderUnknown, TwilioProvider
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -632,4 +633,53 @@ def test_backend_rejects_redirect_and_maps_timeout_without_retry():
         with pytest.raises(BackendError):
             await backend.patient("patient1")
         assert len(requests) == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("continued", [True, False])
+def test_integrated_media_preserves_hesitations_until_continuation_or_timeout(harness, continued):
+    async def scenario():
+        session = await harness.session()
+        for _ in range(7):
+            await say(session, "unknown")
+            await say(session, "yes")
+        assert session.stage == "condition"
+        harness.spoken.clear()
+
+        class Transcriber(phone_app.DeepgramTranscriber):
+            async def events(self):
+                yield SpeechEvent("transcript", "I'd say, like,", True)
+                yield SpeechEvent("utterance_end")
+                assert session.pending_transcript == "I'd say, like,"
+                assert harness.spoken == []
+                assert session.engine.session.answers == []
+                if continued:
+                    yield SpeechEvent("transcript", "moderate.", True)
+                    yield SpeechEvent("utterance_end")
+
+        bridge = phone_app.MediaStreamBridge(
+            AsyncMock(spec=phone_app.WebSocket), load_settings(ENV),
+            phone_app.InMemoryPatientRepository(), phone_app.InMemoryPersistence(),
+            phone_app.StreamTickets(), integrated_service=harness.service,
+        )
+        bridge.session = session
+        bridge.transcriber = Transcriber(api_key="offline")
+        bridge._greeted.set()
+        try:
+            await bridge._pump_speech_events()
+            if not continued:
+                bridge._cancel_silence_timer()
+                await bridge._silence_watchdog(0)
+            assert session.pending_transcript == ""
+            assert len(harness.spoken) == 1
+            if continued:
+                answer = session.engine.session.answers[0]
+                assert answer.normalized_value == "moderate"
+                assert answer.confirmed
+            else:
+                assert session.engine.session.answers == []
+        finally:
+            bridge._cancel_silence_timer()
+            await session.disconnect()
+
     asyncio.run(scenario())

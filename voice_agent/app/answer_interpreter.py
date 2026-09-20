@@ -6,7 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Iterable, Protocol
 
 from .conversation_policy import INTERPRETER_INSTRUCTIONS
 from .conversation_bridge import validated_bridge
@@ -18,6 +18,53 @@ INTENTS = (
 )
 MAX_TRANSCRIPT_CHARS = 12000
 SEVERITY_ORDER = ("none", "mild", "moderate", "severe", "extreme")
+
+# Everyday ways of naming a point on the severity scale. Each is a whole
+# answer once lead-ins ("I'd say", "like") and the question's own noun ("hip
+# pain", "difficulty") are set aside. Words of doubt ("maybe", "I think") are
+# not lead-ins: they leave the reply to the model and a confirmation.
+_LEAD_INS = re.compile(
+    r"\b(?:i'?d say|i would say|i mean|i'?d go with|it'?s been|it'?s|it was|"
+    r"i'?ve had|i had|i have|i experienced|i'?ve experienced|there was|there'?s been|"
+    r"about|around|like|um+|uh+|honestly|really|just|actually|definitely|"
+    r"so|well|yeah|yes|oh|the|this|past|week|for me|on stairs|with that)\b"
+)
+_SCALE_NOUN = re.compile(
+    r"\b(?:hip pain|pain|difficulty|difficulties|discomfort|trouble|problems?|issues?|"
+    r"soreness|aching|ache|painful|amount|level)\b"
+)
+_PARAPHRASES = {
+    "none": {
+        "no x", "no x at all", "not any x", "none at all", "none whatsoever", "not at all",
+        "nothing", "nothing at all", "zero x", "zero", "no x whatsoever", "none x",
+        "not any", "didn't have any x", "didn't have any", "haven't had any x",
+    },
+    "mild": {
+        "a little", "a little x", "a little bit", "a little bit x", "a bit", "a bit x",
+        "slight", "slight x", "slightly", "minor", "minor x", "not much", "not much x",
+        "not too much", "not too much x", "very little", "very little x", "barely any",
+        "barely any x", "hardly any", "hardly any x", "a tiny bit", "mildly", "small x",
+        "only a little", "only a little x", "not a lot", "not a lot x",
+    },
+    "moderate": {
+        "moderately", "medium", "medium x", "moderate x", "moderate amount x",
+        "somewhat", "some", "some x", "a fair amount", "a fair amount x", "in the middle",
+        "middle of the road", "average", "so so", "a fair bit", "a fair bit x",
+    },
+    "severe": {
+        "a lot", "a lot x", "severely", "bad", "bad x", "very bad", "very bad x", "pretty bad",
+        "pretty bad x", "really bad", "really bad x", "quite a lot", "quite a lot x",
+        "very painful", "a great deal", "a great deal x", "significant x", "a whole lot",
+        "a whole lot x", "serious x", "severe x",
+    },
+    "extreme": {
+        "extremely", "extremely x", "extreme x", "unbearable", "unbearable x", "excruciating", "excruciating x",
+        "the worst", "worst x", "terrible", "terrible x", "horrible", "horrible x", "awful",
+        "awful x", "agony", "impossible", "couldn't do it", "couldn't do it at all", "can't do it",
+        "can't do it at all", "i couldn't do it", "i couldn't do it at all", "i can't do it",
+        "i can't do it at all", "as bad as it gets",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -60,6 +107,30 @@ def control_intent(transcript: str) -> str | None:
     if clauses and clauses[-1] in commands["stop"]:
         return "stop"
     return next((intent for intent, phrases in commands.items() if cleaned in phrases), None)
+
+
+def paraphrased_answer(transcript: str, options: Iterable[str]) -> str | None:
+    """Read a plain-language severity ("no difficulty", "a lot of pain") as its label.
+
+    Only the fixed table above matches, and only when it accounts for the
+    whole utterance; "no pain but a lot of stiffness" or "a lot, I think
+    it's getting worse" fall through to the model.
+    """
+
+    cleaned = _SCALE_NOUN.sub("x", clean_utterance(transcript))
+    cleaned = " ".join(_LEAD_INS.sub(" ", cleaned).split())
+    for _ in range(2):
+        cleaned = re.sub(r"\b(?:an?|of|of the|x) x\b", "x", cleaned)
+    cleaned = re.sub(r"^an? (?=(?:moderate|severe|extreme|slight|minor|small|medium) )", "", cleaned)
+    if not cleaned:
+        return None
+    label = normalize_answer(cleaned, options)
+    if label:
+        return label
+    for label, phrases in _PARAPHRASES.items():
+        if cleaned in phrases and label in options:
+            return label
+    return None
 
 
 def is_unscaled_number(transcript: str) -> bool:
@@ -136,8 +207,18 @@ class ExactAnswerInterpreter:
         intent = control_intent(transcript)
         if intent:
             return Interpretation(intent)
-        value = normalize_answer(clean_utterance(transcript), question.answer_options)
-        return Interpretation("select", value, transcript) if value else Interpretation()
+        cleaned = clean_utterance(transcript)
+        value = normalize_answer(cleaned, question.answer_options)
+        if value:
+            return Interpretation("select", value, transcript)
+        if pending_value is None:
+            # A plain phrase for a point on the scale is the patient's own
+            # choice; while a proposal is pending, "not much" or "a bit less"
+            # are about that proposal and are read there instead.
+            value = paraphrased_answer(transcript, question.answer_options)
+            if value:
+                return Interpretation("select", value, transcript)
+        return Interpretation()
 
 
 class OpenAIAnswerInterpreter:

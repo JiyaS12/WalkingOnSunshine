@@ -55,14 +55,20 @@ VOICE_PATH = "/twilio/voice"
 STATUS_PATH = "/twilio/status"
 MEDIA_PATH = "/twilio/media"
 SILENCE_TIMEOUT_SECONDS = 10.0
+# Extra time a caller gets to finish a thought that ended on a filler word.
+HESITATION_GRACE_SECONDS = 4.0
 FRAME_SECONDS = 0.02
 PLAYBACK_LEAD_SECONDS = 2.0
 FIRST_CHUNK_CHARS = 90
 SPEECH_CHUNK_CHARS = 200
 LINE_OPEN_TIMEOUT_SECONDS = 3.0
+GREETING_DELAY_SECONDS = 1.5
 PARAGRAPH_PAUSE_SECONDS = 0.8
 ECHO_GRACE_SECONDS = 0.5
 MULAW_SILENCE = b"\xff" * 160
+# Twilio media frames are 20ms of base64 mu-law plus framing; nothing legitimate
+# comes close to this.
+MAX_MESSAGE_CHARS = 16_384
 CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 # Twilio rings for at most 60s by default; a call still "dialing" well after
 # that was never answered and no status callback is coming to say so.
@@ -124,7 +130,11 @@ class MediaStreamBridge:
         await self.websocket.accept()
         try:
             while not self._closed:
-                message = json.loads(await self.websocket.receive_text())
+                raw = await self.websocket.receive_text()
+                if len(raw) > MAX_MESSAGE_CHARS:
+                    logger.warning("Stream %s sent an oversized message; closing", self.stream_sid)
+                    break
+                message = json.loads(raw)
                 event = message.get("event")
                 if event == "start":
                     await self._on_start(message)
@@ -199,6 +209,7 @@ class MediaStreamBridge:
             self.session = PhoneCallSession(
                 engine, speak=self._speak, session_id=session_id,
                 persistence=self.persistence, to_number=to_number, sms_sender=self.sms_sender,
+                speech_lead_seconds=PLAYBACK_LEAD_SECONDS,
             )
         self.transcriber = self.transcriber_factory(
             api_key=self.settings.deepgram_api_key or "",
@@ -270,6 +281,8 @@ class MediaStreamBridge:
             await asyncio.wait_for(self._line_open.wait(), LINE_OPEN_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             logger.warning("Stream %s heard no inbound audio; greeting anyway", self.stream_sid)
+        # Let the caller get the handset to their ear before we start.
+        await asyncio.sleep(GREETING_DELAY_SECONDS)
         try:
             await self._run_turn(self.session.begin())
         finally:
@@ -313,6 +326,10 @@ class MediaStreamBridge:
                 self._cancel_silence_timer()
                 self.session.add_transcript(event.text)
             elif event.kind == "utterance_end":
+                if self.session.trailing_off():
+                    # Caller is still thinking; the watchdog flushes if not.
+                    self._start_silence_timer(HESITATION_GRACE_SECONDS)
+                    continue
                 await self._run_turn(self.session.flush_utterance())
 
     async def _speak(self, text: str) -> None:
@@ -420,25 +437,28 @@ class MediaStreamBridge:
         if not self.bot_speaking:
             await self._close()
 
-    def _start_silence_timer(self) -> None:
+    def _start_silence_timer(self, timeout: float = SILENCE_TIMEOUT_SECONDS) -> None:
         self._cancel_silence_timer()
         if self.session is None or self.session.finished:
             return
-        self._silence_task = asyncio.create_task(self._silence_watchdog())
+        self._silence_task = asyncio.create_task(self._silence_watchdog(timeout))
 
     def _cancel_silence_timer(self) -> None:
         task, self._silence_task = self._silence_task, None
         if task is not None:
             task.cancel()
 
-    async def _silence_watchdog(self) -> None:
+    async def _silence_watchdog(self, timeout: float) -> None:
         try:
-            await asyncio.sleep(SILENCE_TIMEOUT_SECONDS)
+            await asyncio.sleep(timeout)
         except asyncio.CancelledError:
             return
         if self.session is None:
             return
-        await self._run_turn(self.session.handle_silence())
+        if self.session.pending_transcript:
+            await self._run_turn(self.session.flush_utterance())
+        else:
+            await self._run_turn(self.session.handle_silence())
         # A paused caller is left in peace rather than reprompted, so no mark
         # will come back to re-arm the timer; keep counting the quiet ourselves.
         if not self.bot_speaking and not self._closed:
