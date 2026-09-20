@@ -369,7 +369,7 @@ def add_session(pid: str, session: dict, *, require_active_correlation: bool = F
         if pid not in patients:
             raise KeyError(f"unknown patient: {pid}")
         old_record = patients[pid]
-        if require_active_correlation and old_record.get("active_call_id") and not session.get("call_id"):
+        if require_active_correlation and walk_linked_call(old_record) and not session.get("call_id"):
             raise Conflict("active calls require call_id and attempt_id on session saves")
         idempotency_key = session.get("idempotency_key")
         for item in old_record["gait_sessions"]:
@@ -415,6 +415,26 @@ def _find_call(record: dict, call_id: str) -> dict:
 
 def get_call(pid: str, call_id: str) -> dict:
     return _find_call(get_patient(pid), call_id)
+
+
+_ENDED_CALL = {"completed", "failed", "stopped"}
+
+
+def walk_linked_call(record: dict) -> dict | None:
+    """The active call a walk must correlate with, or None when the patient walks standalone.
+
+    A call that ended without a stored survey can never reach walking, so it
+    must not keep gating the patient page.
+    """
+    call_id = record.get("active_call_id")
+    if not call_id:
+        return None
+    call = _find_call(record, call_id)
+    if call["survey_status"] != "stored" and (
+        call["survey_status"] in {"stopped", "needs_review"} or call["call_status"] in _ENDED_CALL
+    ):
+        return None
+    return call
 
 
 def _touch(call: dict) -> None:

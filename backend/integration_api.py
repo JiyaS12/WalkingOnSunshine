@@ -192,13 +192,8 @@ def create_router(clinician_auth: Callable, patient_auth: Callable) -> APIRouter
 
     @router.get("/api/patient-access/{pid}/walking", dependencies=patient)
     def patient_walking(pid: str) -> dict:
-        record = store.get_patient(pid)
-        call_id = record.get("active_call_id")
-        return {
-            "walking": store.walking_view(store.get_call(pid, call_id))
-            if call_id
-            else None
-        }
+        call = store.walk_linked_call(store.get_patient(pid))
+        return {"walking": store.walking_view(call) if call else None}
 
     @router.post("/api/patient-access/{pid}/walking/events", dependencies=patient)
     def patient_event(pid: str, body: WalkingEvent) -> dict:
