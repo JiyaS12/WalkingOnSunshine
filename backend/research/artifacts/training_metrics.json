@@ -1,0 +1,92 @@
+{
+  "baseline_predictions": [
+    -8.074349270001139e-17,
+    -6.055761952500853e-17,
+    2.0185873175002847e-17,
+    -2.0185873175002847e-17,
+    6.055761952500853e-17,
+    6.055761952500853e-17,
+    4.0371746350005693e-17,
+    8.074349270001139e-17,
+    8.074349270001139e-17,
+    0.0,
+    -6.055761952500853e-17,
+    -1.6148698540002277e-16
+  ],
+  "baseline_rmse": 2.7308140356457207,
+  "event_detection": {
+    "cadence_mae_steps_per_min": 9.013719779035661,
+    "participant_count": 9,
+    "status": "failed",
+    "step_time_mae_s": 0.04650162098437963
+  },
+  "final_alpha": 31.622776601683793,
+  "heldout_targets": [
+    -0.3283856525716396,
+    -0.03280612558221429,
+    0.7781221487955466,
+    -1.864966548944833,
+    -0.6039603644595902,
+    -0.6039603644595902,
+    -0.7042104691029246,
+    -1.629348085094443,
+    -0.8504348552886043,
+    2.1614282838946854,
+    8.625555227391079,
+    -1.272877614062456
+  ],
+  "loocv_rmse": 3.191813545943568,
+  "loocv_spearman": 0.0875658085422933,
+  "out_of_fold_predictions": [
+    -0.07679757336225175,
+    -0.045867569816921354,
+    0.014037084335421739,
+    0.26818773206801083,
+    -2.2256265258186287,
+    -0.5231574625160417,
+    5.743331383735473,
+    -0.14367190525509457,
+    -0.2709665150807139,
+    0.003744153777624648,
+    0.6675318861279672,
+    0.24980568968488126
+  ],
+  "outer_selected_alphas": [
+    17.78279410038923,
+    17.78279410038923,
+    56.23413251903491,
+    3.1622776601683795,
+    0.001,
+    31.622776601683793,
+    0.056234132519034905,
+    100.0,
+    31.622776601683793,
+    1000.0,
+    10.0,
+    17.78279410038923
+  ],
+  "participant_count": 12,
+  "participant_ids": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "12",
+    "13",
+    "14"
+  ],
+  "promoted": false,
+  "promotion_failure_reasons": [
+    "LOOCV Spearman is below 0.50 or undefined",
+    "LOOCV RMSE did not beat the intercept-only baseline",
+    "Xsens timing/cadence agreement did not meet the promotion gate"
+  ],
+  "reference_comparison": "Participant median step-time/cadence proxies; not synchronized event annotations",
+  "scorable_window_count": 26,
+  "validation_method": "Nested participant LOOCV; clinical scaler/PCA and feature scaler fit within every fold"
+}

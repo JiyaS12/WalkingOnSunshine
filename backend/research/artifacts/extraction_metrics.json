@@ -1,0 +1,284 @@
+{
+  "diagnostics": {
+    "Videos/OAW01-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "left and right foot events were implausibly simultaneous": 4,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 1
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW01-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 2,
+        "left and right foot events were implausibly simultaneous": 3,
+        "trial must contain at least 6 seconds": 1
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW02-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "more than 10% of frames required landmark repair": 3,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 2
+    },
+    "Videos/OAW02-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 1,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 3
+      },
+      "scorable_windows": 2
+    },
+    "Videos/OAW03-bottom.mp4": {
+      "evaluated_windows": 8,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 2,
+        "more than 10% of frames required landmark repair": 3,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW03-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 4,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW04-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 2,
+        "left and right foot events were implausibly simultaneous": 1,
+        "more than 10% of frames required landmark repair": 2,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW04-top.mp4": {
+      "evaluated_windows": 6,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 2,
+        "trial must contain at least 6 seconds": 3
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW05-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "left and right foot events were implausibly simultaneous": 5,
+        "more than 10% of frames required landmark repair": 1
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW05-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 6,
+        "more than 10% of frames required landmark repair": 1
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW06-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "more than 10% of frames required landmark repair": 2,
+        "trial must contain at least 6 seconds": 3
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW06-top.mp4": {
+      "evaluated_windows": 8,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "left and right foot events were implausibly simultaneous": 5,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW07-bottom.mp4": {
+      "evaluated_windows": 5,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "left and right foot events were implausibly simultaneous": 2,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW07-top.mp4": {
+      "evaluated_windows": 5,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 2,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW08-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 1,
+        "more than 10% of frames required landmark repair": 2,
+        "trial must contain at least 6 seconds": 3
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW08-top.mp4": {
+      "evaluated_windows": 6,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 2,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW09-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "more than 10% of frames required landmark repair": 5,
+        "trial must contain at least 6 seconds": 1
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW09-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 1,
+        "more than 10% of frames required landmark repair": 4,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW10-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 2,
+        "more than 10% of frames required landmark repair": 3,
+        "trial must contain at least 6 seconds": 1
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW10-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "fewer than two complete strides were detected per side": 1,
+        "left and right foot events were implausibly simultaneous": 1,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 2
+    },
+    "Videos/OAW11-bottom.mp4": {
+      "evaluated_windows": 8,
+      "rejections": {
+        "detected steps did not alternate consistently": 1,
+        "fewer than two complete strides were detected per side": 1,
+        "left and right foot events were implausibly simultaneous": 2,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 3
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW11-top.mp4": {
+      "evaluated_windows": 8,
+      "rejections": {
+        "fewer than two complete strides were detected per side": 1,
+        "left and right foot events were implausibly simultaneous": 2,
+        "more than 10% of frames required landmark repair": 2,
+        "trial must contain at least 6 seconds": 3
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW12-bottom.mp4": {
+      "evaluated_windows": 6,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 4,
+        "more than 10% of frames required landmark repair": 1
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW12-top.mp4": {
+      "evaluated_windows": 5,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 3
+      },
+      "scorable_windows": 2
+    },
+    "Videos/OAW13-bottom.mp4": {
+      "evaluated_windows": 6,
+      "rejections": {
+        "fewer than two complete strides were detected per side": 1,
+        "left and right foot events were implausibly simultaneous": 3,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 0
+    },
+    "Videos/OAW13-top.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "left and right foot events were implausibly simultaneous": 3,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 2
+      },
+      "scorable_windows": 1
+    },
+    "Videos/OAW14-bottom.mp4": {
+      "evaluated_windows": 7,
+      "rejections": {
+        "detected steps did not alternate consistently": 3,
+        "more than 10% of frames required landmark repair": 1
+      },
+      "scorable_windows": 3
+    },
+    "Videos/OAW14-top.mp4": {
+      "evaluated_windows": 8,
+      "rejections": {
+        "detected steps did not alternate consistently": 2,
+        "more than 10% of frames required landmark repair": 1,
+        "trial must contain at least 6 seconds": 1
+      },
+      "scorable_windows": 4
+    }
+  },
+  "extractor_sha256": "b87b79c3995e5c8746159ecb575424e55f7e165c6afd9ddc134571c9a2d833f2",
+  "processed_videos": [
+    "Videos/OAW01-bottom.mp4",
+    "Videos/OAW01-top.mp4",
+    "Videos/OAW02-bottom.mp4",
+    "Videos/OAW02-top.mp4",
+    "Videos/OAW03-bottom.mp4",
+    "Videos/OAW03-top.mp4",
+    "Videos/OAW04-bottom.mp4",
+    "Videos/OAW04-top.mp4",
+    "Videos/OAW05-bottom.mp4",
+    "Videos/OAW05-top.mp4",
+    "Videos/OAW06-bottom.mp4",
+    "Videos/OAW06-top.mp4",
+    "Videos/OAW07-bottom.mp4",
+    "Videos/OAW07-top.mp4",
+    "Videos/OAW08-bottom.mp4",
+    "Videos/OAW08-top.mp4",
+    "Videos/OAW09-bottom.mp4",
+    "Videos/OAW09-top.mp4",
+    "Videos/OAW10-bottom.mp4",
+    "Videos/OAW10-top.mp4",
+    "Videos/OAW11-bottom.mp4",
+    "Videos/OAW11-top.mp4",
+    "Videos/OAW12-bottom.mp4",
+    "Videos/OAW12-top.mp4",
+    "Videos/OAW13-bottom.mp4",
+    "Videos/OAW13-top.mp4",
+    "Videos/OAW14-bottom.mp4",
+    "Videos/OAW14-top.mp4"
+  ]
+}

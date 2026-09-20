@@ -1,0 +1,143 @@
+{
+  "coefficients": [
+    0.3137856226789523,
+    0.1296858239287908,
+    0.11398216315851374,
+    0.06094159646494336,
+    0.0947889466475189,
+    -0.21815618637949138
+  ],
+  "dataset": {
+    "clinical_file_url": "https://ndownloader.figshare.com/files/35454230",
+    "doi": "10.6084/m9.figshare.c.5515953.v1",
+    "license": "CC0",
+    "name": "Toronto Older Adults Gait Archive",
+    "videos_file_url": "https://ndownloader.figshare.com/files/35454242",
+    "xsens_file_url": "https://ndownloader.figshare.com/files/35454227"
+  },
+  "feature_mean": [
+    0.5712971559092248,
+    18.586261901421388,
+    14.666423361241703,
+    31.707431774294218,
+    19.723258112489194,
+    0.20378232107699382
+  ],
+  "feature_names": [
+    "median_step_time_s",
+    "step_time_cv_pct",
+    "stance_time_asymmetry_pct",
+    "mean_knee_rom_deg",
+    "knee_rom_asymmetry_pct",
+    "normalized_foot_clearance"
+  ],
+  "feature_scale": [
+    0.05178039122092183,
+    7.571881525656728,
+    6.692651917930148,
+    3.8873661745601082,
+    12.633013693523043,
+    0.037354546062721414
+  ],
+  "intercept": -3.8597702877704733e-16,
+  "model_version": "toronto-ridge-pc1-v1",
+  "participant_count": 12,
+  "percentile_x": [
+    -2.2256265258186287,
+    -0.5231574625160417,
+    -0.2709665150807139,
+    -0.14367190525509457,
+    -0.07679757336225175,
+    -0.045867569816921354,
+    0.003744153777624648,
+    0.014037084335421739,
+    0.24980568968488126,
+    0.26818773206801083,
+    0.6675318861279672,
+    5.743331383735473
+  ],
+  "percentile_y": [
+    0.0,
+    9.090909090909092,
+    18.181818181818183,
+    27.272727272727273,
+    36.36363636363637,
+    45.45454545454545,
+    54.54545454545455,
+    63.63636363636363,
+    72.72727272727273,
+    81.81818181818181,
+    90.9090909090909,
+    100.0
+  ],
+  "promoted": false,
+  "provenance": {
+    "clinical_file_sha256": "5b9d1e4541c045cc25c452eb719e7438f38408d83e1600a582648a62533c6e24",
+    "extractor_sha256": "b87b79c3995e5c8746159ecb575424e55f7e165c6afd9ddc134571c9a2d833f2",
+    "feature_csv_sha256": "ebd7813567b42343ca9e5cd0b66f768799f2f769a077ca95f4e87bc00bd22310",
+    "runtime_source_sha256": "efd1bdaf9928e3bd445a9bd6d72559834855cafa56889bd23f0e8af88f746cb9",
+    "training_source_sha256": "147f3f311324dffc0b7c7ccacdb352db998d6ed7b3fe78aec90cbc22aefd223f"
+  },
+  "ridge_alpha": 31.622776601683793,
+  "schema_version": 1,
+  "target": {
+    "clinical_columns": [
+      "tug",
+      "negative_poma_gait",
+      "negative_poma_balance",
+      "negative_berg"
+    ],
+    "clinical_mean": [
+      12.008333333333333,
+      -11.666666666666666,
+      -12.916666666666666,
+      -45.333333333333336
+    ],
+    "clinical_scale": [
+      4.289547049385155,
+      0.6236095644623235,
+      1.5523280008497633,
+      5.390320542932076
+    ],
+    "pca_center": [
+      9.147052328536039e-17,
+      -9.52941429469926e-16,
+      -3.4231876592608995e-16,
+      4.625929269271486e-16
+    ],
+    "pca_component": [
+      0.5285183629942761,
+      0.5158060284013042,
+      0.5170573678453798,
+      0.43274029093618216
+    ],
+    "pca_explained_variance_ratio": 0.7418233218227344
+  },
+  "training_feature_max": [
+    0.6666666666666666,
+    33.152583333333325,
+    30.222010026259255,
+    39.92965026567627,
+    46.69529076490176,
+    0.2762859648557448
+  ],
+  "training_feature_min": [
+    0.5,
+    8.236666666666665,
+    6.896551724137934,
+    21.742849279305307,
+    2.4806092630298298,
+    0.1308771478845449
+  ],
+  "validation": {
+    "baseline_rmse": 2.7308140356457207,
+    "event_detection": {
+      "cadence_mae_steps_per_min": 9.013719779035661,
+      "participant_count": 9,
+      "status": "failed",
+      "step_time_mae_s": 0.04650162098437963
+    },
+    "loocv_rmse": 3.191813545943568,
+    "loocv_spearman": 0.0875658085422933
+  }
+}
