@@ -45,8 +45,8 @@ gaitguard-ai/
     store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
   frontend/
-    app/page.tsx              landing page with patient links
-    app/patient/[id]/page.tsx per-patient screening (webcam / upload)
+    app/page.tsx              public secure-link instructions
+    app/patient/[id]/page.tsx signed per-patient screening (webcam / upload)
     app/doctor/page.tsx       clinician dashboard (live-syncs)
     app/components/PatientScreening.tsx  patient screening view
   data/
@@ -113,8 +113,9 @@ Optional environment variables:
 - `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` — local-only escape hatch. Set to
   `1`/`true`/`yes` to run survey ingestion without a token. Never enable this
   in a shared or production environment.
-- `ALLOW_DEMO_PATIENTS` — set to `1`/`true`/`yes` to keep auto-created demo
-  patient profiles enabled while survey ingestion is token-protected.
+- `ALLOW_DEMO_PATIENTS` — local-only support for the clinician-authenticated
+  demo-record endpoint. It does not make `/patient/[id]` public or bypass a
+  signed patient link.
 
 See [the patient access contract](docs/patient-access-contract.md) for stable
 request/response examples used by the patient UI and voice/SMS integrations.
@@ -134,18 +135,31 @@ clinician credentials or access tokens to the frontend environment. For cookie
 delivery, deploy the frontend and API on the same site and list the frontend's
 exact origin in `CORS_ALLOWED_ORIGINS`.
 
-## Demo flow
+## Local-only signed-link demo
 
-1. `cd backend && .venv/bin/uvicorn main:app --port 8000`
-2. `cd frontend && npm run dev`
-3. Open http://localhost:3000 — pick a patient link, type a patient ID, or
-   click **Load Demo Patient RGN-0417**; any unknown ID auto-creates a demo
-   profile (pain 3/10, no prior falls) so you can test right away.
-4. On `/patient/<id>`: do a **Live Camera** walk or **Upload Video** —
-   metrics update, sessions save to the patient's record.
-5. Open `/doctor`, sign in with the backend-configured clinician credentials,
-   and select the patient. The portal live-syncs every 5 s and provides the
-   Unified Clinical Synthesis Report (survey + gait trend + skeleton replay).
+The public home page never lists patients, accepts arbitrary IDs, or creates
+demo records. A local demo uses the same signed handshake as production:
+
+1. In the backend's local `.env`, set a random
+   `PATIENT_LINK_SIGNING_SECRET`, set `SURVEY_INGEST_TOKEN=local-demo-only`, and
+   leave `PATIENT_APP_BASE_URL=http://localhost:3000`.
+2. Start the backend and frontend development servers.
+3. Submit a local intake and copy the returned `patient_url` (treat it as a
+   credential and do not paste it into shared logs):
+
+   ```bash
+   curl -sS http://localhost:8000/api/submit-survey \
+     -H 'Content-Type: application/json' \
+     -H 'X-Survey-Token: local-demo-only' \
+     -d '{"patient_id":"RGN-0417","patient_name":"Local Demo Patient","pain_scale":3,"fall_history":{"falls_last_6_months":0,"injured":false},"dizziness":false,"primary_complaints":["local demo"]}'
+   ```
+
+4. Open the complete returned URL. A bare `/patient/RGN-0417` path is expected
+   to fail. Complete a **Live Camera** or **Upload Video** walk; only a detected
+   walk can be saved.
+5. Open `/doctor` directly, sign in with the backend-configured clinician
+   credentials, and confirm the saved session appears in that patient's
+   timeline.
 
 ## Verify a clean checkout
 

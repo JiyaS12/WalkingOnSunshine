@@ -16,11 +16,17 @@ Open [http://localhost:3000](http://localhost:3000) in a browser. Copy
 `.env.example` to `.env.local` only when the API is not available at its
 default `http://localhost:8000` URL.
 
+The home page is informational and does not expose patient lookup or demo
+creation. Patient screening requires the complete expiring URL returned by
+`POST /api/submit-survey`; a bare `/patient/[id]` route cannot load a record.
+See the root README for the local-only signed-link demo procedure.
+
 ## Verification
 
 ```bash
 npm ci
 npm audit --omit=dev --audit-level=high
+npm test
 npm run lint
 npm run type-check
 npm run build

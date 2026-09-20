@@ -126,13 +126,13 @@ defined in [`docs/patient-access-contract.md`](patient-access-contract.md).
 | Survey ingestion, signed patient links, and patient-scoped APIs | Implemented — `/api/submit-survey`, `/api/patient-access/{pid}` |
 | Doctor's portal and unified synthesis report | Implemented — `/doctor` |
 | Clinician sign-in/session boundary | Implemented — signed HttpOnly session; server-only credentials |
-| Patient client at `/patient/[id]` | Base flow implemented; signed-link frontend integration is tracked in #23. |
+| Patient client at `/patient/[id]` | Implemented — signed-link-only live/upload flow with route-safe loading and session writes. |
 | Automated voice agent (outbound calls, intake) | **Not implemented** — no telephony integration in the repository. |
 | SMS with personalized deep link | **Not implemented** — depends on both the voice agent and the `/patient/[id]` route. |
 | Live voice guidance during the walking test | **Not implemented** |
 
 Shipping the remaining voice-agent domain requires a telephony provider (call +
-SMS webhooks) and frontend consumption of the implemented signed-link contract.
+SMS webhooks) to deliver the implemented signed-link workflow.
 
 ## Code map
 
@@ -146,8 +146,8 @@ gaitguard-ai/
     store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
   frontend/
-    app/page.tsx              landing page (patient links)
-    app/patient/[id]/page.tsx per-patient screening view
+    app/page.tsx              public secure-link instructions
+    app/patient/[id]/page.tsx signed per-patient screening view
     app/doctor/page.tsx       clinician dashboard
     app/components/           WebcamFeed, PatientScreening, SkeletonReplay,
                               TrendGraph, TokenEfficiency
