@@ -326,16 +326,18 @@ def add_session(pid: str, session: dict, *, require_active_correlation: bool = F
         session.setdefault("frames", None)
         new_record = json.loads(json.dumps(old_record))  # deep copy
         session["session_id"] = str(uuid4())
+        call = None
         if session.get("call_id"):
             call = _active_attempt(new_record, session["call_id"], session["attempt_id"])
             if call["survey_status"] != "stored":
                 raise Conflict("walking requires a stored survey")
             if call["walking"]["status"] in {"saved", "stopped"}:
                 raise Conflict("walking attempt is already terminal")
-            if not _is_scorable_walk(session["metrics"]):
-                if not session["metrics"].get("gait_detected"):
-                    raise Conflict("a saved walking attempt requires detected gait")
-                raise ValueError("a saved walking attempt requires a scorable recording; retake the walk")
+            if not session["metrics"].get("gait_detected"):
+                raise Conflict("a saved walking attempt requires detected gait")
+        if not _is_scorable_walk(session["metrics"]):
+            raise ValueError("a saved walk requires a scorable recording; retake the walk")
+        if call is not None:
             call["walking"]["status"] = "saved"
             call["walking"]["session_id"] = session["session_id"]
             _touch(call)
