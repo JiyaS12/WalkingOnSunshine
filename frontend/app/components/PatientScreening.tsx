@@ -336,7 +336,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     <main className="min-h-screen p-6 text-foreground">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Image src="/sana-logo.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
+          <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
             <h1 className="text-2xl font-bold text-foreground">Sana</h1>
             <p className="text-xs text-muted-foreground">
