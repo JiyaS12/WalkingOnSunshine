@@ -65,8 +65,33 @@ python3.12 -m venv .venv
 
 ```bash
 cd backend
-.venv/bin/uvicorn main:app --port 8000
+cp .env.example .env
+# Fill the username/password and generate distinct clinician-session,
+# patient-link, and survey-ingest secrets with:
+# python -c "import secrets; print(secrets.token_urlsafe(48))"
+.venv/bin/uvicorn main:app --port 8000 --env-file .env
 ```
+
+The three clinician values are required. Clinician APIs fail closed with `503`
+until `CLINICIAN_USERNAME`, `CLINICIAN_PASSWORD`, and a random
+`CLINICIAN_SESSION_SECRET` of at least 32 characters are all present. `/doctor`
+exchanges the credentials for a signed, HttpOnly, `SameSite=Lax` session cookie;
+neither the credentials nor signing key belong in a `NEXT_PUBLIC_*` variable.
+
+Runtime environment variables:
+
+- `CLINICIAN_USERNAME` / `CLINICIAN_PASSWORD` — local clinician sign-in.
+- `CLINICIAN_SESSION_SECRET` — random server-only session signing key (minimum
+  32 characters).
+- `CLINICIAN_SESSION_TTL_SECONDS` — session lifetime in seconds (default 28800,
+  accepted range 60–86400).
+- `CLINICIAN_COOKIE_SECURE` — defaults to `true`; set `false` only for explicit
+  local HTTP development.
+- `CLINICIAN_LOGIN_MAX_ATTEMPTS` / `CLINICIAN_LOGIN_WINDOW_SECONDS` — per-process,
+  per-client login throttle (defaults 5 attempts per 60 seconds).
+- `CORS_ALLOWED_ORIGINS` — exact comma-separated frontend origins. Localhost and
+  127.0.0.1 on port 3000 are the development defaults. `*` is rejected because
+  clinician sessions use credentialed requests.
 
 Required patient-link configuration:
 
@@ -105,7 +130,10 @@ npm run dev
 ```
 
 The app runs at http://localhost:3000 and expects the backend on
-`NEXT_PUBLIC_API_URL`.
+`NEXT_PUBLIC_API_URL`. This variable is only the public backend URL; do not add
+clinician credentials or access tokens to the frontend environment. For cookie
+delivery, deploy the frontend and API on the same site and list the frontend's
+exact origin in `CORS_ALLOWED_ORIGINS`.
 
 ## Demo flow
 
@@ -116,9 +144,9 @@ The app runs at http://localhost:3000 and expects the backend on
    profile (pain 3/10, no prior falls) so you can test right away.
 4. On `/patient/<id>`: do a **Live Camera** walk or **Upload Video** —
    metrics update, sessions save to the patient's record.
-5. Open `/doctor` — the portal live-syncs every 5 s; select the patient to
-   see the Unified Clinical Synthesis Report (survey + gait trend +
-   skeleton replay) and click **Generate synthesis**.
+5. Open `/doctor`, sign in with the backend-configured clinician credentials,
+   and select the patient. The portal live-syncs every 5 s and provides the
+   Unified Clinical Synthesis Report (survey + gait trend + skeleton replay).
 
 ## Verify a clean checkout
 
@@ -139,6 +167,7 @@ audit production packages, lint, type-check, and build:
 cd frontend
 npm ci
 npm audit --omit=dev --audit-level=high
+npm test
 npm run lint
 npm run type-check
 npm run build

@@ -88,6 +88,9 @@ The core endpoints that carry the cross-domain handshake:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness probe. |
+| `POST` | `/api/clinician/session` | Validate server-side clinician credentials and issue an HttpOnly session. |
+| `GET` | `/api/clinician/session` | Validate the active clinician session. |
+| `DELETE` | `/api/clinician/session` | Sign out and clear the clinician session. |
 | `POST` | `/api/process-frame` | Joint telemetry (one session's frames) → `GaitMetrics`. |
 | `POST` | `/api/process-video` | Multipart `.mp4`/`.mov` upload → `VideoAnalysis`. |
 | `POST` | `/api/generate-summary` | Plain-language clinical summary (cached). |
@@ -99,6 +102,12 @@ The core endpoints that carry the cross-domain handshake:
 | `GET` | `/api/patients/{pid}` | One patient: survey + session history. |
 | `POST` | `/api/patients/{pid}/sessions` | Attach a gait session to a patient. |
 | `POST` | `/api/patients/{pid}/synthesis` | Unified subjective + objective report. |
+
+The cohort list, patient detail, session administration, summary generation,
+synthesis, and cache-statistics routes require the signed clinician session.
+The session is separate from patient-link authorization: patient link tokens
+are not accepted as clinician credentials. CORS uses the exact origins in
+`CORS_ALLOWED_ORIGINS` and never combines a wildcard origin with credentials.
 
 `/api/generate-summary` and `/api/patients/{pid}/synthesis` call OpenAI
 `gpt-4o-mini` when `OPENAI_API_KEY` is set and fall back to a deterministic
@@ -116,6 +125,7 @@ defined in [`docs/patient-access-contract.md`](patient-access-contract.md).
 | Lower-extremity biomechanics + fall-risk score | Implemented — `GaitProcessor` |
 | Survey ingestion, signed patient links, and patient-scoped APIs | Implemented — `/api/submit-survey`, `/api/patient-access/{pid}` |
 | Doctor's portal and unified synthesis report | Implemented — `/doctor` |
+| Clinician sign-in/session boundary | Implemented — signed HttpOnly session; server-only credentials |
 | Patient client at `/patient/[id]` | Base flow implemented; signed-link frontend integration is tracked in #23. |
 | Automated voice agent (outbound calls, intake) | **Not implemented** — no telephony integration in the repository. |
 | SMS with personalized deep link | **Not implemented** — depends on both the voice agent and the `/patient/[id]` route. |
