@@ -1,0 +1,92 @@
+{
+  "baseline_predictions": [
+    -8.074349270001139e-17,
+    -6.055761952500853e-17,
+    2.0185873175002847e-17,
+    -2.0185873175002847e-17,
+    6.055761952500853e-17,
+    6.055761952500853e-17,
+    4.0371746350005693e-17,
+    8.074349270001139e-17,
+    8.074349270001139e-17,
+    0.0,
+    -6.055761952500853e-17,
+    -1.6148698540002277e-16
+  ],
+  "baseline_rmse": 2.7308140356457207,
+  "event_detection": {
+    "cadence_mae_steps_per_min": 7.674586770677248,
+    "participant_count": 9,
+    "status": "failed",
+    "step_time_mae_s": 0.03924250362947682
+  },
+  "final_alpha": 10.0,
+  "heldout_targets": [
+    -0.3283856525716396,
+    -0.03280612558221429,
+    0.7781221487955466,
+    -1.864966548944833,
+    -0.6039603644595902,
+    -0.6039603644595902,
+    -0.7042104691029246,
+    -1.629348085094443,
+    -0.8504348552886043,
+    2.1614282838946854,
+    8.625555227391079,
+    -1.272877614062456
+  ],
+  "loocv_rmse": 3.2168586111992163,
+  "loocv_spearman": 0.3817869252443988,
+  "out_of_fold_predictions": [
+    0.03352286563412394,
+    -0.4100659943064157,
+    0.6511211828857276,
+    0.017842644547439952,
+    -1.9977348657100473,
+    -1.103796356420405,
+    6.617641339507803,
+    -0.5589710138826558,
+    -0.38407962596526773,
+    0.034021380972281516,
+    1.0460739269055417,
+    -0.17551672134698293
+  ],
+  "outer_selected_alphas": [
+    3.1622776601683795,
+    1.7782794100389228,
+    17.78279410038923,
+    5.62341325190349,
+    0.001,
+    5.62341325190349,
+    0.001,
+    17.78279410038923,
+    10.0,
+    177.82794100389228,
+    5.62341325190349,
+    10.0
+  ],
+  "participant_count": 12,
+  "participant_ids": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "12",
+    "13",
+    "14"
+  ],
+  "promoted": false,
+  "promotion_failure_reasons": [
+    "LOOCV Spearman is below 0.50 or undefined",
+    "LOOCV RMSE did not beat the intercept-only baseline",
+    "Xsens timing/cadence agreement did not meet the promotion gate"
+  ],
+  "reference_comparison": "Participant median step-time/cadence proxies; not synchronized event annotations",
+  "scorable_window_count": 26,
+  "validation_method": "Nested participant LOOCV; clinical scaler/PCA and feature scaler fit within every fold"
+}

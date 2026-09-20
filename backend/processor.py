@@ -13,9 +13,14 @@ translation only shows for the translating mock-cohort sessions).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from experimental_risk import EXTENDED_JOINTS, extract_features, score_features
+from fall_risk import score_fall_risk
 
 JOINTS = (
     "left_hip",
@@ -45,6 +50,18 @@ class GaitMetrics(BaseModel):
     peak_ankle_speed_mps: float
     gait_detected: bool
     dropped_frame_pct: float = 0.0
+    experimental_cv_risk_index: float | None = None
+    experimental_cv_risk_status: Literal[
+        "scored", "scored_with_warning", "not_scorable", "model_unavailable"
+    ] = "model_unavailable"
+    experimental_cv_risk_model_version: str = "unavailable"
+    experimental_cv_risk_contributors: dict[str, float] = Field(default_factory=dict)
+    experimental_cv_risk_warnings: list[str] = Field(default_factory=list)
+    cv_fall_risk_index: int | None = Field(default=None, ge=1, le=100)
+    cv_fall_risk_status: Literal["scored", "fallback", "not_scorable"] | None = None
+    cv_fall_risk_method: Literal["learned_fall_history", "heuristic_fallback", "none"] | None = None
+    cv_fall_risk_model_version: str | None = None
+    cv_fall_risk_warnings: list[str] = Field(default_factory=list)
 
 
 def validate_frames(frames: list[dict[str, list[float]]]) -> None:
@@ -76,22 +93,35 @@ class GaitProcessor:
         frames: list[dict[str, list[float]]],
         fps: float = 30.0,
         leg_length_m: float | None = None,
+        visibility_frames: list[dict[str, float]] | None = None,
+        capture_missing_pct: float = 0.0,
     ):
         if len(frames) < 2:
             raise ValueError("at least 2 frames are required")
-        if fps <= 0:
-            raise ValueError("fps must be positive")
+        if not np.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be finite and positive")
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
+        self.visibility_frames = visibility_frames
+        if not np.isfinite(capture_missing_pct) or not 0 <= capture_missing_pct <= 100:
+            raise ValueError("capture_missing_pct must be between 0 and 100")
+        self.capture_missing_pct = float(capture_missing_pct)
+        extended_joints = tuple(
+            joint for joint in EXTENDED_JOINTS if any(joint in frame for frame in frames)
+        )
         for i, frame in enumerate(frames):
-            for joint in JOINTS:
+            for joint in JOINTS + extended_joints:
                 coords = frame.get(joint)
                 if not isinstance(coords, (list, tuple)) or len(coords) != 3:
                     raise ValueError(
                         f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
                     )
-        self._joints, self.dropped_frame_pct = self._repair_dropped_landmarks()
+        self._joints, repaired_pct = self._repair_dropped_landmarks()
+        self.dropped_frame_pct = (
+            self.capture_missing_pct
+            + (100.0 - self.capture_missing_pct) * repaired_pct / 100.0
+        )
         if leg_length_m is not None:
             if not np.isfinite(leg_length_m) or leg_length_m <= 0:
                 raise ValueError("leg_length_m must be finite and positive")
@@ -112,7 +142,12 @@ class GaitProcessor:
         joints: dict[str, np.ndarray] = {}
         dropped = np.zeros(self.frame_count, dtype=bool)
         index = np.arange(self.frame_count)
-        for joint in JOINTS:
+        available_joints = JOINTS + tuple(
+            joint
+            for joint in EXTENDED_JOINTS
+            if all(joint in frame for frame in self.frames)
+        )
+        for joint in available_joints:
             # None and NaN both arrive as nan here; a non-numeric coordinate
             # raises, which is a malformed request rather than lost tracking
             coords = np.array(
@@ -247,6 +282,16 @@ class GaitProcessor:
             return 0.0
         return max(0.0, (first - second) / first * 100.0)
 
+    def experimental_feature_result(self):
+        """Extract the public-data model inputs for runtime and research jobs."""
+        return extract_features(
+            self._joints,
+            fps=self.fps,
+            leg_length_m=self.leg_length_m,
+            dropped_frame_pct=self.dropped_frame_pct,
+            visibility_frames=self.visibility_frames,
+        )
+
     def compute(self) -> GaitMetrics:
         separation = self._ankle_separation()
         peaks = self._find_peaks(separation)
@@ -310,6 +355,17 @@ class GaitProcessor:
         )
         score = round(float(np.clip(_sigmoid(z), 0.0, 1.0)), 3)
 
+        experimental_features = self.experimental_feature_result()
+        experimental = score_features(experimental_features)
+        common_features = extract_features(
+            {joint: self._joints[joint] for joint in JOINTS},
+            fps=self.fps,
+            leg_length_m=self.leg_length_m,
+            dropped_frame_pct=self.dropped_frame_pct,
+            visibility_frames=self.visibility_frames,
+        )
+        fall_risk = score_fall_risk(common_features, score, gait_detected)
+
         return GaitMetrics(
             stride_length_m=round(float(stride), 4),
             asymmetry_pct=round(float(asymmetry), 4),
@@ -323,4 +379,14 @@ class GaitProcessor:
             peak_ankle_speed_mps=round(peak_ankle_speed, 4),
             gait_detected=gait_detected,
             dropped_frame_pct=round(self.dropped_frame_pct, 2),
+            experimental_cv_risk_index=experimental.index,
+            experimental_cv_risk_status=experimental.status,
+            experimental_cv_risk_model_version=experimental.model_version,
+            experimental_cv_risk_contributors=experimental.contributors,
+            experimental_cv_risk_warnings=experimental.warnings,
+            cv_fall_risk_index=fall_risk.index,
+            cv_fall_risk_status=fall_risk.status,
+            cv_fall_risk_method=fall_risk.method,
+            cv_fall_risk_model_version=fall_risk.model_version,
+            cv_fall_risk_warnings=fall_risk.warnings,
         )

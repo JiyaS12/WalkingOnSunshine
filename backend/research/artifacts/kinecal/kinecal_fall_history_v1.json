@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "model_version": "kinecal-fall-history-logistic-v1",
+  "feature_protocol": "ankle-six-features-v1",
+  "feature_names": [
+    "median_step_time_s",
+    "step_time_cv_pct",
+    "stance_time_asymmetry_pct",
+    "mean_knee_rom_deg",
+    "knee_rom_asymmetry_pct",
+    "normalized_foot_clearance"
+  ],
+  "target": "prior_12_month_fall_history",
+  "source": "https://physionet.org/files/kinecal/1.0.3/",
+  "license": "CC0-1.0",
+  "promoted": false,
+  "fit_status": "exploratory_only",
+  "calibration_status": "unavailable_insufficient_participants",
+  "feature_mean": [
+    0.575,
+    20.643532894736843,
+    34.044168391994475,
+    44.52784759198431,
+    8.982101137511776,
+    0.14396969917947147
+  ],
+  "feature_scale": [
+    0.07949493345141212,
+    7.412512155618603,
+    12.742151321045686,
+    3.1545884995635,
+    5.1425550188574585,
+    0.01591148747963579
+  ],
+  "coefficients": [
+    0.5402080692962696,
+    0.5347009344129877,
+    -0.3750608055627248,
+    -0.04151253014754495,
+    0.12618693780127335,
+    -0.2363476624066936
+  ],
+  "intercept": 1.5118916067095391,
+  "training_feature_min": [
+    0.4666666666666667,
+    10.589999999999996,
+    17.14285714285714,
+    41.97705056953665,
+    1.8528146394079115,
+    0.12346214642149136
+  ],
+  "training_feature_max": [
+    0.6666666666666666,
+    31.21263157894736,
+    48.88888888888889,
+    49.74699654520532,
+    16.38049061695938,
+    0.1606527298712603
+  ],
+  "validation": {
+    "eligible_participants": 53,
+    "accepted_participants": 4,
+    "class_counts": [
+      1,
+      3
+    ],
+    "rejected_fraction": 0.9245283018867925,
+    "gates": {
+      "participants_min": 40,
+      "minority_class_min": 15,
+      "rejected_fraction_max": 0.25,
+      "auc_min": 0.7,
+      "auc_ci_lower_min": 0.5,
+      "brier_skill_min": 0.0,
+      "brier_skill_ci_lower_min": 0.0,
+      "calibration_error_max": 0.1
+    },
+    "transfer_validation": {
+      "status": "not_evaluated",
+      "reason": "No paired Kinect/MediaPipe cohort or independent RGB fall-label cohort."
+    },
+    "status": "insufficient_usable_participants"
+  },
+  "feature_csv_sha256": "630b8939b3aba354e44d816380306ea854a98ad583df33183c0da5a2ba194aa8",
+  "metadata_sha256": "7523c52bf1c4311b46cfd1c143976ea007050054212edc48abcf7a8d88ed4cb9",
+  "trainer_sha256": "437786a884f9463745ee4380d69d6ae009a90f2fec0982dbc728274d7173d306",
+  "extractor_sha256": "401f05f2b662595180e9bfc6ce9ca26079a5b66eb085e4ed49adf13531182516"
+}

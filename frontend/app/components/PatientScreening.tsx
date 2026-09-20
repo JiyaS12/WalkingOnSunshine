@@ -18,6 +18,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
+import FallRiskIndexCard from "./FallRiskIndexCard";
 import {
   Card,
   CardAction,
@@ -37,6 +38,7 @@ import {
   fetchPatientAccess,
 } from "../lib/api";
 import { WalkingReporter, type WalkingReport } from "../lib/walkingReporter";
+import { isScorableWalk } from "../lib/gait";
 import type { WalkError, WalkEventName } from "../lib/integration";
 
 const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
@@ -388,7 +390,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         epoch !== activeEpochRef.current ||
         accessToken === null ||
         !tokenIsUsable ||
-        !candidate.metrics.gait_detected ||
+        !isScorableWalk(candidate.metrics) ||
         candidate.reporter !== reporterRef.current ||
         (candidate.reporter?.blocked && candidate.reporter.view?.status !== "saved") ||
         inFlightSavesRef.current.has(candidate.id) ||
@@ -520,7 +522,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       };
       setReadingState(candidate);
       setSaveMessage(null);
-      if (source === "upload" && metrics.gait_detected) {
+      if (source === "upload" && isScorableWalk(metrics)) {
         void saveSession(candidate);
       }
     },
@@ -540,7 +542,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   const trendSessions = useMemo(() => {
     const sessions = toTrendSessions(patient);
-    if (reading?.metrics.gait_detected && !reading.saved) {
+    if (reading && isScorableWalk(reading.metrics) && !reading.saved) {
       sessions.push({
         label: UNSAVED_LABEL[reading.source],
         asymmetry_pct: reading.metrics.asymmetry_pct,
@@ -575,9 +577,11 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const isSaving = reading !== null && savingReadingId === reading.id;
   const captureFeedback = (
     <div className="flex flex-col gap-2">
-      {metrics && !metrics.gait_detected && (
+      {metrics && !isScorableWalk(metrics) && (
         <p role="alert" className="rounded-2xl bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
-          No walking detected — walk across the frame or upload a clip with walking before saving.
+          {metrics.gait_detected
+            ? "This recording did not meet the quality requirements. Retake the walk or upload a clearer clip before saving."
+            : "No walking detected — walk toward or away from the camera or upload a clip with walking before saving."}
         </p>
       )}
       {reading?.source === "live" && (
@@ -588,12 +592,13 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
           <span className="flex-1 text-xs text-muted-foreground">
-            {reading.saved ? "This walk is saved" : "Save this walk to your record"}
+            {reading.saved ? "This walk is saved" : isScorableWalk(reading.metrics)
+              ? "Save this walk to your record" : "Retake this walk before saving"}
           </span>
           <button
             type="button"
             onClick={() => void saveSession(reading)}
-            disabled={isSaving || reading.saved || !reading.metrics.gait_detected || Boolean(walkClosed) || Boolean(walkWaiting)}
+            disabled={isSaving || reading.saved || !isScorableWalk(reading.metrics) || Boolean(walkClosed) || Boolean(walkWaiting)}
             className="rounded-full bg-pastel-sage px-3 py-1 text-xs font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep disabled:opacity-50"
           >
             {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
@@ -649,8 +654,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       <div className="rounded-3xl bg-pastel-sage/60 p-5 shadow-pillow-sm">
         <h2 className="text-sm font-medium text-foreground">Complete one walking test</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Use the live camera or upload a walking video. For live capture, wait for calibration, walk across the frame only if safe, then choose Save this walk.
-          Uploads are analyzed and saved automatically when walking is detected. Completion is confirmed only after the server saves your walk.
+          Use the live camera or upload a walking video. For live capture, start the 10-second assessment, wait for the countdown, then walk toward or away from the camera only if safe. Choose Save this walk after analysis.
+          Uploads are analyzed and saved automatically when walking is detected and recording quality is sufficient. Completion is confirmed only after the server saves your walk.
         </p>
         {walking?.view && <p className="mt-2 text-xs">Walking status: {walking.view.status === "saved" && walking.view.session_id ? "Saved to your care team" : walking.view.status.replaceAll("_", " ")}</p>}
         {walking?.stopping && walking.view?.status !== "stopped" && <p className="mt-2 text-xs">Stop requested. Waiting for server confirmation.</p>}
@@ -679,7 +684,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         <div className="mt-3">{captureFeedback}</div>
       </section>
 
-        <section className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 lg:grid-cols-5">
+        <FallRiskIndexCard metrics={metrics} />
+        <section className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 lg:grid-cols-3">
             <MetricCard
               title="Stride Length"
               value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
@@ -697,11 +703,21 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               icon={<TrendingDown className="h-4 w-4" />}
             />
             <MetricCard
-              title="Fall Risk"
+              title="Original Fall Risk — heuristic"
               value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
               icon={<AlertTriangle className="h-4 w-4" />}
               badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
             />
+          <MetricCard
+            title="Experimental CV Risk Index — public-data model"
+            value={metrics?.experimental_cv_risk_index != null
+              ? `${metrics.experimental_cv_risk_index.toFixed(1)} / 100`
+              : !metrics ? "—"
+              : metrics.experimental_cv_risk_status === "not_scorable" ? "Not scorable"
+              : "Model unavailable"}
+            icon={<Activity className="h-4 w-4" />}
+            sub="Higher means poorer reference mobility. Not a probability of falling."
+          />
           <MetricCard
             title="Cadence"
             value={metrics ? metrics.cadence_steps_per_min.toFixed(0) : "—"}
@@ -710,6 +726,20 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           />
         </section>
 
+        {metrics && (
+          <div className="rounded-2xl bg-card p-4 text-xs text-muted-foreground" role="status">
+            <p>Experimental model: {metrics.experimental_cv_risk_model_version ?? "unavailable"}</p>
+            {(metrics.experimental_cv_risk_warnings ?? []).map((warning) => <p key={warning}>{warning}</p>)}
+            {!!Object.keys(metrics.experimental_cv_risk_contributors ?? {}).length && (
+              <details>
+                <summary>Learned feature contributions (latent score, before percentile mapping)</summary>
+                {Object.entries(metrics.experimental_cv_risk_contributors ?? {}).map(([name, value]) => (
+                  <p key={name}>{name.replaceAll("_", " ")}: {value.toFixed(3)}</p>
+                ))}
+              </details>
+            )}
+          </div>
+        )}
         <section>
           <TrendGraph sessions={trendSessions} />
         </section>

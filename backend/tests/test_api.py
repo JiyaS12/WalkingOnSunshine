@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent
 import clinician_auth
 import gait_gen
+import patient_access
 import store
 from main import app
 
@@ -84,6 +85,61 @@ def _patient_with_session(pid="RGN-0999"):
     )
 
 
+@pytest.mark.parametrize("scope", ["patients", "patient-access"])
+@pytest.mark.parametrize("changes", [
+    {"cv_fall_risk_status": "not_scorable", "cv_fall_risk_index": None},
+    {"cv_fall_risk_status": "scored", "cv_fall_risk_index": None},
+    {"cv_fall_risk_status": "fallback", "cv_fall_risk_index": None},
+    {"cv_fall_risk_index": 42},
+    {"gait_detected": False},
+])
+def test_uncorrelated_save_rejects_invalid_walk_without_consuming_key(scope, changes, tmp_path):
+    pid = "RGN-0999"
+    assert client.post("/api/submit-survey", json=_survey(pid)).status_code == 200
+    token, _ = patient_access.generate_token(pid)
+    headers = {"Authorization": f"Bearer {token}"}
+    route = f"/api/{scope}/{pid}/sessions"
+    body = {
+        "label": "Quality check", "source": "upload",
+        "idempotency_key": "uncorrelated_walk_0001", "metrics": _metrics(**changes),
+    }
+    before = store.get_patient(pid)
+    persisted = (tmp_path / "patients.json").read_bytes()
+    response = client.post(route, headers=headers, json=body)
+    assert response.status_code == 422, response.text
+    assert "retake" in response.json()["detail"]
+    assert store.get_patient(pid) == before
+    assert (tmp_path / "patients.json").read_bytes() == persisted
+
+    body["metrics"] = _metrics(cv_fall_risk_status="fallback", cv_fall_risk_index=41)
+    saved = client.post(route, headers=headers, json=body)
+    assert saved.status_code == 200, saved.text
+    repeated = client.post(route, headers=headers, json=body)
+    assert repeated.status_code == 200
+    assert repeated.json() == saved.json()
+    assert len(store.get_patient(pid)["gait_sessions"]) == 1
+    assert saved.json()["gait_sessions"][0]["metrics"]["cv_fall_risk_index"] == 41
+
+
+@pytest.mark.parametrize("scope", ["patients", "patient-access"])
+@pytest.mark.parametrize("status", [None, "scored", "fallback"])
+def test_uncorrelated_save_accepts_legacy_and_scorable_walks(scope, status):
+    pid = "RGN-0999"
+    assert client.post("/api/submit-survey", json=_survey(pid)).status_code == 200
+    token, _ = patient_access.generate_token(pid)
+    metrics = _metrics()
+    if status is not None:
+        metrics.update(cv_fall_risk_status=status, cv_fall_risk_index=41)
+    response = client.post(
+        f"/api/{scope}/{pid}/sessions",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"label": "Accepted walk", "source": "live", "metrics": metrics},
+    )
+    assert response.status_code == 200, response.text
+    assert len(store.get_patient(pid)["gait_sessions"]) == 1
+    assert response.json()["gait_sessions"][0]["metrics"]["cv_fall_risk_status"] == status
+
+
 def test_health():
     resp = client.get("/api/health")
     assert resp.status_code == 200
@@ -97,6 +153,14 @@ def test_process_frame():
     assert resp.status_code == 200
     body = resp.json()
     assert "fall_risk_score" in body
+    assert body["experimental_cv_risk_index"] is None
+    assert body["experimental_cv_risk_status"] in {
+        "not_scorable",
+        "model_unavailable",
+    }
+    assert body["experimental_cv_risk_model_version"] == "unavailable"
+    assert isinstance(body["experimental_cv_risk_contributors"], dict)
+    assert isinstance(body["experimental_cv_risk_warnings"], list)
     assert body["gait_detected"] is True
 
 
@@ -117,6 +181,21 @@ def test_process_frame_with_leg_length():
     ):
         assert key in body
     assert body["leg_length_m"] == 0.9
+
+
+def test_excessive_missing_capture_is_not_scorable_but_keeps_original_score():
+    frames = gait_gen.recovered_session()["frames"]
+    resp = client.post(
+        "/api/process-frame",
+        json={"frames": frames, "fps": 30, "expected_frame_count": 400},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["gait_detected"] is True
+    assert body["fall_risk_score"] is not None
+    assert body["experimental_cv_risk_index"] is None
+    assert body["experimental_cv_risk_status"] == "not_scorable"
+    assert body["dropped_frame_pct"] == 25.0
 
 
 def test_process_frame_too_few():

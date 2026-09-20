@@ -1,0 +1,24 @@
+{
+  "eligible_participants": 53,
+  "accepted_participants": 4,
+  "class_counts": [
+    1,
+    3
+  ],
+  "rejected_fraction": 0.9245283018867925,
+  "gates": {
+    "participants_min": 40,
+    "minority_class_min": 15,
+    "rejected_fraction_max": 0.25,
+    "auc_min": 0.7,
+    "auc_ci_lower_min": 0.5,
+    "brier_skill_min": 0.0,
+    "brier_skill_ci_lower_min": 0.0,
+    "calibration_error_max": 0.1
+  },
+  "transfer_validation": {
+    "status": "not_evaluated",
+    "reason": "No paired Kinect/MediaPipe cohort or independent RGB fall-label cohort."
+  },
+  "status": "insufficient_usable_participants"
+}

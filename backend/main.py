@@ -286,6 +286,9 @@ def clinician_sign_out(request: Request, response: Response) -> None:
 
 class ProcessFrameRequest(BaseModel):
     frames: list[dict[str, list[float]]]
+    visibility_frames: list[dict[str, float]] | None = None
+    expected_frame_count: int | None = None
+    capture_missing_pct: float = Field(default=0.0, ge=0, le=100)
     fps: float = 30.0
     leg_length_m: float | None = None
 
@@ -302,8 +305,22 @@ def health() -> dict:
 @app.post("/api/process-frame", response_model=GaitMetrics)
 def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
     try:
+        capture_missing_pct = body.capture_missing_pct
+        if body.expected_frame_count is not None:
+            if body.expected_frame_count < len(body.frames):
+                raise ValueError("expected_frame_count cannot be smaller than frames")
+            if body.expected_frame_count > 0:
+                capture_missing_pct = max(capture_missing_pct, (
+                    100.0
+                    * (body.expected_frame_count - len(body.frames))
+                    / body.expected_frame_count
+                ))
         return GaitProcessor(
-            body.frames, fps=body.fps, leg_length_m=body.leg_length_m
+            body.frames,
+            fps=body.fps,
+            leg_length_m=body.leg_length_m,
+            visibility_frames=body.visibility_frames,
+            capture_missing_pct=capture_missing_pct,
         ).compute()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -383,11 +400,20 @@ async def process_video(file: UploadFile = File(...)) -> dict:
             raise HTTPException(status_code=422, detail="the uploaded video is empty")
 
         try:
-            frames, effective_fps, total = await run_in_threadpool(
-                video.extract_frames, tmp.name
-            )
+            (
+                frames,
+                visibility_frames,
+                effective_fps,
+                total,
+                capture_missing_pct,
+            ) = await run_in_threadpool(video.extract_frames_with_visibility, tmp.name)
             metrics = await run_in_threadpool(
-                lambda: GaitProcessor(frames, fps=effective_fps).compute()
+                lambda: GaitProcessor(
+                    frames,
+                    fps=effective_fps,
+                    visibility_frames=visibility_frames,
+                    capture_missing_pct=capture_missing_pct,
+                ).compute()
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e

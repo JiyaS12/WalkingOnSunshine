@@ -101,6 +101,49 @@ afterEach(() => {
 });
 
 describe("signed patient screening", () => {
+  it.each(["live", "upload"] as const)("excludes a rejected %s trial from saving and the trend", async (source) => {
+    render(<PatientScreening patientId="RGN-0417" />);
+    await screen.findByText("Demo Patient");
+    act(() => webcamProps().onMetrics({
+      ...walkingMetrics, cv_fall_risk_status: "not_scorable", cv_fall_risk_index: null,
+    }, source, []));
+    expect(screen.getByTestId("trend-graph")).toBeEmptyDOMElement();
+    expect(screen.getByText("Retake needed")).toBeInTheDocument();
+    expect(addPatientAccessSession).not.toHaveBeenCalled();
+    if (source === "live") expect(screen.getByRole("button", { name: "Save this walk" })).toBeDisabled();
+  });
+
+  it("preserves historical metrics without experimental fields", async () => {
+    render(<PatientScreening patientId="RGN-0417" />);
+    await screen.findByText("Demo Patient");
+    act(() => webcamProps().onMetrics(walkingMetrics, "live", []));
+    expect(screen.getByText("Original Fall Risk — heuristic")).toBeInTheDocument();
+    expect(screen.getByText("0.220")).toBeInTheDocument();
+    expect(screen.getByText("Model unavailable")).toBeInTheDocument();
+  });
+
+  it("preserves experimental rejection reasons and learned contributions", async () => {
+    render(<PatientScreening patientId="RGN-0417" />);
+    await screen.findByText("Demo Patient");
+    act(() => webcamProps().onMetrics({
+      ...walkingMetrics, experimental_cv_risk_index: null,
+      experimental_cv_risk_status: "not_scorable",
+      experimental_cv_risk_warnings: ["lower-body landmark visibility is too low"],
+    }, "live", []));
+    expect(screen.getByText("Not scorable")).toBeInTheDocument();
+    expect(screen.getByText("lower-body landmark visibility is too low")).toBeInTheDocument();
+    act(() => webcamProps().onMetrics({
+      ...walkingMetrics, experimental_cv_risk_index: 70.5,
+      experimental_cv_risk_status: "scored_with_warning",
+      experimental_cv_risk_warnings: ["outside reference range"],
+      experimental_cv_risk_contributors: { median_step_time_s: 0.123 },
+    }, "live", []));
+    expect(screen.getByText("70.5 / 100")).toBeInTheDocument();
+    expect(screen.getByText("outside reference range")).toBeInTheDocument();
+    expect(screen.getByText("median step time s: 0.123")).toBeInTheDocument();
+    expect(screen.queryByText("HIGH")).not.toBeInTheDocument();
+  });
+
   it("requires the token query parameter and never falls back to another API", async () => {
     openPatient("RGN-0417", null);
     render(<PatientScreening patientId="RGN-0417" />);

@@ -11,12 +11,13 @@ vi.mock("../lib/api", async () => ({
 }));
 
 let result: (results: PoseResults) => void;
+let cameraResult: PoseResults | undefined;
 const gum = vi.fn<() => Promise<MediaStream>>();
 const stop = vi.fn();
 class FakePose {
   setOptions() {}
   onResults(callback: (results: PoseResults) => void) { result = callback; }
-  async send() {}
+  async send() { if (cameraResult) result(cameraResult); }
   async initialize() {}
   async close() {}
 }
@@ -31,13 +32,15 @@ async function settle() {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
+  cameraResult = undefined;
   window.Pose = FakePose;
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: gum } });
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-  vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
-  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+    setTimeout(() => callback(performance.now()), 16));
+  vi.stubGlobal("cancelAnimationFrame", (timer: ReturnType<typeof setTimeout>) => clearTimeout(timer));
   gum.mockResolvedValue({ getTracks: () => [{ stop }], getVideoTracks: () => [] } as unknown as MediaStream);
   vi.mocked(processFrames).mockResolvedValue(metrics);
   vi.mocked(processVideo).mockResolvedValue({ metrics, frames: [], fps: 30, frames_processed: 90, frames_total: 90, filename: "walk.mp4" });
@@ -45,18 +48,82 @@ beforeEach(() => {
 afterEach(() => { cleanup(); delete window.Pose; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("real webcam lifecycle wiring", () => {
+  it("keeps a rejected guided trial recoverable and completes only its valid retake", async () => {
+    const rejected = { ...metrics, cv_fall_risk_status: "not_scorable" as const, cv_fall_risk_index: null };
+    const accepted = { ...metrics, cv_fall_risk_status: "fallback" as const, cv_fall_risk_index: 21 };
+    vi.mocked(processFrames).mockResolvedValueOnce(rejected).mockResolvedValueOnce(accepted);
+    const lifecycle = vi.fn();
+    const onMetrics = vi.fn();
+    render(<WebcamFeed onMetrics={onMetrics} onLifecycle={lifecycle} />);
+    await settle();
+    Object.defineProperty(document.querySelector("video"), "readyState", { value: 4 });
+    const landmarks = Array.from({ length: 33 }, (_, i) => ({
+      x: i % 2 ? 0.1 : -0.1, y: i >= 27 ? 1 : i >= 25 ? 0.5 : 0, z: 0,
+    }));
+    cameraResult = {
+      poseWorldLandmarks: landmarks,
+      poseLandmarks: landmarks.map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 })),
+    };
+    act(() => { for (let i = 0; i < 60; i++) result(cameraResult!); });
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle).toHaveBeenCalledWith("recoverable_error", "tracking_lost");
+    expect(lifecycle).not.toHaveBeenCalledWith("capture_completed", undefined);
+    expect(onMetrics).toHaveBeenCalledWith(rejected, "live", expect.any(Array));
+    expect(screen.getByText(/retake/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start 10-second assessment" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle.mock.calls.filter(([event]) => event === "capture_started")).toHaveLength(2);
+    expect(lifecycle.mock.calls.filter(([event]) => event === "capture_completed")).toHaveLength(1);
+    expect(onMetrics).toHaveBeenLastCalledWith(accepted, "live", expect.any(Array));
+  });
+
+  it("does not complete a quality-rejected upload and accepts a replacement", async () => {
+    const rejected = { ...metrics, cv_fall_risk_status: "not_scorable" as const, cv_fall_risk_index: null };
+    const accepted = { ...metrics, cv_fall_risk_status: "scored" as const, cv_fall_risk_index: 42 };
+    const analysis = { frames: [], fps: 30, frames_processed: 300, frames_total: 300, filename: "walk.mp4" };
+    vi.mocked(processVideo).mockResolvedValueOnce({ ...analysis, metrics: rejected })
+      .mockResolvedValueOnce({ ...analysis, metrics: accepted });
+    const lifecycle = vi.fn();
+    const onMetrics = vi.fn();
+    const view = render(<WebcamFeed onMetrics={onMetrics} onLifecycle={lifecycle} />);
+    await settle();
+    fireEvent.click(screen.getByRole("radio", { name: "Upload Video" }));
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await act(async () => fireEvent.change(input, { target: { files: [new File(["fake"], "walk.mp4", { type: "video/mp4" })] } }));
+    expect(lifecycle.mock.calls.map(([event]) => event)).toEqual(["capture_started", "recoverable_error"]);
+    expect(onMetrics).toHaveBeenLastCalledWith(rejected, "upload", []);
+    expect(screen.getByText(/retake/i)).toBeInTheDocument();
+    await act(async () => fireEvent.change(input, { target: { files: [new File(["new"], "retake.mp4", { type: "video/mp4" })] } }));
+    expect(lifecycle.mock.calls.map(([event]) => event)).toEqual([
+      "capture_started", "recoverable_error", "capture_started", "capture_completed",
+    ]);
+    expect(onMetrics).toHaveBeenLastCalledWith(accepted, "upload", []);
+  });
+
   it("waits for observed landmarks and calibration before reporting ready/capture, and ignores late callbacks after pause", async () => {
     const lifecycle = vi.fn();
     const onMetrics = vi.fn();
     render(<WebcamFeed onMetrics={onMetrics} onLifecycle={lifecycle} />);
     await settle();
+    Object.defineProperty(document.querySelector("video"), "readyState", { value: 4 });
     expect(lifecycle).not.toHaveBeenCalled();
     const landmarks = Array.from({ length: 33 }, (_, i) => ({ x: i % 2 ? 0.1 : -0.1, y: i >= 27 ? 1 : i >= 25 ? 0.5 : 0, z: 0 }));
-    act(() => result({ poseWorldLandmarks: landmarks }));
+    cameraResult = {
+      poseWorldLandmarks: landmarks,
+      poseLandmarks: landmarks.map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 })),
+    };
+    act(() => result(cameraResult!));
     expect(lifecycle.mock.calls.map((call) => call[0])).toEqual(["calibration_started"]);
-    act(() => { for (let i = 1; i < 60; i++) result({ poseWorldLandmarks: landmarks }); });
-    expect(lifecycle.mock.calls.map((call) => call[0])).toEqual(["calibration_started", "calibration_completed", "capture_started"]);
-    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    act(() => { for (let i = 1; i < 60; i++) result(cameraResult!); });
+    expect(lifecycle.mock.calls.map((call) => call[0])).toEqual(["calibration_started", "calibration_completed"]);
+    expect(processFrames).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(lifecycle).toHaveBeenCalledWith("capture_started", undefined);
+    expect(processFrames).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
     expect(lifecycle).toHaveBeenCalledWith("capture_completed", undefined);
     expect(onMetrics).toHaveBeenCalledWith(metrics, "live", expect.any(Array));
     fireEvent.click(screen.getByRole("button", { name: "Pause camera" }));
@@ -64,6 +131,7 @@ describe("real webcam lifecycle wiring", () => {
     act(() => result({ poseWorldLandmarks: landmarks }));
     expect(lifecycle).toHaveBeenCalledTimes(count);
     expect(stop).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Start 10-second assessment" })).toBeDisabled();
   });
 
   it("publishes actual permission denial and retry without claiming readiness", async () => {
@@ -77,6 +145,30 @@ describe("real webcam lifecycle wiring", () => {
     await settle();
     expect(lifecycle).toHaveBeenCalledWith("page_ready");
     expect(gum).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a failed request and a fresh lifecycle when retrying a guided trial", async () => {
+    const lifecycle = vi.fn();
+    vi.mocked(processFrames).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<WebcamFeed onMetrics={vi.fn()} onLifecycle={lifecycle} />);
+    await settle();
+    Object.defineProperty(document.querySelector("video"), "readyState", { value: 4 });
+    const landmarks = Array.from({ length: 33 }, (_, i) => ({
+      x: i % 2 ? 0.1 : -0.1, y: i >= 27 ? 1 : i >= 25 ? 0.5 : 0, z: 0,
+    }));
+    cameraResult = {
+      poseWorldLandmarks: landmarks,
+      poseLandmarks: landmarks.map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 })),
+    };
+    act(() => { for (let i = 0; i < 60; i++) result(cameraResult!); });
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle).toHaveBeenCalledWith("recoverable_error", "network_error");
+    expect(lifecycle).not.toHaveBeenCalledWith("capture_completed", undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle.mock.calls.filter(([event]) => event === "capture_started")).toHaveLength(2);
+    expect(lifecycle).toHaveBeenCalledWith("capture_completed", undefined);
   });
 
   it("supports upload while camera permission is pending and suppresses the old camera error", async () => {

@@ -1,4 +1,14 @@
 import type { NormalizedLandmark } from "../types/mediapipe";
+import type { GaitMetrics } from "./api";
+
+export function isScorableWalk(metrics: GaitMetrics): boolean {
+  if (!metrics.gait_detected) return false;
+  const status = metrics.cv_fall_risk_status;
+  const index = metrics.cv_fall_risk_index;
+  if (status == null) return index == null;
+  return (status === "scored" || status === "fallback") &&
+    typeof index === "number" && Number.isInteger(index) && index >= 1 && index <= 100;
+}
 
 export interface LiveGaitMetrics {
   leftKneeFlexion: number;

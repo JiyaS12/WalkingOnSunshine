@@ -285,6 +285,20 @@ def ensure_patient(
         return _append_survey_locked(patients, survey), True
 
 
+def _is_scorable_walk(metrics: dict) -> bool:
+    if not metrics.get("gait_detected"):
+        return False
+    status = metrics.get("cv_fall_risk_status")
+    index = metrics.get("cv_fall_risk_index")
+    if status is None:
+        return index is None
+    return (
+        status in {"scored", "fallback"}
+        and isinstance(index, (int, float)) and not isinstance(index, bool)
+        and 1 <= index <= 100 and int(index) == index
+    )
+
+
 def add_session(pid: str, session: dict, *, require_active_correlation: bool = False) -> dict:
     session = deepcopy(session)
     with _lock:
@@ -312,6 +326,7 @@ def add_session(pid: str, session: dict, *, require_active_correlation: bool = F
         session.setdefault("frames", None)
         new_record = json.loads(json.dumps(old_record))  # deep copy
         session["session_id"] = str(uuid4())
+        call = None
         if session.get("call_id"):
             call = _active_attempt(new_record, session["call_id"], session["attempt_id"])
             if call["survey_status"] != "stored":
@@ -320,6 +335,9 @@ def add_session(pid: str, session: dict, *, require_active_correlation: bool = F
                 raise Conflict("walking attempt is already terminal")
             if not session["metrics"].get("gait_detected"):
                 raise Conflict("a saved walking attempt requires detected gait")
+        if not _is_scorable_walk(session["metrics"]):
+            raise ValueError("a saved walk requires a scorable recording; retake the walk")
+        if call is not None:
             call["walking"]["status"] = "saved"
             call["walking"]["session_id"] = session["session_id"]
             _touch(call)

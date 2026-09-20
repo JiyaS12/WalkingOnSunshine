@@ -17,9 +17,24 @@ export interface GaitMetrics {
   gait_detected: boolean;
   /** share of frames where a dropped landmark had to be interpolated */
   dropped_frame_pct: number;
+  experimental_cv_risk_index?: number | null;
+  experimental_cv_risk_status?:
+    | "scored"
+    | "scored_with_warning"
+    | "not_scorable"
+    | "model_unavailable";
+  experimental_cv_risk_model_version?: string;
+  experimental_cv_risk_contributors?: Record<string, number>;
+  experimental_cv_risk_warnings?: string[];
+  cv_fall_risk_index?: number | null;
+  cv_fall_risk_status?: "scored" | "fallback" | "not_scorable" | null;
+  cv_fall_risk_method?: "learned_fall_history" | "heuristic_fallback" | "none" | null;
+  cv_fall_risk_model_version?: string | null;
+  cv_fall_risk_warnings?: string[];
 }
 
 export type JointFrame = Record<string, number[]>;
+export type VisibilityFrame = Record<string, number>;
 
 export class ApiError extends Error {
   status: number;
@@ -104,7 +119,10 @@ export async function processFrames(
   frames: JointFrame[],
   fps: number,
   legLengthM?: number,
-  signal?: AbortSignal
+  visibilityFrames?: VisibilityFrame[],
+  expectedFrameCount?: number,
+  signal?: AbortSignal,
+  captureMissingPct?: number
 ): Promise<GaitMetrics> {
   return request<GaitMetrics>("/api/process-frame", {
     method: "POST",
@@ -112,6 +130,11 @@ export async function processFrames(
     body: JSON.stringify({
       frames,
       fps,
+      ...(captureMissingPct !== undefined ? { capture_missing_pct: captureMissingPct } : {}),
+      ...(visibilityFrames ? { visibility_frames: visibilityFrames } : {}),
+      ...(expectedFrameCount !== undefined
+        ? { expected_frame_count: expectedFrameCount }
+        : {}),
       ...(legLengthM !== undefined ? { leg_length_m: legLengthM } : {}),
     }),
     signal,

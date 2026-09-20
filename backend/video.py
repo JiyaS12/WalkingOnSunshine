@@ -8,18 +8,26 @@ positive — same convention the frontend uses for live camera input).
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 
 import cv2
 import mediapipe as mp
+from mediapipe.framework.formats.landmark_pb2 import LandmarkList
 
 # pose landmark indices -> joint names (same mapping as the frontend)
 _LANDMARK_JOINTS = {
+    11: "left_shoulder",
+    12: "right_shoulder",
     23: "left_hip",
     24: "right_hip",
     25: "left_knee",
     26: "right_knee",
     27: "left_ankle",
     28: "right_ankle",
+    29: "left_heel",
+    30: "right_heel",
+    31: "left_foot_index",
+    32: "right_foot_index",
 }
 
 Frame = dict[str, list[float]]
@@ -59,7 +67,7 @@ def _fill_gaps(detections: list[tuple[int, Frame]]) -> list[Frame]:
             {
                 joint: [
                     prev_frame[joint][k] + t * (next_frame[joint][k] - prev_frame[joint][k])
-                    for k in range(3)
+                    for k in range(len(prev_frame[joint]))
                 ]
                 for joint in prev_frame
             }
@@ -85,10 +93,19 @@ def _frame_from_landmarks(world) -> Frame | None:
     return frame
 
 
-def extract_frames(
+def _visibility_from_landmarks(world: LandmarkList) -> Frame:
+    return {
+        joint: [float(world.landmark[index].visibility)]
+        for index, joint in _LANDMARK_JOINTS.items()
+    } if isinstance(world, LandmarkList) else {
+        joint: [0.0] for joint in _LANDMARK_JOINTS.values()
+    }
+
+
+def extract_frames_with_visibility(
     path: str, max_frames: int = 300
-) -> tuple[list[Frame], float, int]:
-    """Returns (joint_frames, effective_fps, total_frames_read)."""
+) -> tuple[list[Frame], list[dict[str, float]], float, int, float]:
+    """Return coordinates, visibility, FPS, frames read, and missing percentage."""
     try:
         cap = cv2.VideoCapture(path)
     except cv2.error as e:
@@ -102,17 +119,12 @@ def extract_frames(
     fps = cap.get(cv2.CAP_PROP_FPS)
     if not fps or math.isnan(fps) or math.isinf(fps) or fps <= 0:
         fps = 30.0
-    total_raw = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    total = int(total_raw) if total_raw and math.isfinite(total_raw) and total_raw > 0 else 0
-    step = max(1, math.ceil(total / max_frames)) if total > 0 else 1
-    # Decimating a long clip to fit max_frames can drop the sample rate below
-    # what gait timing needs (~4 steps/s), which aliases stride and cadence.
-    # Keep the rate above the floor and analyse a bounded window instead.
-    if fps / step < _MIN_ANALYSIS_FPS:
-        step = max(1, int(fps // _MIN_ANALYSIS_FPS))
+    step = max(1, math.ceil(fps / 30.0))
     effective_fps = fps / step
+    max_frames = min(max_frames, int(round(10 * effective_fps)))
 
     detections: list[tuple[int, Frame]] = []
+    visibility_detections: list[tuple[int, dict[str, list[float]]]] = []
     read = 0
     sampled = 0
     try:
@@ -144,6 +156,9 @@ def extract_frames(
                 frame = _frame_from_landmarks(results.pose_world_landmarks)
                 if frame is not None:
                     detections.append((slot, frame))
+                    visibility_detections.append(
+                        (slot, _visibility_from_landmarks(results.pose_world_landmarks))
+                    )
     except cv2.error as e:
         raise VideoDecodeError(f"video decoding failed: {e}") from e
     finally:
@@ -161,4 +176,100 @@ def extract_frames(
             "full body"
         )
     frames = _fill_gaps(detections)
+    visibility_vectors = _fill_gaps(visibility_detections)
+    visibility_frames = [
+        {joint: values[0] for joint, values in frame.items()}
+        for frame in visibility_vectors
+    ]
+    missing_pct = 100.0 * (sampled - len(detections)) / sampled
+    return frames, visibility_frames, effective_fps, read, missing_pct
+
+
+def extract_frames(
+    path: str, max_frames: int = 300
+) -> tuple[list[Frame], float, int]:
+    """Backward-compatible coordinate-only video extraction."""
+    frames, _, effective_fps, read, _ = extract_frames_with_visibility(
+        path, max_frames
+    )
     return frames, effective_fps, read
+
+
+def extract_frame_windows(
+    path: str,
+    *,
+    window_seconds: float = 10.0,
+    max_fps: float = 30.0,
+) -> Iterator[tuple[list[Frame], list[dict[str, float]], float, float]]:
+    """Yield bounded windows for offline training without retaining a full video."""
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise ValueError(f"could not open video file: {path}")
+    source_fps = cap.get(cv2.CAP_PROP_FPS)
+    if not source_fps or not math.isfinite(source_fps) or source_fps <= 0:
+        source_fps = 30.0
+    step = max(1, math.ceil(source_fps / max_fps))
+    effective_fps = source_fps / step
+    slots_per_window = max(2, int(round(window_seconds * effective_fps)))
+    read = 0
+    sampled_slot = 0
+    coords: list[tuple[int, Frame]] = []
+    visibility: list[tuple[int, dict[str, list[float]]]] = []
+
+    def finish_window(slot_count: int):
+        nonlocal coords, visibility
+        if len(coords) < 2:
+            coords, visibility = [], []
+            return None
+        try:
+            missing_pct = 100.0 * (slot_count - len(coords)) / slot_count
+            filled = _fill_gaps(coords)
+            filled_visibility = _fill_gaps(visibility)
+        except ValueError:
+            coords, visibility = [], []
+            return None
+        coords, visibility = [], []
+        visibility_frames = [
+            {joint: values[0] for joint, values in frame.items()}
+            for frame in filled_visibility
+        ]
+        return filled, visibility_frames, effective_fps, missing_pct
+
+    try:
+        with mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        ) as pose:
+            while True:
+                ok, image = cap.read()
+                if not ok:
+                    break
+                source_index = read
+                read += 1
+                if source_index % step != 0:
+                    continue
+                local_slot = sampled_slot % slots_per_window
+                sampled_slot += 1
+                try:
+                    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    results = pose.process(rgb)
+                    world = results.pose_world_landmarks
+                    frame = _frame_from_landmarks(world)
+                except (cv2.error, RuntimeError, ValueError):
+                    frame = None
+                if frame is not None:
+                    coords.append((local_slot, frame))
+                    visibility.append((local_slot, _visibility_from_landmarks(world)))
+                if local_slot == slots_per_window - 1:
+                    completed = finish_window(slots_per_window)
+                    if completed is not None:
+                        yield completed
+            remainder = sampled_slot % slots_per_window
+            if remainder:
+                completed = finish_window(remainder)
+                if completed is not None:
+                    yield completed
+    finally:
+        cap.release()
