@@ -19,6 +19,21 @@ discarded, so one missing frame cannot zero out a genuine high-risk score;
 `dropped_frame_pct` reports how much of a session was repaired, and a clip
 missing more than half its frames is rejected outright.
 
+Stride length is `2 x` the mean fore-aft ankle separation at its peaks —
+the ankle-to-ankle vector projected onto the walking direction (perpendicular
+to the hip line), so step width and any height difference between the feet
+stay out of it. It therefore assumes left and right steps are similar; the
+left/right difference is reported by `asymmetry_pct` instead. Because
+MediaPipe world coordinates are a scale *estimate*, treat `stride_ratio`
+(stride / leg length) as the reliable figure and the metre value as
+approximate.
+
+A reading only counts as gait when the feet leave the floor **and** the
+fore-aft swing is periodic — most of its power sits at stepping rates
+(0.3–3 Hz). Amplitude alone cannot decide it: tracker jitter separates the
+ankles further than a short shuffling step does, so thresholding on distance
+either flags a stationary subject or dismisses a genuinely impaired walker.
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full system overview:
