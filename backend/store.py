@@ -36,12 +36,18 @@ def _load() -> dict:
     global _patients
     if _patients is not None:
         return _patients
+    seeds = {p["patient_id"]: p for p in json.loads(SEED_PATH.read_text())}
     try:
-        _patients = json.loads(_cache_path.read_text())
+        cached = json.loads(_cache_path.read_text())
     except Exception:
-        _patients = {
-            p["patient_id"]: p for p in json.loads(SEED_PATH.read_text())
-        }
+        _patients = seeds
+        _persist()
+        return _patients
+    # Seed patients added after the cache was written are merged in; existing
+    # records (and their surveys/sessions) are never overwritten.
+    missing = {pid: p for pid, p in seeds.items() if pid not in cached}
+    _patients = {**cached, **missing}
+    if missing:
         _persist()
     return _patients
 
