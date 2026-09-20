@@ -17,11 +17,11 @@ def database(monkeypatch):
         "demo-1": {
             "patient_id": "demo-1", "name": "Synthetic patient", "secret": "DO-NOT-EXPOSE",
             "calls": [{"patient_id": "demo-1", "call_id": "call-1", "attempt_id": "attempt-1",
-                       "call_status": "completed", "survey_status": "stored", "survey_skipped": ["hoos_rising"],
+                       "call_status": "completed", "survey_status": "stored", "survey_id": "survey-1",
                        "_destination_phone": "+15555550123",
                        "_fingerprint": "DO-NOT-EXPOSE", "_phone_snapshot": {"token": "DO-NOT-EXPOSE"},
                        "walking": {"status": "saved", "events": [{"event_id": "event-1", "event": "page_ready", "token": "DO-NOT-EXPOSE"}]}}],
-            "surveys": [{"patient_id": "demo-1", "call_id": "call-1", "pain_scale": 0,
+            "surveys": [{"patient_id": "demo-1", "call_id": "call-1", "survey_id": "survey-1", "pain_scale": 0,
                          "_fingerprint": "DO-NOT-EXPOSE", "condition_survey": {
                              "instrument": "hoos_jr", "skipped": ["hoos_rising"],
                              "answers": [{"question_id": "hoos_stairs", "normalized_value": "none", "confirmed": True, "token": "DO-NOT-EXPOSE"}]}}],

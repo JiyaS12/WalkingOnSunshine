@@ -62,11 +62,23 @@ def _fingerprint(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def _public_call(call: dict) -> dict:
+def survey_skipped(record: dict, call: dict) -> list[str]:
+    """Question IDs the call's stored survey left unanswered, read from the linked survey."""
+    survey_id = call.get("survey_id")
+    if not survey_id:
+        return []
+    for survey in record.get("surveys", []):
+        if survey.get("survey_id") == survey_id:
+            return list((survey.get("condition_survey") or {}).get("skipped") or [])
+    return []
+
+
+def _public_call(record: dict, call: dict) -> dict:
     result = deepcopy(call)
     result.pop("_fingerprint", None)
     result.pop("_phone_snapshot", None)
     result.pop("_destination_phone", None)
+    result["survey_skipped"] = survey_skipped(record, call)
     return result
 
 
@@ -79,7 +91,7 @@ def _public_record(record: dict) -> dict:
     for survey in result.get("surveys", []):
         survey.pop("_fingerprint", None)
     if "calls" in result:
-        result["calls"] = [_public_call(call) for call in result["calls"]]
+        result["calls"] = [_public_call(record, call) for call in result["calls"]]
     return result
 
 
@@ -289,7 +301,6 @@ def _append_survey_locked(patients: dict, survey: dict) -> dict:
             raise Conflict("survey is already terminal")
         call["survey_status"] = "stored"
         call["survey_id"] = survey["survey_id"]
-        call["survey_skipped"] = list(survey["condition_survey"].get("skipped", []))
         _touch(call)
     _commit(patients, pid, new_record)
     return _public_record(new_record)
@@ -431,7 +442,7 @@ def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: s
             if call["request_id"] == request_id:
                 if call["_fingerprint"] != fingerprint:
                     raise Conflict("request_id already has a different call request")
-                return _public_call(call), False
+                return _public_call(record, call), False
         category = category or record.get("condition_category")
         if category not in {"orthopedic", "stroke"}:
             raise Conflict("condition_category must be supplied by a clinician")
@@ -444,7 +455,7 @@ def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: s
             "call_id": str(uuid4()), "patient_id": pid, "request_id": request_id,
             "attempt_id": str(uuid4()), "condition_category": category,
             "call_status": "dispatching", "survey_status": "pending", "survey_id": None,
-            "survey_skipped": [], "sms_status": "not_requested", "sms_attempt": 0, "sms_retries": [],
+            "sms_status": "not_requested", "sms_attempt": 0, "sms_retries": [],
             "provider_call_id": None, "phone_session_id": None, "message_id": None,
             "error_code": None, "version": 1, "phone_version": 0,
             "created_at": now, "updated_at": now, "_fingerprint": fingerprint,
@@ -459,7 +470,7 @@ def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: s
         record["condition_category"] = category
         record["condition_source"] = "clinician"
         _commit(patients, pid, record)
-        return _public_call(call), True
+        return _public_call(record, call), True
 
 
 _CALL_TRANSITIONS = {
