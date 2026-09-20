@@ -234,8 +234,10 @@ def test_repeated_unclear_consent_replies_default_to_no(harness):
     ("yes but not now", "no"), ("please don't", "no"), ("maybe later", "no"),
     ("you can't text me", "no"), ("you can\u2019t text me", "no"), ("you cannot text me", "no"),
     ("I won't be able to", "no"), ("you can text me", "yes"),
-    ("yes, I can't wait", "yes"), ("sure, but I can't get texts", "no"),
-    ("okay, I won't be able to open the link", "no"), ("I can't wait", "no"),
+    ("yes, I can't wait", "yes"), ("yes, I can\u2019t wait to get the text", "yes"),
+    ("sure, I won't hesitate to open it", "yes"), ("sure, but I can't get texts", "no"),
+    ("okay, I won't be able to open the link", "no"), ("fine, but I cannot receive messages", "no"),
+    ("I can't wait", "unclear"),
     ("hmm", "unclear"), ("what link", "unclear"), ("", "unclear"),
 ])
 def test_consent_intent(reply, intent):
