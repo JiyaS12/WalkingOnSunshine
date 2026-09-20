@@ -451,7 +451,7 @@ export default function PatientScreening({
                 <div className="flex flex-col gap-2">
                   {metrics && !metrics.gait_detected && (
                     <p className="rounded-2xl border-0 bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
-                      No walking detected — walk across the frame (or upload a
+                      No walking detected — walk toward or away from the camera (or upload a
                       clip with walking) to record a session.
                     </p>
                   )}
@@ -479,7 +479,7 @@ export default function PatientScreening({
           />
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
             title="Stride Length"
             value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
@@ -503,10 +503,20 @@ export default function PatientScreening({
             icon={<TrendingDown className="h-4 w-4" />}
           />
           <MetricCard
-            title="Fall Risk"
+            title="Original Fall Risk — heuristic"
             value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
             icon={<AlertTriangle className="h-4 w-4" />}
             badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
+          />
+          <MetricCard
+            title="Experimental CV Risk Index — public-data model"
+            value={metrics?.experimental_cv_risk_index != null
+              ? `${metrics.experimental_cv_risk_index.toFixed(1)} / 100`
+              : !metrics ? "—"
+              : metrics.experimental_cv_risk_status === "not_scorable" ? "Not scorable"
+              : "Model unavailable"}
+            icon={<Activity className="h-4 w-4" />}
+            sub="Higher means poorer reference mobility. Not a probability of falling."
           />
           <MetricCard
             title="Cadence"
@@ -516,6 +526,21 @@ export default function PatientScreening({
             icon={<Activity className="h-4 w-4" />}
           />
         </section>
+
+        {metrics && (
+          <div className="rounded-2xl bg-card p-4 text-xs text-muted-foreground" role="status">
+            <p>Experimental model: {metrics.experimental_cv_risk_model_version ?? "unavailable"}</p>
+            {(metrics.experimental_cv_risk_warnings ?? []).map((warning) => <p key={warning}>{warning}</p>)}
+            {!!Object.keys(metrics.experimental_cv_risk_contributors ?? {}).length && (
+              <details>
+                <summary>Learned feature contributions (latent score, before percentile mapping)</summary>
+                {Object.entries(metrics.experimental_cv_risk_contributors ?? {}).map(([name, value]) => (
+                  <p key={name}>{name.replaceAll("_", " ")}: {value.toFixed(3)}</p>
+                ))}
+              </details>
+            )}
+          </div>
+        )}
 
         <section className="grid gap-6 lg:grid-cols-2">
           <TrendGraph sessions={sessions} />

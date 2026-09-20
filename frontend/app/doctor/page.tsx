@@ -679,9 +679,16 @@ export default function DoctorPortal() {
                   <div className="flex flex-col gap-2">
                     <div className="grid grid-cols-2 gap-2">
                       {stat(
-                        "Fall risk",
+                        "Original fall risk — heuristic",
                         latestSession.metrics.fall_risk_score.toFixed(2),
                         delta("fall_risk_score")
+                      )}
+                      {stat(
+                        "Experimental CV risk index — public-data model",
+                        latestSession.metrics.experimental_cv_risk_index != null
+                          ? `${latestSession.metrics.experimental_cv_risk_index.toFixed(1)} / 100`
+                          : latestSession.metrics.experimental_cv_risk_status === "not_scorable"
+                            ? "Not scorable" : "Model unavailable"
                       )}
                       {stat(
                         "Asymmetry",
@@ -705,6 +712,12 @@ export default function DoctorPortal() {
                         latestSession.label
                       )}
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      Experimental index: higher means poorer reference mobility, not a probability of falling.
+                    </p>
+                    {(latestSession.metrics.experimental_cv_risk_warnings ?? []).map((warning) => (
+                      <p className="text-xs text-muted-foreground" key={warning}>{warning}</p>
+                    ))}
                     {trend.length > 0 && <TrendGraph sessions={trend} />}
                     {replaySession ? (
                       <SkeletonReplay

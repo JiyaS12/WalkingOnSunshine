@@ -97,6 +97,14 @@ def test_process_frame():
     assert resp.status_code == 200
     body = resp.json()
     assert "fall_risk_score" in body
+    assert body["experimental_cv_risk_index"] is None
+    assert body["experimental_cv_risk_status"] in {
+        "not_scorable",
+        "model_unavailable",
+    }
+    assert body["experimental_cv_risk_model_version"] == "unavailable"
+    assert isinstance(body["experimental_cv_risk_contributors"], dict)
+    assert isinstance(body["experimental_cv_risk_warnings"], list)
     assert body["gait_detected"] is True
 
 
@@ -117,6 +125,21 @@ def test_process_frame_with_leg_length():
     ):
         assert key in body
     assert body["leg_length_m"] == 0.9
+
+
+def test_excessive_missing_capture_is_not_scorable_but_keeps_original_score():
+    frames = gait_gen.recovered_session()["frames"]
+    resp = client.post(
+        "/api/process-frame",
+        json={"frames": frames, "fps": 30, "expected_frame_count": 400},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["gait_detected"] is True
+    assert body["fall_risk_score"] is not None
+    assert body["experimental_cv_risk_index"] is None
+    assert body["experimental_cv_risk_status"] == "not_scorable"
+    assert body["dropped_frame_pct"] == 25.0
 
 
 def test_process_frame_too_few():

@@ -67,6 +67,11 @@ def test_fill_gaps_trims_edges():
     assert len(frames) == 3
 
 
+def test_fill_gaps_supports_scalar_visibility_vectors():
+    frames = _fill_gaps([(0, {"left_hip": [0.2]}), (2, {"left_hip": [0.8]})])
+    assert frames[1]["left_hip"] == pytest.approx([0.5])
+
+
 def test_fill_gaps_low_coverage_raises():
     # slots 0..9, only 4 detections -> 40% coverage
     detections = [(s, _frame(float(s))) for s in (0, 3, 6, 9)]

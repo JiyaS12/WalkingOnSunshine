@@ -11,13 +11,21 @@ generates LLM clinical summaries.
 
 Fall risk is normalized by estimated leg length (stride ratio ≈ 1.4–1.6× leg
 length and knee flexion ROM ≈ 50–65° for healthy gait score < 0.15); standing
-still is never flagged. With `leg_length_m` supplied by the frontend's
-60-frame calibration, live camera metrics use the user's own proportions.
+still is never flagged. Trial metrics use leg length estimated from the recorded
+frames; callers can also provide `leg_length_m` to the frame endpoint.
 
 Landmarks that drop out mid-clip are linearly interpolated rather than
 discarded, so one missing frame cannot zero out a genuine high-risk score;
 `dropped_frame_pct` reports how much of a session was repaired, and a clip
 missing more than half its frames is rejected outright.
+
+The experimental branch also exposes a separate **Experimental CV Risk Index
+(0–100)**. It uses a guided three-second countdown and ten-second walk toward
+or away from a fixed camera. The index is percentile-like relative to the
+Toronto Older Adults Gait Archive; it is not a fall probability and has no
+low/moderate/high clinical bands. If recording quality fails or no trained
+artifact passes the validation gate, the API returns `null` with an explicit
+status while preserving the original heuristic score.
 
 ## Architecture
 
@@ -38,6 +46,7 @@ that support it.
 ```
 gaitguard-ai/
   backend/
+    experimental_risk.py  quality-gated features + learned model runtime
     main.py          FastAPI app and route definitions
     patient_access.py signed patient-token and link generation/verification
     processor.py     GaitProcessor: frames -> GaitMetrics
@@ -142,8 +151,10 @@ exact origin in `CORS_ALLOWED_ORIGINS`.
 3. Open http://localhost:3000 — pick a patient link, type a patient ID, or
    click **Load Demo Patient RGN-0417**; any unknown ID auto-creates a demo
    profile (pain 3/10, no prior falls) so you can test right away.
-4. On `/patient/<id>`: do a **Live Camera** walk or **Upload Video** —
-   metrics update, sessions save to the patient's record.
+4. On `/patient/<id>`: choose **Live Camera**, then **Start 10-second assessment**.
+   After the countdown, walk toward or away from the fixed camera with your
+   feet visible. Alternatively, **Upload Video** analyzes the first ten seconds.
+   Save the completed live walk; walking uploads save automatically.
 5. Open `/doctor`, sign in with the backend-configured clinician credentials,
    and select the patient. The portal live-syncs every 5 s and provides the
    Unified Clinical Synthesis Report (survey + gait trend + skeleton replay).
@@ -175,6 +186,11 @@ npm run build
 
 These checks require no repository secrets. GitHub Actions runs the same gates
 for every push and pull request with npm and pip dependency caching enabled.
+If your shell already has `OPENAI_API_KEY`, unset it when running the tests so
+the deterministic template assertions do not call the external model.
+
+For the optional public-data experiment and research tests, see
+[the training guide](backend/research/README.md).
 
 ## License
 

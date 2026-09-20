@@ -13,9 +13,13 @@ translation only shows for the translating mock-cohort sessions).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from experimental_risk import EXTENDED_JOINTS, extract_features, score_features
 
 JOINTS = (
     "left_hip",
@@ -45,6 +49,13 @@ class GaitMetrics(BaseModel):
     peak_ankle_speed_mps: float
     gait_detected: bool
     dropped_frame_pct: float = 0.0
+    experimental_cv_risk_index: float | None = None
+    experimental_cv_risk_status: Literal[
+        "scored", "scored_with_warning", "not_scorable", "model_unavailable"
+    ] = "model_unavailable"
+    experimental_cv_risk_model_version: str = "unavailable"
+    experimental_cv_risk_contributors: dict[str, float] = Field(default_factory=dict)
+    experimental_cv_risk_warnings: list[str] = Field(default_factory=list)
 
 
 def validate_frames(frames: list[dict[str, list[float]]]) -> None:
@@ -76,6 +87,8 @@ class GaitProcessor:
         frames: list[dict[str, list[float]]],
         fps: float = 30.0,
         leg_length_m: float | None = None,
+        visibility_frames: list[dict[str, float]] | None = None,
+        capture_missing_pct: float = 0.0,
     ):
         if len(frames) < 2:
             raise ValueError("at least 2 frames are required")
@@ -84,6 +97,10 @@ class GaitProcessor:
         self.frames = frames
         self.fps = float(fps)
         self.frame_count = len(frames)
+        self.visibility_frames = visibility_frames
+        if not np.isfinite(capture_missing_pct) or not 0 <= capture_missing_pct <= 100:
+            raise ValueError("capture_missing_pct must be between 0 and 100")
+        self.capture_missing_pct = float(capture_missing_pct)
         for i, frame in enumerate(frames):
             for joint in JOINTS:
                 coords = frame.get(joint)
@@ -91,7 +108,8 @@ class GaitProcessor:
                     raise ValueError(
                         f"frame {i}: joint '{joint}' must have exactly 3 coordinates"
                     )
-        self._joints, self.dropped_frame_pct = self._repair_dropped_landmarks()
+        self._joints, repaired_pct = self._repair_dropped_landmarks()
+        self.dropped_frame_pct = max(repaired_pct, self.capture_missing_pct)
         if leg_length_m is not None:
             if not np.isfinite(leg_length_m) or leg_length_m <= 0:
                 raise ValueError("leg_length_m must be finite and positive")
@@ -112,7 +130,12 @@ class GaitProcessor:
         joints: dict[str, np.ndarray] = {}
         dropped = np.zeros(self.frame_count, dtype=bool)
         index = np.arange(self.frame_count)
-        for joint in JOINTS:
+        available_joints = JOINTS + tuple(
+            joint
+            for joint in EXTENDED_JOINTS
+            if all(joint in frame for frame in self.frames)
+        )
+        for joint in available_joints:
             # None and NaN both arrive as nan here; a non-numeric coordinate
             # raises, which is a malformed request rather than lost tracking
             coords = np.array(
@@ -247,6 +270,16 @@ class GaitProcessor:
             return 0.0
         return max(0.0, (first - second) / first * 100.0)
 
+    def experimental_feature_result(self):
+        """Extract the public-data model inputs for runtime and research jobs."""
+        return extract_features(
+            self._joints,
+            fps=self.fps,
+            leg_length_m=self.leg_length_m,
+            dropped_frame_pct=self.dropped_frame_pct,
+            visibility_frames=self.visibility_frames,
+        )
+
     def compute(self) -> GaitMetrics:
         separation = self._ankle_separation()
         peaks = self._find_peaks(separation)
@@ -310,6 +343,9 @@ class GaitProcessor:
         )
         score = round(float(np.clip(_sigmoid(z), 0.0, 1.0)), 3)
 
+        experimental_features = self.experimental_feature_result()
+        experimental = score_features(experimental_features)
+
         return GaitMetrics(
             stride_length_m=round(float(stride), 4),
             asymmetry_pct=round(float(asymmetry), 4),
@@ -323,4 +359,9 @@ class GaitProcessor:
             peak_ankle_speed_mps=round(peak_ankle_speed, 4),
             gait_detected=gait_detected,
             dropped_frame_pct=round(self.dropped_frame_pct, 2),
+            experimental_cv_risk_index=experimental.index,
+            experimental_cv_risk_status=experimental.status,
+            experimental_cv_risk_model_version=experimental.model_version,
+            experimental_cv_risk_contributors=experimental.contributors,
+            experimental_cv_risk_warnings=experimental.warnings,
         )

@@ -21,19 +21,27 @@ import {
   processFrames,
   processVideo,
   JointFrame,
+  VisibilityFrame,
   VideoAnalysis,
 } from "../lib/api";
 import { legLengthFrom } from "../lib/gait";
+import { prepareTrial } from "../lib/trial";
 import type { PoseResults } from "../types/mediapipe";
 
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
+  11: "left_shoulder",
+  12: "right_shoulder",
   23: "left_hip",
   24: "right_hip",
   25: "left_knee",
   26: "right_knee",
   27: "left_ankle",
   28: "right_ankle",
+  29: "left_heel",
+  30: "right_heel",
+  31: "left_foot_index",
+  32: "right_foot_index",
 };
 
 // lower-body landmarks including heels (29/30) and foot indices (31/32)
@@ -99,10 +107,9 @@ const POSE_FILES = `https://cdn.jsdelivr.net/npm/@mediapipe/pose@${POSE_VERSION}
 const EMBEDDED_BLOCKED_MSG =
   "Camera access is blocked inside the embedded preview. Open the dashboard in its own browser tab to use Live Camera.";
 
-const BUFFER_MAX = 300;
-const SYNC_INTERVAL_MS = 2000;
-const SYNC_MIN_FRAMES = 30;
-const SYNC_BATCH = 90;
+const TRIAL_BUFFER_MAX = 900;
+const TRIAL_SECONDS = 10;
+const COUNTDOWN_SECONDS = 3;
 
 const scriptPromises = new Map<string, Promise<void>>();
 
@@ -172,6 +179,7 @@ interface Props {
 }
 
 type Mode = "live" | "upload";
+type TrialPhase = "idle" | "countdown" | "recording" | "processing";
 
 export default function WebcamFeed({
   onMetrics,
@@ -191,6 +199,8 @@ export default function WebcamFeed({
   const [legLengthM, setLegLengthM] = useState<number | null>(null);
   const [calibrationCount, setCalibrationCount] = useState(0);
   const [videoDiag, setVideoDiag] = useState("");
+  const [trialPhase, setTrialPhase] = useState<TrialPhase>("idle");
+  const [trialSeconds, setTrialSeconds] = useState(COUNTDOWN_SECONDS);
 
   useEffect(() => {
     setEmbedded(window.self !== window.top);
@@ -207,13 +217,17 @@ export default function WebcamFeed({
   const sendStartRef = useRef(0);
   const lastResultsRef = useRef<PoseResults | null>(null);
   const mutedSinceRef = useRef(0);
-  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const diagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bufferRef = useRef<JointFrame[]>([]);
   const timesRef = useRef<number[]>([]);
-  const sendingRef = useRef(false);
+  const visibilityBufferRef = useRef<VisibilityFrame[]>([]);
+  const trialPhaseRef = useRef<TrialPhase>("idle");
+  const trialIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const trialTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trialStartRef = useRef(0);
+  const callbackTimesRef = useRef<number[]>([]);
   const generationRef = useRef(0);
   const calibrationRef = useRef<number[]>([]);
   const legLengthRef = useRef<number | null>(null);
@@ -238,9 +252,13 @@ export default function WebcamFeed({
     cancelAnimationFrame(rafRef.current);
     abortRef.current?.abort();
     abortRef.current = null;
-    if (syncIntervalRef.current !== null) {
-      clearInterval(syncIntervalRef.current);
-      syncIntervalRef.current = null;
+    if (trialIntervalRef.current !== null) {
+      clearInterval(trialIntervalRef.current);
+      trialIntervalRef.current = null;
+    }
+    if (trialTimeoutRef.current !== null) {
+      clearTimeout(trialTimeoutRef.current);
+      trialTimeoutRef.current = null;
     }
     if (resultsTimerRef.current !== null) {
       clearTimeout(resultsTimerRef.current);
@@ -272,7 +290,11 @@ export default function WebcamFeed({
     closePoseRef.current = null;
     bufferRef.current = [];
     timesRef.current = [];
-    sendingRef.current = false;
+    visibilityBufferRef.current = [];
+    callbackTimesRef.current = [];
+    trialPhaseRef.current = "idle";
+    setTrialPhase("idle");
+    setTrialSeconds(COUNTDOWN_SECONDS);
     calibrationRef.current = [];
     legLengthRef.current = null;
     setLegLengthM(null);
@@ -357,8 +379,11 @@ export default function WebcamFeed({
       lastResultsRef.current = results;
       setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
       updateFraming(results.poseLandmarks);
+      const time = sendStartRef.current - trialStartRef.current;
+      const recording = trialPhaseRef.current === "recording" && time >= 0 && time < TRIAL_SECONDS * 1000;
+      if (recording) callbackTimesRef.current.push(time);
       const world = results.poseWorldLandmarks;
-      if (!world || world.length < 29) return;
+      if (!world || world.length < 33) return;
 
       // calibration: collect leg length over the first 60 world frames
       if (legLengthRef.current === null) {
@@ -376,18 +401,19 @@ export default function WebcamFeed({
         }
       }
 
+      if (!recording || bufferRef.current.length >= TRIAL_BUFFER_MAX) return;
       const frame: JointFrame = {};
+      const visibility: VisibilityFrame = {};
       for (const [idx, joint] of Object.entries(LANDMARK_JOINTS)) {
         const p = world[Number(idx)];
+        if (![p.x, p.y, p.z].every(Number.isFinite)) return;
         // flip y so up is positive, matching backend coords
         frame[joint] = [p.x, -p.y, p.z];
+        visibility[joint] = p.visibility ?? 0;
       }
-      const buf = bufferRef.current;
-      buf.push(frame);
-      timesRef.current.push(performance.now());
-      if (buf.length > BUFFER_MAX) buf.splice(0, buf.length - BUFFER_MAX);
-      if (timesRef.current.length > BUFFER_MAX)
-        timesRef.current.splice(0, timesRef.current.length - BUFFER_MAX);
+      bufferRef.current.push(frame);
+      visibilityBufferRef.current.push(visibility);
+      timesRef.current.push(time);
     },
     [updateFraming]
   );
@@ -609,42 +635,6 @@ export default function WebcamFeed({
         );
       }, 15_000);
 
-      syncIntervalRef.current = setInterval(() => {
-        const buf = bufferRef.current;
-        if (buf.length < SYNC_MIN_FRAMES || sendingRef.current) return;
-        sendingRef.current = true;
-        const batch = buf.slice(-SYNC_BATCH);
-        const times = timesRef.current.slice(-SYNC_BATCH);
-        let fps = 30;
-        if (times.length >= 2) {
-          const span =
-            (times[times.length - 1] - times[0]) / 1000;
-          const measured = (times.length - 1) / span;
-          if (Number.isFinite(measured) && measured > 0) {
-            fps = Math.min(60, Math.max(5, measured));
-          }
-        }
-        const sendGen = generationRef.current;
-        processFrames(
-          batch,
-          fps,
-          legLengthRef.current ?? undefined,
-          abortRef.current?.signal
-        )
-          .then((m) => {
-            if (sendGen !== generationRef.current) return;
-            onMetricsRef.current(m, "live", batch.slice(-300));
-            setLastSyncAt(new Date());
-          })
-          .catch((err) => {
-            if (err instanceof DOMException && err.name === "AbortError")
-              return;
-          })
-          .finally(() => {
-            if (sendGen === generationRef.current)
-              sendingRef.current = false;
-          });
-      }, SYNC_INTERVAL_MS);
     } catch (err) {
       console.error("[Sana live]", err);
       failLive(
@@ -654,6 +644,71 @@ export default function WebcamFeed({
       );
     }
   }, [failLive, handleResults, stopAll, embedded, drawSkeleton]);
+
+  const finishTrial = useCallback(async () => {
+    trialPhaseRef.current = "processing";
+    setTrialPhase("processing");
+    if (trialIntervalRef.current !== null) clearInterval(trialIntervalRef.current);
+    const gen = generationRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const trial = prepareTrial(
+        bufferRef.current, visibilityBufferRef.current,
+        timesRef.current, callbackTimesRef.current
+      );
+      const metrics = await processFrames(
+        trial.frames, trial.fps, undefined, trial.visibility,
+        undefined, controller.signal, trial.missingPct
+      );
+      if (gen !== generationRef.current || controller.signal.aborted) return;
+      onMetricsRef.current(metrics, "live", trial.frames);
+      setLastSyncAt(new Date());
+    } catch (err) {
+      if (gen !== generationRef.current || controller.signal.aborted) return;
+      setError(err instanceof Error ? err.message : "Trial could not be scored.");
+    } finally {
+      if (gen === generationRef.current) {
+        trialPhaseRef.current = "idle";
+        setTrialPhase("idle");
+        onProcessingChangeRef.current?.(false);
+      }
+    }
+  }, []);
+
+  const startTrial = useCallback(() => {
+    if (trialPhaseRef.current !== "idle") return;
+    onInputResetRef.current?.();
+    setError(null);
+    setLastSyncAt(null);
+    onProcessingChangeRef.current?.(true);
+    trialPhaseRef.current = "countdown";
+    setTrialPhase("countdown");
+    setTrialSeconds(COUNTDOWN_SECONDS);
+    const countdownStart = performance.now();
+    trialIntervalRef.current = setInterval(() => {
+      setTrialSeconds(Math.max(0, Math.ceil(
+        COUNTDOWN_SECONDS - (performance.now() - countdownStart) / 1000
+      )));
+    }, 100);
+    trialTimeoutRef.current = setTimeout(() => {
+      if (trialIntervalRef.current !== null) clearInterval(trialIntervalRef.current);
+      bufferRef.current = [];
+      timesRef.current = [];
+      visibilityBufferRef.current = [];
+      callbackTimesRef.current = [];
+      trialStartRef.current = performance.now();
+      trialPhaseRef.current = "recording";
+      setTrialPhase("recording");
+      setTrialSeconds(TRIAL_SECONDS);
+      trialIntervalRef.current = setInterval(() => {
+        setTrialSeconds(Math.max(0, Math.ceil(
+          TRIAL_SECONDS - (performance.now() - trialStartRef.current) / 1000
+        )));
+      }, 100);
+      trialTimeoutRef.current = setTimeout(() => void finishTrial(), TRIAL_SECONDS * 1000);
+    }, COUNTDOWN_SECONDS * 1000);
+  }, [finishTrial]);
 
   // skeleton replay for the joint frames returned by /api/process-video
   const playFrames = useCallback(
@@ -902,6 +957,28 @@ export default function WebcamFeed({
         </div>
       )}
 
+      {mode === "live" && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-card p-4">
+          <div className="text-xs text-muted-foreground">
+            <p>Fixed camera · full body and feet visible · walk toward or away from the camera.</p>
+            <p>Allow room for 10 seconds of walking and at least six alternating steps.</p>
+            <p aria-live="polite">
+              {trialPhase === "countdown" ? `Get into position — ${trialSeconds}`
+                : trialPhase === "recording" ? `Walk now — ${trialSeconds} seconds remaining`
+                : trialPhase === "processing" ? "Analyzing trial…"
+                : "Start when ready. A three-second countdown precedes the trial."}
+            </p>
+          </div>
+          <button
+            onClick={startTrial}
+            disabled={trialPhase !== "idle" || trackingStatus !== "tracking" || bodyOutOfFrame || !!cameraBlocked}
+            className="rounded-full bg-pastel-sage px-4 py-2 text-xs font-medium disabled:opacity-50"
+          >
+            Start 10-second assessment
+          </button>
+        </div>
+      )}
+
       <div className="rounded-[2.5rem] bg-gradient-to-br from-pastel-blue via-pastel-blue to-pastel-sage/70 p-3 shadow-pillow-lg">
         <div className="mb-2 flex items-center justify-between px-1 text-xs text-foreground">
           {mode === "live" ? (
@@ -993,6 +1070,22 @@ export default function WebcamFeed({
             mode === "live" ? "absolute inset-0 -scale-x-100 object-cover" : ""
           }`}
         />
+        {mode === "live" && trialPhase !== "idle" && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-slate-950/35">
+            <div className="rounded-xl border border-emerald-400/60 bg-slate-950/90 px-6 py-4 text-center shadow-xl">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-300">
+                {trialPhase === "countdown"
+                  ? "Get ready"
+                  : trialPhase === "recording"
+                    ? "Walk toward or away from the camera"
+                    : "Analyzing gait"}
+              </p>
+              <p className="mt-1 text-4xl font-bold text-white">
+                {trialPhase === "processing" ? "…" : trialSeconds}
+              </p>
+            </div>
+          </div>
+        )}
         {mode === "upload" && !uploading && !uploadCaption && (
           <button
             type="button"

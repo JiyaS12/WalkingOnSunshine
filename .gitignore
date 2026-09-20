@@ -10,3 +10,5 @@ node_modules/
 *.key
 PROJECT_LOG.md
 .cache/
+backend/research/.raw/
+backend/research/.feature-checkpoint.json

@@ -1,0 +1,5 @@
+-r requirements.txt
+openpyxl==3.1.5
+requests==2.32.5
+scikit-learn==1.7.2
+stream-unzip==0.0.99
