@@ -29,11 +29,16 @@ _FILLER = re.compile(
     r"my pain is|pain is|falls?|times?|i'?ve had|i had|i have had|i fell|i'?ve fallen)\b"
 )
 _NEGATED_SUBJECT = re.compile(
-    r"\bi(?: am|'m| do| did| have| was)?(?: not|n't)\b"
+    r"\bi(?: am|'m| do| did| have|'ve| was)?"
+    r"(?: (?:definitely|really|honestly|certainly|absolutely|truly|actually|still|just))?"
+    r"(?: not|n't| never)\b"
 )
 _YES_WORDS = re.compile(r"\b(?:yes|yeah|yep|yup|i have|i did|i do|correct|that's right|i was|i am|i'm)\b")
 _NO_WORDS = re.compile(r"\b(?:no|nope|nah|never|none|not|n't|haven't|didn't|wasn't|don't|isn't|aren't)\b")
-_DECIMAL = re.compile(r"\b(?:point|decimal)\b|\band a (?:half|quarter)\b|\d\s*[.,]\s*\d")
+_DECIMAL = re.compile(
+    r"\b(?:point|decimal)\b|\b(?:(?:a|one) half|(?:a|one|three) quarters?)\b|"
+    r"\band a (?:half|quarter)\b|\d\s*[.,]\s*\d"
+)
 _NONE_TEXT = {"none", "nothing", "no", "nope", "nothing to note", "nothing really", "not really",
               "no complaints", "no notes", "nothing to add", "nothing else"}
 ACKNOWLEDGMENTS = ("Got it.", "Okay.", "Thanks.")

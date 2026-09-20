@@ -928,6 +928,7 @@ def test_absent_notes_are_stored_without_confirmation_but_free_text_is_read_back
 @pytest.mark.parametrize("text,value", [
     ("I am not dizzy", False), ("I'm not dizzy", False), ("I do not think so", False), ("no I haven't", False),
     ("I don't get dizzy", False), ("yes I am", True), ("I have been", True),
+    ("I am definitely not dizzy", False), ("I have never fallen", False), ("I'm really not", False),
 ])
 def test_negated_boolean_replies_are_not_affirmative(text, value):
     reading = lenient_parse("boolean", text)
@@ -942,6 +943,8 @@ def test_fractional_ratings_are_not_rounded(text):
 def test_time_words_do_not_invalidate_counts():
     assert lenient_parse("count", "I fell once last quarter").value == 1
     assert lenient_parse("count", "one and a half").valid is False
+    for text in ("one half", "a half", "one quarter", "three quarters"):
+        assert lenient_parse("pain", text).valid is False, text
 
 
 @pytest.mark.parametrize("text", ["I am dizzy, but not often", "yes and no", "I have, but not lately"])
