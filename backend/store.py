@@ -108,6 +108,10 @@ def get_patient(pid: str) -> dict:
         return json.loads(json.dumps(patients[pid]))  # deep copy
 
 
+class CreationDisabled(Exception):
+    """Raised when a new patient record would be created but creation is disabled."""
+
+
 def _append_survey_locked(patients: dict, survey: dict) -> dict:
     """Mutate `patients` to append `survey`; caller must hold `_lock`.
 
@@ -176,7 +180,7 @@ def ensure_patient(
         if pid in patients:
             return json.loads(json.dumps(patients[pid])), False
         if not allow_create:
-            raise PermissionError(f"creation disabled for patient: {pid}")
+            raise CreationDisabled(pid)
         return _append_survey_locked(patients, survey), True
 
 

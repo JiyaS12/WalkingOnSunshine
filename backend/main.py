@@ -276,7 +276,7 @@ def ensure_demo_patient(pid: str = _PID_PATH) -> dict:
         record, created = store.ensure_patient(
             pid, survey.model_dump(mode="json"), allow_create=allow_create
         )
-    except PermissionError as exc:
+    except store.CreationDisabled as exc:
         raise HTTPException(
             status_code=403,
             detail=(
