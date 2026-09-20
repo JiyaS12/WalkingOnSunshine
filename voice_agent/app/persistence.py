@@ -121,7 +121,8 @@ class InMemoryPersistence:
             })
         engine_state = str(snapshot.get("state") or "")
         if engine_state in TERMINAL_STATUS:
-            self.complete_call(session_id, TERMINAL_STATUS[engine_state])
+            outcome = "needs_review" if snapshot.get("needs_human_review") else TERMINAL_STATUS[engine_state]
+            self.complete_call(session_id, outcome)
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
         records = list(self.calls.values())

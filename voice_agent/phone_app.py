@@ -595,7 +595,9 @@ class MediaStreamBridge:
 
     def _cancel_silence_timer(self) -> None:
         task, self._silence_task = self._silence_task, None
-        if task is not None:
+        # A silence-triggered skip speaks the next question on this task.
+        # Cancelling it here would cancel that very playback.
+        if task is not None and task is not asyncio.current_task():
             task.cancel()
 
     async def _silence_watchdog(self, timeout: float) -> None:

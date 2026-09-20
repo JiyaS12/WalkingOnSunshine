@@ -24,6 +24,18 @@ export interface ConditionSurvey {
   condition_category: ConditionCategory;
   answers: ConfirmedAnswer[];
   skipped?: string[];
+  needs_human_review?: boolean;
+  unanswered_questions?: {
+    question_id: string;
+    reason: "clarification_limit" | "no_response";
+    clarification_attempts: number;
+  }[];
+  transcript?: {
+    speaker: "assistant" | "patient" | "system";
+    text: string;
+    question_id: string | null;
+    recorded_at: string;
+  }[];
 }
 
 export interface CallStart {
@@ -65,6 +77,7 @@ export interface CallRecord {
   call_status: CallStatus;
   survey_status: SurveyStatus;
   survey_id: string | null;
+  needs_human_review?: boolean;
   sms_status: SMSStatus;
   sms_attempt: number;
   sms_retries: { request_id: string; sms_attempt: number; created_at: string }[];

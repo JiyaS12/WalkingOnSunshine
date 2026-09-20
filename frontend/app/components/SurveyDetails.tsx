@@ -18,9 +18,19 @@ const questionLabels: Record<string, string> = {
 const yesNo = (value: boolean | null | undefined) => value == null ? "Unknown" : value ? "Yes" : "No";
 
 export default function SurveyDetails({ survey }: { survey: Survey }) {
+  const unanswered = survey.condition_survey?.unanswered_questions?.length
+    ? survey.condition_survey.unanswered_questions
+    : (survey.condition_survey?.skipped ?? []).map((question_id) => ({question_id, reason: "clarification_limit", clarification_attempts: 3}));
+  const needsReview = survey.condition_survey?.needs_human_review || unanswered.length > 0;
   return (
     <div className="space-y-3 text-xs">
       <p className="text-muted-foreground">Recorded {survey.recorded_at ?? "Unknown"} · Call {survey.call_id ?? "Not recorded"}</p>
+      {needsReview && (
+        <div role="note" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950">
+          <p className="font-semibold">Needs human review</p>
+          <p>Some answers could not be established. They were left unanswered, not guessed. Review the transcript and use clinical judgment; no complete survey score is available.</p>
+        </div>
+      )}
       <section aria-label="Original generic intake" className="space-y-1">
         <h4 className="font-semibold">Original generic intake</h4>
         <p>Pain: {survey.pain_scale == null ? "Unknown" : `${survey.pain_scale}/10`}</p>
@@ -43,10 +53,10 @@ export default function SurveyDetails({ survey }: { survey: Survey }) {
                   <p className="text-muted-foreground">{answer.confirmed ? "Confirmed" : "Unconfirmed"} · {answer.acceptance_method.replaceAll("_", " ")}{answer.confirmed_at ? ` · ${answer.confirmed_at}` : ""}</p>
                 </li>
               ))}
-              {(survey.condition_survey.skipped ?? []).map((questionId) => (
-                <li key={questionId}>
-                  <p>{questionLabels[questionId] ?? questionId}: not answered</p>
-                  <p className="text-muted-foreground">Skipped on the call after repeated clarification · needs review</p>
+              {unanswered.map((question) => (
+                <li key={question.question_id} className="rounded-lg bg-amber-50 p-2 text-amber-950">
+                  <p>{questionLabels[question.question_id] ?? question.question_id}: Unanswered — human review required</p>
+                  <p>{question.reason === "no_response" ? "No speech recognized" : "Clarification limit reached"} · {question.clarification_attempts} clarification attempts</p>
                 </li>
               ))}
             </ul>
@@ -54,6 +64,21 @@ export default function SurveyDetails({ survey }: { survey: Survey }) {
           </>
         ) : <p>Not recorded.</p>}
       </section>
+      {!!survey.condition_survey?.transcript?.length && (
+        <details className="border-t border-border pt-2">
+          <summary className="cursor-pointer font-semibold">Survey transcript ({survey.condition_survey.transcript.length} turns)</summary>
+          <p className="mt-2 text-muted-foreground">Speech-recognition text may contain errors. Transcript statements are not confirmed survey answers.</p>
+          <ol className="mt-3 max-h-96 space-y-3 overflow-auto" aria-label="Survey transcript">
+            {survey.condition_survey.transcript.map((turn, index) => (
+              <li key={index} className="rounded-xl bg-muted p-3">
+                <p className="font-semibold capitalize">{turn.speaker} · {turn.question_id ? (questionLabels[turn.question_id] ?? turn.question_id) : "Survey"}</p>
+                <p className="text-muted-foreground">{turn.recorded_at}</p>
+                <p className="whitespace-pre-wrap break-words">{turn.text}</p>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
     </div>
   );
 }

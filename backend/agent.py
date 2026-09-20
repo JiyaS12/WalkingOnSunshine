@@ -247,6 +247,15 @@ def _condition_summary(record: dict) -> str:
             instrument = ConditionSurvey.model_validate(section)
         except ValidationError:
             continue
+        if instrument.needs_human_review:
+            confirmed = ", ".join(f"{answer.question_id}={answer.normalized_value}" for answer in instrument.answers) or "none"
+            missing = ", ".join(item.question_id for item in instrument.unanswered_questions) or "see survey record"
+            return (
+                f"Condition survey requires human review: {instrument.instrument} v{instrument.version}. "
+                f"Confirmed answers: {confirmed}. Unanswered: {missing}. "
+                "No total score is calculated for this incomplete/review-flagged survey. "
+                "Do not infer missing answers; the clinician should review the survey transcript."
+            )
         total = sum(OPTION_WEIGHTS[answer.normalized_value] for answer in instrument.answers)
         answers = ", ".join(f"{answer.question_id}={answer.normalized_value}" for answer in instrument.answers)
         skipped = (

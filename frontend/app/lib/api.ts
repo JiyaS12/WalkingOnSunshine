@@ -221,7 +221,7 @@ export interface PatientAccessRecord {
 export type DatabaseCall = Pick<CallRecord,
   "call_id" | "patient_id" | "attempt_id" | "condition_category" | "call_status" |
   "survey_status" | "survey_id" | "sms_status" | "sms_attempt" | "error_code" |
-  "created_at" | "updated_at" | "walking"
+  "created_at" | "updated_at" | "walking" | "needs_human_review"
 > & { destination_phone: string | null };
 
 export type DatabaseWalk = Omit<GaitSession, "frames" | "frames_ref" | "idempotency_key" | "metrics"> & {

@@ -165,6 +165,23 @@ def test_failed_database_write_invalidates_cache_without_local_fallback(integrat
     assert store.get_patient('demo-1')['condition_category'] is None
 
 
+def test_review_flags_and_unanswered_transcript_survive_supabase_reload(integrated_store):
+    store.upsert_survey({'patient_id': 'demo-1', 'patient_name': 'Synthetic patient'})
+    call, _ = store.reserve_call('demo-1', 'request-review', 'orthopedic', 'fingerprint')
+    condition = {
+        'condition_category': 'orthopedic', 'needs_human_review': True, 'answers': [],
+        'unanswered_questions': [{'question_id': 'hoos_stairs', 'reason': 'clarification_limit'}],
+        'transcript': [{'speaker': 'patient', 'text': 'unclear synthetic testimony'}],
+    }
+    store.upsert_survey({'patient_id': 'demo-1', 'call_id': call['call_id'], 'submission_kind': 'integrated', 'condition_survey': condition})
+    store._patients = None
+    store._supabase = None
+    restored = store.get_patient('demo-1')
+    assert restored['surveys'][-1]['condition_survey'] == condition
+    assert restored['calls'][0]['needs_human_review'] is True
+    assert restored['calls'][0]['survey_status'] == 'stored'
+
+
 def test_missing_schema_does_not_fall_back_to_local_seed_patients(integrated_store):
     integrated_store.fail = True
     with pytest.raises(store.StoreUnavailable):

@@ -155,6 +155,64 @@ async def answer_survey(session, consent: str = "yes"):
     await say(session, consent)
 
 
+@pytest.mark.parametrize("mode", ["unclear", "silence", "all_unclear", "last_unclear"])
+def test_unresolved_questions_continue_and_store_review_evidence(harness, mode):
+    async def scenario():
+        session = await harness.session()
+        for question_index in range(6):
+            skip = mode == "all_unclear" or question_index == (5 if mode == "last_unclear" else 0)
+            if skip:
+                for _ in range(3):
+                    finished = await session.handle_silence() if mode == "silence" else await say(session, "banana unclear testimony")
+                    assert not finished
+                assert session.engine.session.pending_answer is None
+            else:
+                assert not await say(session, "mild")
+        assert session.stage == "consent"
+        assert harness.provider.messages == 0
+        # Existing spoken consent still gates the link, including review surveys.
+        await say(session, "yes")
+        await asyncio.wait_for(harness.walk_requested.wait(), timeout=2)
+        payload = harness.submissions[0]["condition_survey"]
+        missing = 6 if mode == "all_unclear" else 1
+        assert payload["needs_human_review"] is True
+        assert len(payload["answers"]) == 6 - missing
+        assert len(payload["unanswered_questions"]) == missing
+        unresolved_ids = {item["question_id"] for item in payload["unanswered_questions"]}
+        assert not unresolved_ids.intersection(item["question_id"] for item in payload["answers"])
+        assert all("normalized_value" not in item for item in payload["unanswered_questions"])
+        if mode != "silence":
+            unclear = [turn for turn in payload["transcript"] if turn["text"] == "banana unclear testimony"]
+            assert len(unclear) == 3 * missing
+            assert all(turn["question_id"] in unresolved_ids for turn in unclear)
+        else:
+            assert any(turn["speaker"] == "system" for turn in payload["transcript"])
+        assert harness.provider.messages == 1
+        record = store.get_patient("patient1")
+        assert record["surveys"][-1]["condition_survey"] == payload
+        call = store.get_call("patient1", session.call.call_id)
+        assert call["survey_status"] == "stored"
+        assert call["needs_human_review"] is True
+        assert not session.finished
+        await session.disconnect()
+        assert store.get_call("patient1", session.call.call_id)["needs_human_review"] is True
+    asyncio.run(scenario())
+
+
+def test_review_survey_is_saved_without_sms_when_consent_declined(harness):
+    async def scenario():
+        session = await harness.session()
+        for _ in range(3):
+            await say(session, "banana")
+        for _ in range(5):
+            await say(session, "mild")
+        await say(session, "no")
+        assert session.finished
+        assert harness.provider.messages == 0
+        assert harness.submissions[0]["condition_survey"]["needs_human_review"]
+    asyncio.run(scenario())
+
+
 def test_text_waits_for_a_spoken_yes(harness):
     async def scenario():
         session = await harness.session()

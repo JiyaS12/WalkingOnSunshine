@@ -52,7 +52,11 @@ class SurveySession:
     last_confirmation_prompt: str | None = None
     clarification_attempts: int = 0
     needs_human_review: bool = False
-    skipped: list[str] = field(default_factory=list)
+    unanswered_questions: list[dict[str, object]] = field(default_factory=list)
+
+    @property
+    def skipped(self) -> list[str]:
+        return [str(item["question_id"]) for item in self.unanswered_questions]
 
     @property
     def current_question(self) -> SurveyQuestion | None:
