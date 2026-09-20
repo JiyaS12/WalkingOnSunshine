@@ -39,6 +39,13 @@ NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 # ---------- Backend ----------
 log "Setting up backend"
 cd "$ROOT/backend"
+if [ -x .venv/bin/python ]; then
+  venv_ver="$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo none)"
+  case "$venv_ver" in
+    3.10|3.11|3.12) ;;
+    *) log "Recreating backend/.venv (was Python $venv_ver)"; rm -rf .venv ;;
+  esac
+fi
 if [ ! -x .venv/bin/python ]; then
   "$PY" -m venv .venv
 fi
@@ -102,18 +109,28 @@ cd "$ROOT/frontend"
 npm run dev &
 FRONTEND_PID=$!
 
+READY=false
 for _ in $(seq 1 60); do
   if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1 \
      && curl -fsS -o /dev/null http://localhost:3000/ >/dev/null 2>&1; then
+    READY=true
     break
   fi
   sleep 1
 done
+[ "$READY" = true ] || die "Servers did not become ready within 60 seconds (see output above)."
 
 # Mint a magic link for the seeded demo patient (data/mock_patients.json).
 cd "$ROOT/backend"
-set -a; . ./.env; set +a
-MAGIC_LINK="$(.venv/bin/python -c 'import patient_access; print(patient_access.create_patient_link("RGN-0417").url)' 2>/dev/null || true)"
+MAGIC_LINK="$(.venv/bin/python -c '
+import os
+from dotenv import dotenv_values
+for k, v in dotenv_values(".env").items():
+    if v is not None:
+        os.environ.setdefault(k, v)
+import patient_access
+print(patient_access.create_patient_link("RGN-0417").url)
+' 2>/dev/null || true)"
 
 cat <<EOF
 
