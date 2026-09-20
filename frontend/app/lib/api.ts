@@ -346,6 +346,62 @@ export async function fetchPatient(id: string): Promise<PatientRecord> {
   return request<PatientRecord>(`/api/patients/${encodeURIComponent(id)}`);
 }
 
+/** The patient-scoped view returned by the signed-link / magic-link APIs. */
+export interface PatientView {
+  patient_id: string;
+  name?: string | null;
+  gait_sessions: GaitSession[];
+}
+
+export interface PatientSession {
+  authenticated: true;
+  patient_id: string;
+  expires_at: number;
+}
+
+/** Exchange a magic-link token for an HttpOnly patient session cookie. */
+export async function verifyPatientToken(
+  id: string,
+  token: string
+): Promise<PatientSession> {
+  const q = new URLSearchParams({ patient_id: id, token });
+  return request<PatientSession>(`/api/auth/verify?${q.toString()}`);
+}
+
+export async function fetchPatientView(id: string): Promise<PatientView> {
+  return request<PatientView>(
+    `/api/patient-access/${encodeURIComponent(id)}`
+  );
+}
+
+export async function generatePatientViewSummary(
+  id: string
+): Promise<SummaryResponse> {
+  return request<SummaryResponse>(
+    `/api/patient-access/${encodeURIComponent(id)}/summary`,
+    { method: "POST" }
+  );
+}
+
+export async function addPatientViewSession(
+  id: string,
+  body: {
+    label: string;
+    source: string;
+    metrics: GaitMetrics;
+    frames?: JointFrame[] | null;
+  }
+): Promise<PatientView> {
+  return request<PatientView>(
+    `/api/patient-access/${encodeURIComponent(id)}/sessions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+}
+
 export async function addPatientSession(
   id: string,
   body: {

@@ -8,14 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Loader2,
   LogOut,
   Search,
-  ShieldCheck,
   Sparkles,
-  Stethoscope,
   User,
 } from "lucide-react";
 import SkeletonReplay from "../components/SkeletonReplay";
@@ -50,12 +49,18 @@ function riskBand(score: number | null | undefined): string {
 function riskBadge(score: number | null | undefined) {
   const band = riskBand(score);
   if (band === "high")
-    return "bg-rose-600/20 text-rose-300 border-rose-500/40";
+    return "border-0 bg-pastel-peach text-foreground";
   if (band === "moderate")
-    return "bg-amber-600/20 text-amber-300 border-amber-500/40";
+    return "border-0 bg-pastel-peach/70 text-foreground";
   if (band === "low")
-    return "bg-emerald-600/20 text-emerald-300 border-emerald-500/40";
-  return "border-slate-600 text-slate-400";
+    return "border-0 bg-pastel-green text-foreground";
+  return "border-0 bg-muted text-muted-foreground";
+}
+
+function safeReturnPath(): string | null {
+  if (typeof window === "undefined") return null;
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && /^\/(patient\/[^/?#]+)?$/.test(next) ? next : null;
 }
 
 export default function DoctorPortal() {
@@ -313,6 +318,11 @@ export default function DoctorPortal() {
     try {
       const activeSession = await signInClinician(username, password);
       setPassword("");
+      const returnPath = safeReturnPath();
+      if (returnPath) {
+        window.location.assign(returnPath);
+        return;
+      }
       setSession(activeSession);
       setAuthState("signed-in");
     } catch (err) {
@@ -339,16 +349,16 @@ export default function DoctorPortal() {
   };
 
   const stat = (label: string, value: string, d?: number | null) => (
-    <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
-      <p className="text-[10px] uppercase tracking-wide text-slate-500">
+    <div className="rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className="text-sm font-semibold text-slate-100">
+      <p className="text-sm font-semibold text-foreground">
         {value}
         {d !== null && d !== undefined && (
           <span
             className={`ml-1 text-[10px] ${
-              d <= 0 ? "text-emerald-400" : "text-rose-400"
+              d <= 0 ? "text-foreground" : "text-foreground"
             }`}
           >
             {d > 0 ? "+" : ""}
@@ -361,7 +371,7 @@ export default function DoctorPortal() {
 
   if (authState === "checking") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">
+      <main className="flex min-h-screen items-center justify-center text-muted-foreground">
         <p className="flex items-center gap-2 text-sm">
           <Loader2 className="h-4 w-4 animate-spin" /> Checking clinician session…
         </p>
@@ -371,57 +381,57 @@ export default function DoctorPortal() {
 
   if (authState !== "signed-in") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-        <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6">
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="w-full max-w-sm rounded-[2.25rem] border-0 bg-card p-6 shadow-pillow">
           <div className="mb-5 flex items-center gap-3">
-            <ShieldCheck className="h-8 w-8 text-emerald-400" />
+            <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
             <div>
               <h1 className="text-xl font-bold">Clinician sign-in</h1>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-muted-foreground">
                 Sign in to access protected patient records.
               </p>
             </div>
           </div>
           {authState === "expired" && (
-            <p role="alert" className="mb-3 rounded-lg border border-amber-500/40 bg-amber-600/10 p-2 text-xs text-amber-200">
+            <p role="alert" className="mb-3 rounded-2xl border-0 bg-pastel-peach/70 p-2 text-xs text-foreground">
               Your clinician session expired. Sign in again.
             </p>
           )}
           <form onSubmit={handleSignIn} className="space-y-3">
-            <label className="block text-xs text-slate-300">
+            <label className="block text-xs text-muted-foreground">
               Username
               <input
                 autoComplete="username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-sage"
               />
             </label>
-            <label className="block text-xs text-slate-300">
+            <label className="block text-xs text-muted-foreground">
               Password
               <input
                 type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-sage"
               />
             </label>
             {authError && authState !== "expired" && (
-              <p role="alert" className="text-xs text-rose-300">
+              <p role="alert" className="text-xs text-[#9A4B32]">
                 {authError}
               </p>
             )}
             <button
               type="submit"
               disabled={signingIn || !username || !password}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep disabled:opacity-50"
             >
               {signingIn && <Loader2 className="h-4 w-4 animate-spin" />}
               {signingIn ? "Signing in…" : "Sign in"}
             </button>
           </form>
-          <Link href="/" className="mt-4 block text-center text-xs text-slate-400 hover:text-slate-200">
+          <Link href="/" className="mt-4 block text-center text-xs text-muted-foreground hover:text-foreground">
             Return to patient view
           </Link>
         </div>
@@ -430,47 +440,47 @@ export default function DoctorPortal() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <main className="min-h-screen p-6 text-foreground">
+      <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Stethoscope className="h-8 w-8 text-emerald-400" />
+          <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
-            <h1 className="text-2xl font-bold">Doctor&apos;s Portal</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="text-2xl font-bold text-foreground">Doctor&apos;s Portal</h1>
+            <p className="text-xs text-muted-foreground">
               Unified clinical synthesis — surveys + gait telemetry
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300">
+          <span className="rounded-full border-0 bg-muted px-3 py-1.5 text-xs text-muted-foreground shadow-pillow-inset">
             {session?.username}
           </span>
           <button
             onClick={() => void handleSignOut()}
-            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+            className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
           >
-            <LogOut className="h-3.5 w-3.5 text-slate-400" />
+            <LogOut className="h-3.5 w-3.5 text-muted-foreground" />
             Sign out
           </button>
           <Link
             href="/"
-            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+            className="flex items-center gap-2 rounded-full border-0 bg-card px-3 py-1.5 text-xs text-foreground shadow-pillow-sm hover:bg-pastel-sand"
           >
-            <User className="h-3.5 w-3.5 text-slate-400" />
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
             Patient view
           </Link>
         </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-          <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
-            <Search className="h-4 w-4 text-slate-500" />
+        <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
+          <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
+            <Search className="h-4 w-4 text-muted-foreground" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search id, name, complaint…"
-              className="w-full bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-500"
+              className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>
           <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
@@ -485,10 +495,10 @@ export default function DoctorPortal() {
               <button
                 key={k}
                 onClick={() => setRiskFilter(k)}
-                className={`rounded-full border px-2 py-0.5 ${
+                className={`rounded-full border-0 px-2 py-0.5 ${
                   riskFilter === k
-                    ? "border-emerald-500 bg-emerald-600/20 text-emerald-300"
-                    : "border-slate-600 text-slate-300 hover:bg-slate-800"
+                    ? "bg-pastel-sage text-foreground shadow-pillow-sm"
+                    : "bg-card text-muted-foreground shadow-pillow-inset"
                 }`}
               >
                 {label}
@@ -496,20 +506,20 @@ export default function DoctorPortal() {
             ))}
             <button
               onClick={() => setDizzyOnly((v) => !v)}
-              className={`rounded-full border px-2 py-0.5 ${
+              className={`rounded-full border-0 px-2 py-0.5 ${
                 dizzyOnly
-                  ? "border-emerald-500 bg-emerald-600/20 text-emerald-300"
-                  : "border-slate-600 text-slate-300 hover:bg-slate-800"
+                  ? "bg-pastel-sage text-foreground shadow-pillow-sm"
+                  : "bg-card text-muted-foreground shadow-pillow-inset"
               }`}
             >
               Dizziness
             </button>
             <button
               onClick={() => setFallsOnly((v) => !v)}
-              className={`rounded-full border px-2 py-0.5 ${
+              className={`rounded-full border-0 px-2 py-0.5 ${
                 fallsOnly
-                  ? "border-emerald-500 bg-emerald-600/20 text-emerald-300"
-                  : "border-slate-600 text-slate-300 hover:bg-slate-800"
+                  ? "bg-pastel-sage text-foreground shadow-pillow-sm"
+                  : "bg-card text-muted-foreground shadow-pillow-inset"
               }`}
             >
               Recent falls
@@ -517,51 +527,51 @@ export default function DoctorPortal() {
           </div>
 
           {loadingList && (
-            <p className="flex items-center gap-2 text-xs text-slate-400">
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading patients…
             </p>
           )}
           {listError && (
-            <p className="text-xs text-rose-300">{listError}</p>
+            <p className="text-xs text-foreground">{listError}</p>
           )}
           {!loadingList && !listError && filtered.length === 0 && (
-            <p className="text-xs text-slate-400">No patients match.</p>
+            <p className="text-xs text-muted-foreground">No patients match.</p>
           )}
           <ul className="flex flex-col gap-2">
             {filtered.map((p) => (
               <li key={p.patient_id}>
                 <button
                   onClick={() => setSelectedId(p.patient_id)}
-                  className={`w-full rounded-lg border p-2.5 text-left transition-colors ${
+                  className={`w-full rounded-2xl border-0 p-2.5 text-left transition-colors ${
                     selectedId === p.patient_id
-                      ? "border-emerald-500 bg-emerald-600/10"
-                      : "border-slate-700 bg-slate-950 hover:bg-slate-800"
+                      ? "bg-pastel-sage/50 shadow-pillow"
+                      : "bg-muted shadow-pillow-inset hover:bg-pastel-sand"
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-100">
+                    <span className="text-sm font-medium text-foreground">
                       {p.name ?? p.patient_id}
                     </span>
                     {p.latest_fall_risk !== null &&
                       p.latest_fall_risk !== undefined && (
                         <span
-                          className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${riskBadge(p.latest_fall_risk)}`}
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${riskBadge(p.latest_fall_risk)}`}
                         >
                           {p.latest_fall_risk.toFixed(2)}
                         </span>
                       )}
                   </div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                     <span>{p.patient_id}</span>
                     {p.age != null && <span>· {p.age} y/o</span>}
                     {p.pain_scale != null && (
-                      <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-1.5 py-px text-amber-300">
+                      <span className="rounded-full border-0 bg-pastel-peach px-1.5 py-px text-foreground">
                         pain {p.pain_scale}
                       </span>
                     )}
                   </div>
                   {p.latest_survey_at && (
-                    <p className="mt-0.5 text-[10px] text-slate-500">
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
                       survey {p.latest_survey_at.slice(0, 10)}
                     </p>
                   )}
@@ -571,12 +581,15 @@ export default function DoctorPortal() {
           </ul>
         </div>
 
-        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-          <h2 className="mb-1 text-sm font-medium text-slate-200">
-            Unified Clinical Synthesis Report
-          </h2>
+        <div className="overflow-hidden rounded-[2.25rem] border-0 bg-card shadow-pillow">
+          <div className="rounded-t-[2.25rem] bg-gradient-to-r from-pastel-sage via-pastel-green to-pastel-peach/70 px-6 py-3">
+            <h2 className="text-sm font-medium text-foreground">
+              Unified Clinical Synthesis Report
+            </h2>
+          </div>
+          <div className="p-5">
           <div className="mb-4 flex items-center justify-between text-xs">
-            <p className="text-slate-400">
+            <p className="text-muted-foreground">
               {record
                 ? `${record.name ?? record.patient_id} · ${record.patient_id}${
                     record.age ? ` · ${record.age} y/o` : ""
@@ -586,23 +599,23 @@ export default function DoctorPortal() {
                   : "Select a patient"}
             </p>
             {lastSyncedAt && (
-              <span className="flex items-center gap-1.5 text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-pastel-sagedeep" />
                 Live · updated{" "}
                 {lastSyncedAt.toLocaleTimeString("en-GB", { hour12: false })}
               </span>
             )}
           </div>
           {detailError && (
-            <p className="text-xs text-rose-300">{detailError}</p>
+            <p className="text-xs text-foreground">{detailError}</p>
           )}
           {!record && selectedId && !detailError && (
-            <p className="flex items-center gap-2 text-xs text-slate-400">
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading record…
             </p>
           )}
           {!record && !selectedId && (
-            <p className="text-xs text-slate-400">No patient selected.</p>
+            <p className="text-xs text-muted-foreground">No patient selected.</p>
           )}
 
           {record && record.patient_id === selectedId && (
@@ -610,19 +623,19 @@ export default function DoctorPortal() {
           )}
           {record && (
             <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Subjective — Phone Survey
                 </h3>
                 {latestSurvey ? (
                   <SurveyDetails survey={latestSurvey} />
                 ) : (
-                  <p className="text-xs text-slate-500">No survey on file.</p>
+                  <p className="text-xs text-muted-foreground">No survey on file.</p>
                 )}
               </div>
 
-              <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Objective — Gait Analysis
                 </h3>
                 {latestSession ? (
@@ -662,26 +675,26 @@ export default function DoctorPortal() {
                         fps={30}
                       />
                     ) : (
-                      <p className="rounded-lg border border-dashed border-slate-700 p-3 text-center text-[11px] text-slate-500">
+                      <p className="rounded-2xl border-2 border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">
                         No skeleton replay available
                       </p>
                     )}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-muted-foreground">
                     No gait sessions on file.
                   </p>
                 )}
               </div>
 
-              <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   AI Clinical Summary
                 </h3>
                 <button
                   onClick={runSynthesis}
                   disabled={synthLoading}
-                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
                 >
                   {synthLoading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -691,19 +704,19 @@ export default function DoctorPortal() {
                   {synthLoading ? "Generating…" : "Generate synthesis"}
                 </button>
                 {synthError && (
-                  <p className="mt-2 text-xs text-rose-300">{synthError}</p>
+                  <p className="mt-2 text-xs text-foreground">{synthError}</p>
                 )}
                 {synthesis && (
                   <div className="mt-3">
-                    <p className="text-xs leading-relaxed text-slate-200">
+                    <p className="text-xs leading-relaxed text-foreground">
                       {synthesis.summary}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
-                      <span className="rounded-full border border-slate-600 px-2 py-0.5 uppercase text-slate-300">
+                      <span className="rounded-full border-0 bg-card px-2 py-0.5 uppercase text-muted-foreground">
                         {synthesis.source === "openai" ? "OpenAI" : "template"}
                       </span>
                       {synthesis.cached && (
-                        <span className="rounded-full border border-sky-500/40 bg-sky-600/20 px-2 py-0.5 uppercase text-sky-300">
+                        <span className="rounded-full border-0 bg-pastel-sage px-2 py-0.5 uppercase text-foreground">
                           cached
                         </span>
                       )}
@@ -717,7 +730,7 @@ export default function DoctorPortal() {
             <section aria-label="Clinical history" className="mt-4 space-y-3 text-xs">
               <h3 className="font-semibold">Clinical history</h3>
               {[...record.surveys].reverse().map((survey, index) => (
-                <details key={survey.survey_id ?? `${survey.recorded_at}-${index}`} className="rounded border border-slate-700 p-3">
+                <details key={survey.survey_id ?? `${survey.recorded_at}-${index}`} className="rounded-2xl border border-border p-3">
                   <summary>Survey · {survey.recorded_at ?? "Unknown time"} · {survey.call_id ?? "No call association"}</summary>
                   <SurveyDetails survey={survey} />
                 </details>
@@ -731,6 +744,7 @@ export default function DoctorPortal() {
               ))}
             </section>
           )}
+        </div>
         </div>
       </div>
     </main>

@@ -26,8 +26,11 @@ function setup({ microphoneError, speechError, responseState = "awaiting_confirm
     }
     async end() { this.paused = true; this.ended = true; await this.emit("pause"); await this.emit("ended"); }
   }
-  const elements = Object.fromEntries(["conversation", "record", "listen-toggle", "status", "start", "voice", "patient"].map(id => [id, new Element()]));
+  const elements = Object.fromEntries(["conversation", "record", "listen-toggle", "status", "start", "voice", "patient", "token"].map(id => [id, new Element()]));
   const calls = [];
+  const blobs = [];
+  const revoked = [];
+  const storage = new Map([["operatorToken", "synthetic-operator-token"]]);
   let microphoneCalls = 0;
   let stoppedTracks = 0;
   let latestRecorder;
@@ -55,6 +58,10 @@ function setup({ microphoneError, speechError, responseState = "awaiting_confirm
   const context = {
     document: { querySelector: selector => elements[selector.slice(1)], createElement: () => new Element() },
     window: { MediaRecorder: Recorder, AudioContext, speechSynthesis: { cancel() {} }, addEventListener: (name, fn) => { windowEvents[name] = fn; } },
+    sessionStorage: {
+      getItem: key => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+    },
     navigator: { mediaDevices: { getUserMedia: async () => {
       microphoneCalls++;
       if (microphoneError) throw microphoneError;
@@ -64,7 +71,9 @@ function setup({ microphoneError, speechError, responseState = "awaiting_confirm
     } } },
     fetch: async (url, options) => {
       calls.push({ url, options });
-      if (url.includes("/speech?")) throw new Error("Speech must stream through the media element, not a buffered fetch");
+      if (url.includes("/speech?")) {
+        return new Response("synthetic speech", { headers: { "Content-Type": "audio/mpeg" } });
+      }
       if (url.endsWith("/audio")) {
         if (uploadError) return new Response(JSON.stringify({ detail: "Transcription unavailable" }), { status: 502 });
         return new Response(JSON.stringify({
@@ -75,12 +84,18 @@ function setup({ microphoneError, speechError, responseState = "awaiting_confirm
     },
     MediaRecorder: Recorder, Blob, FormData, Date, encodeURIComponent, TurnDetector,
     performance: { now: () => now },
-    URL: { createObjectURL: () => "blob:synthetic-voice", revokeObjectURL() {} },
+    URL: {
+      createObjectURL: blob => {
+        blobs.push(blob);
+        return `blob:synthetic-voice-${blobs.length}`;
+      },
+      revokeObjectURL: url => revoked.push(url),
+    },
     setInterval: fn => { timers.set(++nextTimer, fn); return nextTimer; },
     clearInterval: id => timers.delete(id),
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../voice_web/app.js"), "utf8"), context);
-  return { elements, calls, mediaRequests, tracks, windowEvents,
+  return { elements, calls, mediaRequests, tracks, windowEvents, blobs, revoked, storage,
     tick(duration, rms = 0) {
       amplitude = rms;
       for (let time = 0; time < duration; time += 50) {
@@ -95,8 +110,13 @@ function setup({ microphoneError, speechError, responseState = "awaiting_confirm
 test("hands-free speech and silence upload a turn and automatically listen again", async () => {
   const app = setup();
   const { elements: e } = app;
+  assert.equal(e.token.value, "synthetic-operator-token");
+  e.token.value = "  synthetic-current-token  ";
   await e.start.emit("click");
-  assert.ok(app.mediaRequests[0].includes("/speech?prompt_id=turn-1"));
+  assert.equal(app.mediaRequests[0], "blob:synthetic-voice-1");
+  assert.ok(app.calls.some(call => call.url === "/api/sessions/session-1/speech?prompt_id=turn-1"));
+  assert.equal(app.blobs[0].type, "audio/mpeg");
+  assert.equal(await app.blobs[0].text(), "synthetic speech");
   assert.equal(e.voice.preload, "auto");
   assert.equal(e.record.disabled, true);
   assert.equal(app.recorder, undefined);
@@ -117,7 +137,15 @@ test("hands-free speech and silence upload a turn and automatically listen again
   assert.equal(app.stoppedTracks, 0);
   assert.equal(app.tracks[0].enabled, false);
   assert.ok(e.conversation.children.some(row => row.textContent === "You: Mild."));
-  assert.ok(app.mediaRequests.some(url => url.includes("/speech?prompt_id=turn-2")));
+  assert.deepEqual(app.mediaRequests, ["blob:synthetic-voice-1", "blob:synthetic-voice-2"]);
+  assert.ok(app.calls.some(call => call.url === "/api/sessions/session-1/speech?prompt_id=turn-2"));
+  assert.deepEqual(app.revoked, ["blob:synthetic-voice-1"]);
+  assert.equal(app.storage.get("operatorToken"), "synthetic-current-token");
+  assert.equal(app.calls.length, 4);
+  for (const call of app.calls) {
+    assert.equal(call.options.headers.Authorization, "Bearer synthetic-current-token");
+    assert.ok(!call.url.includes("token"));
+  }
   const upload = app.calls.find(call => call.url.endsWith("/audio"));
   assert.equal(upload.options.body.get("audio").type, "audio/webm;codecs=opus");
   await e.voice.end();

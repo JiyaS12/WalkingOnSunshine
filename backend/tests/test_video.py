@@ -97,6 +97,48 @@ def test_extract_frames_bad_file(tmp_path):
         extract_frames(str(path))
 
 
+def test_process_video_corrupt_file_returns_422():
+    resp = client.post(
+        "/api/process-video",
+        files={"file": ("garbage.mp4", b"\x00\x01not a video", "video/mp4")},
+    )
+    assert resp.status_code == 422
+    assert "corrupt" in resp.json()["detail"].lower()
+
+
+def test_process_video_empty_upload_returns_422():
+    resp = client.post(
+        "/api/process-video",
+        files={"file": ("empty.mp4", b"", "video/mp4")},
+    )
+    assert resp.status_code == 422
+    assert "empty" in resp.json()["detail"].lower()
+
+
+def test_process_video_processing_crash_returns_422(tmp_path, monkeypatch):
+    def boom(path, max_frames=300):
+        raise IndexError("list index out of range")
+
+    monkeypatch.setattr(video, "extract_frames", boom)
+    path = _blank_mp4(tmp_path / "blank.mp4")
+    resp = client.post(
+        "/api/process-video",
+        files={"file": ("blank.mp4", path.read_bytes(), "video/mp4")},
+    )
+    assert resp.status_code == 422
+
+
+def test_frame_from_landmarks_rejects_nan_and_missing():
+    world = _FakeWorld()
+    assert video._frame_from_landmarks(world) is not None
+    world.landmark[25].x = float("nan")
+    assert video._frame_from_landmarks(world) is None
+    short = _FakeWorld()
+    short.landmark = short.landmark[:20]
+    assert video._frame_from_landmarks(short) is None
+    assert video._frame_from_landmarks(None) is None
+
+
 def test_process_video_bad_suffix():
     resp = client.post(
         "/api/process-video",

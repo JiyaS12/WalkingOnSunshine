@@ -1,4 +1,4 @@
-# GaitGuard AI frontend
+# Sana frontend
 
 This App Router frontend requires Node.js 20.19.x and npm 10 or newer.
 The root `.nvmrc` selects the supported Node 20 release.

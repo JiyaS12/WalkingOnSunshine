@@ -1,7 +1,8 @@
-"""GaitGuard AI — Phase 1 FastAPI backend."""
+"""Sana — Phase 1 FastAPI backend."""
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import tempfile
@@ -16,6 +17,7 @@ from fastapi import (
     Header,
     HTTPException,
     Path,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -35,6 +37,8 @@ from integration_models import ConditionSurvey, Identifier, utc_timestamp
 from phone_client import PhoneConfigurationError
 from processor import GaitMetrics, GaitProcessor, validate_frames
 
+_log = logging.getLogger(__name__)
+
 # cv2/mediapipe are heavy native deps; a broken install (a non-headless
 # OpenCV without libGL, say) must not take the rest of the API down with it
 try:
@@ -45,7 +49,7 @@ except ImportError as exc:
 else:
     _VIDEO_IMPORT_ERROR = None
 
-app = FastAPI(title="GaitGuard AI")
+app = FastAPI(title="Sana")
 
 
 @app.exception_handler(store.Conflict)
@@ -162,7 +166,10 @@ def _auth_error(code: str) -> HTTPException:
 def _check_browser_origin(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin and origin.rstrip("/") not in _ALLOWED_CORS_ORIGINS:
-        raise HTTPException(status_code=403, detail="request origin is not allowed")
+        raise HTTPException(
+            status_code=403,
+            detail=f"request origin {origin} is not allowed",
+        )
 
 
 def require_clinician(
@@ -302,12 +309,9 @@ def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-@app.post(
-    "/api/generate-summary", dependencies=[Depends(require_clinician)]
-)
-def generate_summary(body: SummaryRequest) -> dict:
+def _summary_for(pid: str) -> dict:
     try:
-        record = store.get_patient(body.patient_id)
+        record = store.get_patient(pid)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     sessions = record.get("gait_sessions") or []
@@ -318,8 +322,15 @@ def generate_summary(body: SummaryRequest) -> dict:
     return agent.generate_summary(
         sessions[0]["metrics"],
         sessions[-1]["metrics"],
-        body.patient_id,
+        pid,
     )
+
+
+@app.post(
+    "/api/generate-summary", dependencies=[Depends(require_clinician)]
+)
+def generate_summary(body: SummaryRequest) -> dict:
+    return _summary_for(body.patient_id)
 
 
 @app.get(
@@ -368,6 +379,8 @@ async def process_video(file: UploadFile = File(...)) -> dict:
                 )
             tmp.write(chunk)
         tmp.close()
+        if size == 0:
+            raise HTTPException(status_code=422, detail="the uploaded video is empty")
 
         try:
             frames, effective_fps, total = await run_in_threadpool(
@@ -378,6 +391,13 @@ async def process_video(file: UploadFile = File(...)) -> dict:
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+        except (ZeroDivisionError, IndexError, KeyError, TypeError, RuntimeError) as e:
+            _log.exception("process-video failed for %s", name)
+            raise HTTPException(
+                status_code=422,
+                detail="the video could not be analysed — make sure the full body "
+                "is visible and the file is a valid .mp4/.mov/.webm",
+            ) from e
     finally:
         tmp.close()
         try:
@@ -581,28 +601,126 @@ def add_patient_session(pid: str, body: SessionPayload) -> dict:
     return _store_patient_session(pid, body)
 
 
-def _require_patient_access(
-    pid: str, authorization: str | None = Header(default=None)
-) -> None:
-    parts = authorization.split() if authorization else []
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
-            status_code=401,
-            detail="invalid or expired patient access",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+PATIENT_SESSION_COOKIE = "sana_patient_session"
+_DEFAULT_PATIENT_SESSION_TTL = 4 * 60 * 60
+
+
+def _patient_access_denied() -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail="invalid or expired patient access",
+        headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+    )
+
+
+def _patient_session_ttl() -> int:
+    raw = os.getenv("PATIENT_SESSION_TTL_SECONDS")
+    if raw is None:
+        return _DEFAULT_PATIENT_SESSION_TTL
     try:
-        patient_access.verify_token(parts[1], pid)
+        ttl = int(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=503, detail="patient access is not configured"
+        ) from exc
+    if not 60 <= ttl <= 7 * 24 * 60 * 60:
+        raise HTTPException(
+            status_code=503, detail="patient access is not configured"
+        )
+    return ttl
+
+
+def _cookie_secure() -> bool:
+    try:
+        return clinician_auth.get_auth_config().cookie_secure
+    except clinician_auth.AuthConfigurationError:
+        raw = os.getenv("CLINICIAN_COOKIE_SECURE", "true").strip().lower()
+        return raw not in {"0", "false", "no", "off"}
+
+
+def _verify_patient_token(token: str, pid: str) -> None:
+    try:
+        patient_access.verify_token(token, pid)
     except patient_access.PatientAccessConfigurationError as exc:
         raise HTTPException(
             status_code=503, detail="patient access is not configured"
         ) from exc
     except patient_access.PatientAccessError as exc:
+        raise _patient_access_denied() from exc
+
+
+def _require_patient_access(
+    pid: str,
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Accept either a bearer link token or the patient session cookie
+    issued by /api/auth/verify."""
+
+    parts = authorization.split() if authorization else []
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        _verify_patient_token(parts[1], pid)
+        return
+    cookie = request.cookies.get(PATIENT_SESSION_COOKIE)
+    if not cookie:
+        raise _patient_access_denied()
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        _check_browser_origin(request)
+    _verify_patient_token(cookie, pid)
+
+
+@app.get("/api/auth/verify")
+def verify_patient_link(
+    response: Response,
+    patient_id: str = Query(min_length=1, max_length=64),
+    token: str = Query(min_length=1, max_length=2048),
+) -> dict:
+    """Exchange a signed magic-link token for a patient session cookie."""
+
+    response.headers["Cache-Control"] = "no-store"
+    _verify_patient_token(token, patient_id)
+    try:
+        store.get_patient(patient_id)
+    except KeyError as exc:
         raise HTTPException(
-            status_code=401,
-            detail="invalid or expired patient access",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=404, detail="patient record not found"
         ) from exc
+    ttl = _patient_session_ttl()
+    try:
+        session_token, expires_at = patient_access.generate_token(
+            patient_id, ttl_seconds=ttl
+        )
+    except patient_access.PatientAccessConfigurationError as exc:
+        raise HTTPException(
+            status_code=503, detail="patient access is not configured"
+        ) from exc
+    response.set_cookie(
+        key=PATIENT_SESSION_COOKIE,
+        value=session_token,
+        max_age=ttl,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+    return {
+        "authenticated": True,
+        "patient_id": patient_id,
+        "expires_at": int(expires_at.timestamp()),
+    }
+
+
+@app.delete("/api/auth/verify", status_code=204)
+def end_patient_session(request: Request, response: Response) -> None:
+    _check_browser_origin(request)
+    response.delete_cookie(
+        key=PATIENT_SESSION_COOKIE,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
 
 
 def _patient_view(record: dict) -> dict:
@@ -628,6 +746,16 @@ def get_patient_with_access(
         raise HTTPException(
             status_code=404, detail="patient record not found"
         ) from exc
+
+
+@app.post("/api/patient-access/{pid}/summary")
+def patient_summary_with_access(
+    pid: str,
+    response: Response,
+    _: None = Depends(_require_patient_access),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return _summary_for(pid)
 
 
 @app.post("/api/patient-access/{pid}/sessions")

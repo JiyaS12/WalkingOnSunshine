@@ -1,4 +1,4 @@
-"""Patient record store for GaitGuard AI.
+"""Patient record store for Sana.
 
 JSON-persisted at backend/.cache/patients.json; seeded on first load from
 data/mock_patients.json.

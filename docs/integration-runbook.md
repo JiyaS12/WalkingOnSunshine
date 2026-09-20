@@ -101,17 +101,15 @@ CI preserves backend/frontend jobs and adds `voice-python`, `voice-js` and
 cover the new service contracts and providers rather than imposing new rules
 on unrelated legacy modules.
 
-### Current JavaScript verification gap
+The desktop voice fixtures supply a session-storage operator token and model
+authenticated speech fetches with blob playback. They assert bearer headers
+on session, speech and audio requests, token-free URLs and object URL renewal,
+alongside the existing microphone, silence, pause, retry and completion cases.
 
-The preexisting `voice_agent/tests/test_voice_ui.cjs` fixture assumes public
-media-element speech URLs and omits session storage/operator-token UI support.
-The authenticated implementation fetches speech with a bearer header and uses
-object URLs. Eight legacy cases currently fail during fixture initialization.
-They are preserved, not skipped; the full `voice-js` CI job reports the failure.
-`test_authenticated_voice_ui.cjs` adds passing coverage of authenticated session,
-speech and audio requests, rejection, microphone cleanup and blob URL renewal.
-Updating the old fixture/assertions requires approval under the integration
-task's restriction on modifying existing tests.
+Run frontend unit tests without a backend listening on port 8000. The legacy
+patient-screening fixture stubs patient reads/writes but leaves the walking
+status request unmocked; a running server rejects its synthetic credential.
+The integration-specific frontend fixtures mock walking status explicitly.
 
 ## Clinician and patient flow
 

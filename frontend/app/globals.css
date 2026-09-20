@@ -2,26 +2,80 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+@layer base {
+  .theme {
+    --font-heading: var(--font-sans);
+  }
+  :root {
+    --background: #f9f7f2;
+    --foreground: #2c3e50;
+    --card: #fffdf9;
+    --card-foreground: #2c3e50;
+    --popover: #fffdf9;
+    --popover-foreground: #2c3e50;
+    --primary: #b2c2b2;
+    --primary-foreground: #2c3e50;
+    --secondary: #efebe3;
+    --secondary-foreground: #2c3e50;
+    --muted: #efebe3;
+    --muted-foreground: #6b7c8f;
+    --accent: #efebe3;
+    --accent-foreground: #2c3e50;
+    --destructive: #f2d5c4;
+    --destructive-foreground: #2c3e50;
+    --border: #e8e3d9;
+    --input: #e8e3d9;
+    --ring: #a3b5a3;
+    --radius: 1.5rem;
+    --sidebar: #f9f7f2;
+    --sidebar-foreground: #2c3e50;
+    --sidebar-primary: #b2c2b2;
+    --sidebar-primary-foreground: #2c3e50;
+    --sidebar-accent: #efebe3;
+    --sidebar-accent-foreground: #2c3e50;
+    --sidebar-border: #e8e3d9;
+    --sidebar-ring: #a3b5a3;
+    --chart-1: #b3a8dc;
+    --chart-2: #8fb4d2;
+    --chart-3: #a3b5a3;
+    --chart-4: #f2d5c4;
+    --chart-5: #c9c4ea;
+    --chart-background: #fffdf9;
+    --chart-foreground: #2c3e50;
+    --chart-foreground-muted: #6b7c8f;
+    --chart-line-primary: var(--chart-1);
+    --chart-line-secondary: var(--chart-2);
+    --chart-crosshair: #8fb4d2;
+    --chart-grid: #e8e3d9;
+    --chart-brush-border: var(--chart-grid);
+    --chart-tooltip-background: rgb(255 253 249 / 0.96);
+    --chart-tooltip-foreground: #2c3e50;
+    --chart-tooltip-muted: #6b7c8f;
+    --chart-marker-background: #fffdf9;
+    --chart-marker-border: #e8e3d9;
+    --chart-marker-foreground: #2c3e50;
+    --chart-label: #6b7c8f;
+    --chart-scale-01: #fffdf9;
+    --chart-scale-02: #efebe3;
+    --chart-scale-03: #e8e3d9;
+    --chart-scale-04: #cfc8ba;
+    --chart-scale-05: #a89f8e;
+    --chart-scale-pattern-color: #efebe3;
+  }
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }

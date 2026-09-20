@@ -9,7 +9,7 @@ interface Props {
   onAuthFailure: (error: unknown) => boolean;
 }
 
-const controlClass = "rounded border border-slate-600 bg-slate-950 px-3 py-2 text-sm disabled:opacity-50";
+const controlClass = "rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-sm disabled:opacity-50";
 
 export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
   const [calls, setCalls] = useState(patient.calls ?? []);
@@ -129,9 +129,9 @@ export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
   const blocked = calls.some(unresolvedCall) || pendingCall;
 
   return (
-    <section aria-label="Clinician call controls" className="mb-4 space-y-3 rounded-lg border border-slate-700 p-4">
+    <section aria-label="Clinician call controls" className="mb-4 space-y-3 rounded-3xl bg-card p-4 shadow-pillow-sm">
       <h3 className="font-semibold">Voice follow-up</h3>
-      <p className="text-xs text-slate-400">Select the patient&apos;s confirmed condition. Do not infer it from complaints or demographics.</p>
+      <p className="text-xs text-muted-foreground">Select the patient&apos;s confirmed condition. Do not infer it from complaints or demographics.</p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="grid gap-1 text-xs">
           Condition
@@ -164,16 +164,16 @@ export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
         </button>
       </form>
       {pendingCall && <button className={controlClass} disabled={busy} onClick={sendCall}>Retry same call request</button>}
-      {blocked && <p className="text-xs text-amber-200">An unresolved request blocks another call. Reconcile status; an unknown outcome does not mean the call failed.</p>}
-      {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
-      {notice && <p role="status" className="text-xs text-amber-200">{notice}</p>}
-      {!calls.length && <p className="text-xs text-slate-400">No calls on file.</p>}
+      {blocked && <p className="text-xs text-foreground">An unresolved request blocks another call. Reconcile status; an unknown outcome does not mean the call failed.</p>}
+      {error && <p role="alert" className="text-sm text-foreground">{error}</p>}
+      {notice && <p role="status" className="text-xs text-foreground">{notice}</p>}
+      {!calls.length && <p className="text-xs text-muted-foreground">No calls on file.</p>}
       <ol className="space-y-3">
         {[...calls].reverse().map((call) => {
           const canRetrySMS = call.call_id === latestCall?.call_id && call.survey_status === "stored" &&
             call.sms_status === "failed" && call.sms_attempt < 5;
           return (
-            <li key={call.call_id} className="space-y-2 rounded border border-slate-700 p-3 text-xs">
+            <li key={call.call_id} className="space-y-2 break-words rounded-2xl bg-muted p-3 text-xs shadow-pillow-inset">
               <p>{call.created_at} · {call.condition_category} · Call {call.call_id} · Attempt {call.attempt_id}</p>
               <p>Call: {call.call_status} · Survey: {call.survey_status} · SMS: {call.sms_status} (attempt {call.sms_attempt}) · Walk: {call.walking.status}</p>
               {call.error_code && <p>Service reason: {call.error_code}</p>}

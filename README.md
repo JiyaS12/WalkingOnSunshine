@@ -1,4 +1,4 @@
-# GaitGuard AI
+# Sana
 
 AI-assisted gait analysis for clinical mobility monitoring. A
 Python/FastAPI backend processes MediaPipe-style joint telemetry
@@ -73,6 +73,9 @@ Unknown condition metadata is never inferred from complaints, age, or cohort.
 
 See the [integration/operator runbook](docs/integration-runbook.md) for setup,
 the offline deterministic demo, failure recovery and live validation steps.
+The Sana screens use the shared pastel design system. Patient access still
+requires the complete signed SMS link; the public landing page does not offer
+patient-ID lookup.
 The [API/data contract](docs/patient-access-contract.md) describes all three
 authentication boundaries and the call/survey/walking payloads. Supabase remains
 an optional standalone voice-demo integration, not the integrated patient store.

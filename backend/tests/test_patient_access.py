@@ -407,3 +407,117 @@ def test_patient_scoped_session_write_rolls_back_on_persist_failure(monkeypatch)
 
     assert response.status_code == 500
     assert store.get_patient(_NEW_PID) == before
+
+
+def _verify(pid: str, token: str | None = None):
+    return client.get(
+        "/api/auth/verify",
+        params={"patient_id": pid, "token": token or _token_for(pid)},
+    )
+
+
+def test_magic_link_verify_issues_patient_session_cookie(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    _create(_NEW_PID)
+
+    response = _verify(_NEW_PID)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["authenticated"] is True
+    assert body["patient_id"] == _NEW_PID
+    cookie = response.headers["set-cookie"]
+    assert "sana_patient_session=" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
+    assert response.headers["cache-control"] == "no-store"
+    # the session outlives the short-lived link token
+    assert body["expires_at"] > int(
+        patient_access.generate_token(_NEW_PID)[1].timestamp()
+    )
+
+
+def test_magic_link_session_cookie_grants_scoped_access(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    _create(_NEW_PID)
+    _create("RGN-7002", "Other")
+    assert _verify(_NEW_PID).status_code == 200  # cookie stored on client
+
+    read = client.get(f"/api/patient-access/{_NEW_PID}")
+    assert read.status_code == 200
+    assert set(read.json()) == {"patient_id", "name", "gait_sessions"}
+
+    other = client.get("/api/patient-access/RGN-7002")
+    assert other.status_code == 401
+
+    write = client.post(
+        f"/api/patient-access/{_NEW_PID}/sessions",
+        json=_session("Cookie save"),
+        headers={"Origin": "http://localhost:3000"},
+    )
+    assert write.status_code == 200
+    assert [s["label"] for s in write.json()["gait_sessions"]] == ["Cookie save"]
+
+    forged = client.post(
+        f"/api/patient-access/{_NEW_PID}/sessions",
+        json=_session("CSRF"),
+        headers={"Origin": "https://evil.example"},
+    )
+    assert forged.status_code == 403
+
+    assert client.delete(
+        "/api/auth/verify", headers={"Origin": "http://localhost:3000"}
+    ).status_code == 204
+    assert client.get(f"/api/patient-access/{_NEW_PID}").status_code == 401
+
+
+@pytest.mark.parametrize(
+    "token", ["not-a-token", "", None]
+)
+def test_magic_link_verify_rejects_bad_tokens(token):
+    _create(_NEW_PID)
+    bad = _token_for("RGN-9999") if token is None else token
+    response = client.get(
+        "/api/auth/verify", params={"patient_id": _NEW_PID, "token": bad}
+    )
+    assert response.status_code in {401, 422}
+    assert "set-cookie" not in response.headers
+
+
+def test_magic_link_verify_requires_existing_patient():
+    response = _verify(_NEW_PID)
+    assert response.status_code == 404
+    assert "set-cookie" not in response.headers
+
+
+def test_magic_link_verify_fails_closed_without_signing_secret(monkeypatch):
+    _create(_NEW_PID)
+    token = _token_for(_NEW_PID)
+    monkeypatch.delenv("PATIENT_LINK_SIGNING_SECRET")
+    response = _verify(_NEW_PID, token)
+    assert response.status_code == 503
+
+
+def test_magic_link_session_can_generate_patient_summary(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    _create(_NEW_PID)
+    assert _verify(_NEW_PID).status_code == 200
+    origin = {"Origin": "http://localhost:3000"}
+
+    empty = client.post(f"/api/patient-access/{_NEW_PID}/summary", headers=origin)
+    assert empty.status_code == 422
+
+    assert client.post(
+        f"/api/patient-access/{_NEW_PID}/sessions",
+        json=_session("S1"),
+        headers=origin,
+    ).status_code == 200
+    summary = client.post(
+        f"/api/patient-access/{_NEW_PID}/summary", headers=origin
+    )
+    assert summary.status_code == 200
+    assert summary.json()["summary"]
+
+    assert client.post(
+        "/api/patient-access/RGN-7002/summary", headers=origin
+    ).status_code == 401

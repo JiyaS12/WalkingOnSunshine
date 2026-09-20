@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 import {
   Activity,
   AlertTriangle,
@@ -17,6 +18,14 @@ import {
   WifiOff,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import TrendGraph, { TrendSession } from "./TrendGraph";
 import {
   ApiError,
@@ -70,40 +79,51 @@ function riskLevel(score: number): { label: string; classes: string } {
   if (score < 0.3) {
     return {
       label: "LOW",
-      classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40",
+      classes: "border-0 bg-pastel-green text-foreground",
     };
   }
   if (score < 0.5) {
     return {
       label: "MODERATE",
-      classes: "bg-amber-600/20 text-amber-300 border-amber-500/40",
+      classes: "border-0 bg-pastel-peach/70 text-foreground",
     };
   }
   return {
     label: "HIGH",
-    classes: "bg-rose-600/20 text-rose-300 border-rose-500/40",
+    classes: "border-0 bg-pastel-peach text-foreground",
   };
 }
 
 function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-400">{title}</span>
-        <span className="text-slate-500">{icon}</span>
-      </div>
-      <div className="mt-2 flex items-end gap-2">
-        <span className="text-2xl font-semibold text-slate-100">{value}</span>
-        {badge && (
-          <span
-            className={`mb-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.classes}`}
-          >
-            {badge.label}
+    <Card className="[--card-spacing:1.5rem]">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </CardTitle>
+        <CardAction>
+          <span className="text-muted-foreground">{icon}</span>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="pt-2">
+        <div className="flex items-end gap-2">
+          <span className="text-3xl font-semibold text-foreground">
+            {value}
           </span>
+          {badge && (
+            <Badge
+              variant="outline"
+              className={`mb-1 text-[10px] font-semibold ${badge.classes}`}
+            >
+              {badge.label}
+            </Badge>
+          )}
+        </div>
+        {sub && (
+          <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
         )}
-      </div>
-      {sub && <p className="mt-1 text-[10px] text-slate-500">{sub}</p>}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -116,40 +136,40 @@ function AccessPanel({
 }) {
   const content = {
     missing: {
-      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-amber-300" />,
+      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-foreground" />,
       title: "Secure link required",
       detail:
         "Open the complete link sent by your care team. A patient ID by itself cannot open a screening.",
     },
     invalid: {
-      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-amber-300" />,
+      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-foreground" />,
       title: "This link is no longer valid",
       detail:
         "The link may be expired or incomplete. Ask your care team to send a new secure link.",
     },
     offline: {
-      icon: <WifiOff className="mx-auto mb-3 h-9 w-9 text-rose-300" />,
+      icon: <WifiOff className="mx-auto mb-3 h-9 w-9 text-foreground" />,
       title: "You appear to be offline",
       detail: "Check your connection, then try opening the screening again.",
     },
     unavailable: {
-      icon: <AlertTriangle className="mx-auto mb-3 h-9 w-9 text-rose-300" />,
+      icon: <AlertTriangle className="mx-auto mb-3 h-9 w-9 text-foreground" />,
       title: "Screening is temporarily unavailable",
       detail: "Please try again. If the problem continues, contact your care team.",
     },
   }[status];
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-      <div role="alert" className="max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6 text-center">
+    <main className="flex min-h-screen items-center justify-center bg-muted p-6 text-foreground">
+      <div role="alert" className="max-w-sm rounded-xl border border-border bg-card p-6 text-center">
         {content.icon}
-        <h1 className="text-lg font-semibold text-slate-100">{content.title}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">{content.detail}</p>
+        <h1 className="text-lg font-semibold text-foreground">{content.title}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{content.detail}</p>
         {(status === "offline" || status === "unavailable") && (
           <button
             type="button"
             onClick={onRetry}
-            className="mx-auto mt-4 flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+            className="mx-auto mt-4 flex items-center gap-2 rounded-md bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground hover:bg-pastel-sagedeep"
           >
             <RefreshCw className="h-4 w-4" />
             Try again
@@ -535,7 +555,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     return (
       <main
         role="status"
-        className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400"
+        className="flex min-h-screen items-center justify-center bg-muted text-muted-foreground"
       >
         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your screening…
       </main>
@@ -553,33 +573,89 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   const metrics = reading?.metrics ?? null;
   const isSaving = reading !== null && savingReadingId === reading.id;
+  const captureFeedback = (
+    <div className="flex flex-col gap-2">
+      {metrics && !metrics.gait_detected && (
+        <p role="alert" className="rounded-2xl bg-pastel-peach/70 px-3 py-2 text-xs text-foreground">
+          No walking detected — walk across the frame or upload a clip with walking before saving.
+        </p>
+      )}
+      {reading?.source === "live" && (
+        <div className="flex items-center gap-2 rounded-2xl bg-muted p-3 shadow-pillow-inset">
+          {reading.saved ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-foreground" />
+          ) : (
+            <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+          <span className="flex-1 text-xs text-muted-foreground">
+            {reading.saved ? "This walk is saved" : "Save this walk to your record"}
+          </span>
+          <button
+            type="button"
+            onClick={() => void saveSession(reading)}
+            disabled={isSaving || reading.saved || !reading.metrics.gait_detected || Boolean(walkClosed) || Boolean(walkWaiting)}
+            className="rounded-full bg-pastel-sage px-3 py-1 text-xs font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep disabled:opacity-50"
+          >
+            {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
+          </button>
+        </div>
+      )}
+      {currentSaveMessage && (
+        <div
+          role={currentSaveMessage.kind === "error" ? "alert" : "status"}
+          className={`flex items-center justify-between gap-3 rounded-2xl px-3 py-2 text-xs text-foreground ${
+            currentSaveMessage.kind === "error" ? "bg-pastel-peach/70" : "bg-pastel-green"
+          }`}
+        >
+          <span>{currentSaveMessage.text}</span>
+          {currentSaveMessage.retry && (
+            <button
+              type="button"
+              disabled={savingReadingId === currentSaveMessage.retry.id}
+              onClick={() => void saveSession(currentSaveMessage.retry!)}
+              className="flex shrink-0 items-center gap-1 rounded-full bg-card px-2 py-1 font-medium shadow-pillow-sm disabled:opacity-50"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retry save
+            </button>
+          )}
+        </div>
+      )}
+      {reading?.source === "upload" && isSaving && (
+        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving analyzed walk…
+        </p>
+      )}
+    </div>
+  );
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <main className="min-h-screen p-6 text-foreground">
+      <header className="mx-auto mb-8 flex max-w-6xl flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Activity className="h-8 w-8 text-emerald-400" />
+          <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
-            <h1 className="text-2xl font-bold">GaitGuard AI</h1>
-            <p className="text-xs text-slate-400">Your secure walking assessment</p>
+            <h1 className="text-2xl font-bold">Sana</h1>
+            <p className="text-xs text-muted-foreground">Your secure walking assessment</p>
           </div>
         </div>
-        <span className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-          <User className="h-3.5 w-3.5 text-slate-400" />
+        <span className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground">
+          <User className="h-3.5 w-3.5 text-muted-foreground" />
           {patient.name ?? "Patient"}
         </span>
       </header>
 
-      <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4">
-        <h2 className="text-sm font-medium text-emerald-200">Complete one walking test</h2>
-        <p className="mt-1 text-xs leading-relaxed text-slate-400">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <div className="rounded-3xl bg-pastel-sage/60 p-5 shadow-pillow-sm">
+        <h2 className="text-sm font-medium text-foreground">Complete one walking test</h2>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           Use the live camera or upload a walking video. For live capture, wait for calibration, walk across the frame only if safe, then choose Save this walk.
           Uploads are analyzed and saved automatically when walking is detected. Completion is confirmed only after the server saves your walk.
         </p>
         {walking?.view && <p className="mt-2 text-xs">Walking status: {walking.view.status === "saved" && walking.view.session_id ? "Saved to your care team" : walking.view.status.replaceAll("_", " ")}</p>}
         {walking?.stopping && walking.view?.status !== "stopped" && <p className="mt-2 text-xs">Stop requested. Waiting for server confirmation.</p>}
         {walkWaiting && <p className="mt-2 text-xs">Your survey must finish before this walking assessment can begin.</p>}
-        {walking?.warning && <p role="status" className="mt-2 text-xs text-amber-200">{walking.warning}</p>}
+        {walking?.warning && <p role="status" className="mt-2 text-xs text-foreground">{walking.warning}</p>}
         {walking?.changed ? (
           <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => setRetryNonce((value) => value + 1)}>Load current assessment</button>
         ) : walking?.warning && (
@@ -593,16 +669,17 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <section>
         {!walkClosed && !walkWaiting && <WebcamFeed
           key={identityEpoch}
           onMetrics={handleMetrics}
           onInputReset={handleInputReset}
           onLifecycle={handleLifecycle}
         />}
+        <div className="mt-3">{captureFeedback}</div>
+      </section>
 
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
+        <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <MetricCard
               title="Stride Length"
               value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
@@ -625,72 +702,16 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               icon={<AlertTriangle className="h-4 w-4" />}
               badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
             />
-          </div>
           <MetricCard
             title="Cadence"
             value={metrics ? `${metrics.cadence_steps_per_min.toFixed(0)} steps/min` : "—"}
             icon={<Activity className="h-4 w-4" />}
           />
+        </section>
 
-          {metrics && !metrics.gait_detected && (
-            <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
-              No walking detected — walk across the frame or upload a clip with walking before saving.
-            </p>
-          )}
-
-          {reading?.source === "live" && (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3">
-              {reading.saved ? (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-              ) : (
-                <Save className="h-4 w-4 shrink-0 text-slate-400" />
-              )}
-              <span className="flex-1 text-xs text-slate-400">
-                {reading.saved ? "This walk is saved" : "Save this walk to your record"}
-              </span>
-              <button
-                type="button"
-                onClick={() => void saveSession(reading)}
-                disabled={isSaving || reading.saved || !reading.metrics.gait_detected || Boolean(walkClosed) || Boolean(walkWaiting)}
-                className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
-              </button>
-            </div>
-          )}
-
-          {currentSaveMessage && (
-            <div
-              role={currentSaveMessage.kind === "error" ? "alert" : "status"}
-              className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
-                currentSaveMessage.kind === "error"
-                  ? "border-rose-500/40 bg-rose-600/10 text-rose-300"
-                  : "border-emerald-500/40 bg-emerald-600/10 text-emerald-300"
-              }`}
-            >
-              <span>{currentSaveMessage.text}</span>
-              {currentSaveMessage.retry && (
-                <button
-                  type="button"
-                  disabled={savingReadingId === currentSaveMessage.retry.id}
-                  onClick={() => void saveSession(currentSaveMessage.retry!)}
-                  className="flex shrink-0 items-center gap-1 rounded-md border border-rose-400/50 px-2 py-1 font-medium hover:bg-rose-500/10 disabled:opacity-50"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  Retry save
-                </button>
-              )}
-            </div>
-          )}
-
-          {reading?.source === "upload" && isSaving && (
-            <p role="status" className="flex items-center gap-2 text-xs text-slate-400">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving analyzed walk…
-            </p>
-          )}
-
+        <section>
           <TrendGraph sessions={trendSessions} />
-        </div>
+        </section>
       </div>
     </main>
   );

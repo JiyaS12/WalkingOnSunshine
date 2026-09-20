@@ -1,6 +1,6 @@
-# GaitGuard AI — Architecture
+# Sana — Architecture
 
-GaitGuard AI is a multi-modal post-stroke/surgery analysis platform that
+Sana is a multi-modal post-stroke/surgery analysis platform that
 bridges patient-facing mobile screening with clinician-facing diagnostic
 tools. The system correlates subjective patient intake data with objective
 biomechanical telemetry to evaluate fall risk and mobility degradation.
@@ -111,8 +111,10 @@ The core endpoints that carry the cross-domain handshake:
 | `POST` | `/api/generate-summary` | Plain-language clinical summary (cached). |
 | `GET` | `/api/summary-cache-stats` | Token-cache hit rate and tokens saved. |
 | `POST` | `/api/submit-survey` | Voice-agent intake payload → patient record. |
-| `GET` | `/api/patient-access/{pid}` | Signed-link patient view (bearer token required). |
-| `POST` | `/api/patient-access/{pid}/sessions` | Signed-link session write (bearer token required). |
+| `GET` | `/api/auth/verify` | Magic link: exchange `patient_id` + `token` for an HttpOnly patient session cookie. |
+| `GET` | `/api/patient-access/{pid}` | Signed-link patient view (bearer token or patient session cookie). |
+| `POST` | `/api/patient-access/{pid}/sessions` | Signed-link session write (bearer token or patient session cookie). |
+| `POST` | `/api/patient-access/{pid}/summary` | Plain-language summary for the patient's own record. |
 | `GET` | `/api/patients` | Cohort list for the doctor's portal (`?q=` search). |
 | `GET` | `/api/patients/{pid}` | One patient: survey + session history. |
 | `POST` | `/api/patients/{pid}/sessions` | Attach a gait session to a patient. |

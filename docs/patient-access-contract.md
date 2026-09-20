@@ -88,11 +88,34 @@ its confirmed payload and durably reserves SMS before dispatch; repeating
 ingestion never implies another SMS. Responses
 that contain the link or patient-scoped data include `Cache-Control: no-store`.
 
+## 1b. Optional patient-session exchange
+
+The backend also supports exchanging a signed link for a short-lived HttpOnly
+`sana_patient_session` cookie. The integrated patient UI uses the in-memory
+bearer flow in section 2; it does not call this exchange or rely on cookies.
+The cookie is itself a signed token bound to the same patient id
+(`PATIENT_SESSION_TTL_SECONDS`, default 4 hours; `Secure` follows
+`CLINICIAN_COOKIE_SECURE`), so it can only read and write that patient.
+
+```http
+GET /api/auth/verify?patient_id=RGN-0417&token=<signed-token> HTTP/1.1
+```
+
+```json
+{ "authenticated": true, "patient_id": "RGN-0417", "expires_at": 1780000000 }
+```
+
+`401` for a bad/expired/mismatched token, `404` when the patient record does
+not exist, `503` when signing is not configured. `DELETE /api/auth/verify`
+clears the cookie. Non-`GET` requests authenticated by the cookie must carry an
+allow-listed browser `Origin`; the bearer form below still works unchanged.
+
 ## 2. Read the patient walking-test view
 
-The patient UI takes `token` from its initial page URL and sends it as a bearer
-credential. It must not put the token into subsequent API query strings or
-browser storage.
+The integrated patient UI sends the link token as a bearer credential and
+omits cookies from its patient-scoped requests. It must not put the token into
+subsequent API query strings or browser storage. The API additionally accepts
+the optional patient session described above.
 
 The implemented client captures the token in component memory and immediately
 removes it from the visible URL while preserving unrelated query parameters.

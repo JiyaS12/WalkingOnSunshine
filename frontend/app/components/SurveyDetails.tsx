@@ -20,7 +20,7 @@ const yesNo = (value: boolean | null | undefined) => value == null ? "Unknown" :
 export default function SurveyDetails({ survey }: { survey: Survey }) {
   return (
     <div className="space-y-3 text-xs">
-      <p className="text-slate-400">Recorded {survey.recorded_at ?? "Unknown"} · Call {survey.call_id ?? "Not recorded"}</p>
+      <p className="text-muted-foreground">Recorded {survey.recorded_at ?? "Unknown"} · Call {survey.call_id ?? "Not recorded"}</p>
       <section aria-label="Original generic intake" className="space-y-1">
         <h4 className="font-semibold">Original generic intake</h4>
         <p>Pain: {survey.pain_scale == null ? "Unknown" : `${survey.pain_scale}/10`}</p>
@@ -31,7 +31,7 @@ export default function SurveyDetails({ survey }: { survey: Survey }) {
         <p>Dizziness notes: {survey.dizziness_notes ?? "Not recorded"}</p>
         <p>Complaints: {survey.primary_complaints == null ? "Unknown" : survey.primary_complaints.join("; ") || "None reported"}</p>
       </section>
-      <section aria-label="Condition-specific answers" className="space-y-1 border-t border-slate-700 pt-2">
+      <section aria-label="Condition-specific answers" className="space-y-1 border-t border-border pt-2">
         <h4 className="font-semibold">Condition-specific answers</h4>
         {survey.condition_survey ? (
           <>
@@ -40,11 +40,11 @@ export default function SurveyDetails({ survey }: { survey: Survey }) {
               {survey.condition_survey.answers.map((answer) => (
                 <li key={answer.question_id}>
                   <p>{questionLabels[answer.question_id] ?? answer.question_id}: {answer.normalized_value}</p>
-                  <p className="text-slate-400">{answer.confirmed ? "Confirmed" : "Unconfirmed"} · {answer.acceptance_method.replaceAll("_", " ")}{answer.confirmed_at ? ` · ${answer.confirmed_at}` : ""}</p>
+                  <p className="text-muted-foreground">{answer.confirmed ? "Confirmed" : "Unconfirmed"} · {answer.acceptance_method.replaceAll("_", " ")}{answer.confirmed_at ? ` · ${answer.confirmed_at}` : ""}</p>
                 </li>
               ))}
             </ul>
-            <p className="text-slate-400">Individual responses only. No validated HOOS JR interval score or stroke scale is calculated here.</p>
+            <p className="text-muted-foreground">Individual responses only. No validated HOOS JR interval score or stroke scale is calculated here.</p>
           </>
         ) : <p>Not recorded.</p>}
       </section>
