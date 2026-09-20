@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 
 from . import conversation_policy as policy
 from .answer_interpreter import AnswerInterpreter, clean_utterance, control_intent
-from .generic_intake import GenericIntake
+from .generic_intake import GenericIntake, build_intake_interpreter
 from .integrated_service import IntegratedService
 from .integration_contract import CallStatus, PhoneError, RegisteredCall
 from .main_backend import BackendError
@@ -33,7 +33,7 @@ class IntegratedSession:
         self.engine = SafeSurveyEngine(
             InMemoryPatientRepository({patient.patient_code: patient}), patient.patient_code, interpreter,
         )
-        self.generic = GenericIntake()
+        self.generic = GenericIntake(build_intake_interpreter())
         self.service = service
         self.call = call
         self.session_id = service.receipt(call.call_id).snapshot.phone_session_id or call.call_id
@@ -102,7 +102,7 @@ class IntegratedSession:
             await self._say(self._current_prompt())
             return False
         if self.stage == "generic":
-            prompt = self.generic.handle(text)
+            prompt = await asyncio.to_thread(self.generic.handle, text)
             if self.generic.state in {"stopped", "needs_review"}:
                 await self.finish("stopped" if self.generic.state == "stopped" else "completed", prompt, "needs_review")
                 return True

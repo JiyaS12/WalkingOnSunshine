@@ -17,7 +17,7 @@ from starlette.datastructures import FormData
 
 import phone_app
 from app import conversation_policy as policy
-from app.generic_intake import GenericIntake, parse_value
+from app.generic_intake import GenericIntake, IntakeReading, lenient_parse, parse_value
 from app.integrated_service import IntegratedService
 from app.integrated_session import IntegratedSession
 from app.integration_contract import CallStart, SMSRetry
@@ -143,7 +143,6 @@ async def say(session, text):
 async def answer_survey(session, *, unknown=False):
     for text in (["unknown"] * 7 if unknown else ["7", "2", "yes", "fell on stairs", "no", "none", "hip pain; trouble walking"]):
         await say(session, text)
-        await say(session, "yes")
     for _ in range(6):
         await say(session, "mild")
 
@@ -220,7 +219,7 @@ def test_stroke_call_uses_captured_condition_and_stroke_ids(harness):
 def test_stop_during_unconfirmed_intake_never_submits(harness):
     async def scenario():
         session = await harness.session()
-        await say(session, "7")
+        await say(session, "maybe a 7")
         await say(session, "stop")
         assert session.finished
         assert not session.generic.values
@@ -240,7 +239,7 @@ def test_generic_intake_validation(kind, text):
 
 def test_generic_intake_confirmation_pause_and_bounded_rejections():
     intake = GenericIntake()
-    intake.handle("7")
+    intake.handle("maybe a 7")
     assert intake.values == {}
     assert "Paused" in intake.handle("pause")
     intake.handle("yes")
@@ -248,12 +247,53 @@ def test_generic_intake_confirmation_pause_and_bounded_rejections():
     assert '"7"' in intake.handle("resume")
     assert '"7"' in intake.handle("repeat")
     intake.handle("no")
-    intake.handle("8")
+    intake.handle("probably 8")
     intake.handle("no")
-    intake.handle("9")
+    intake.handle("i think 9")
     intake.handle("no")
     assert intake.state == "needs_review"
     assert intake.values == {}
+
+
+@pytest.mark.parametrize("kind,text,value", [
+    ("pain", "about a five", 5), ("pain", "I'd say it's like a 6 out of 10", 6), ("pain", "seven", 7),
+    ("count", "no falls", 0), ("count", "I haven't fallen", 0), ("count", "once", 1), ("count", "I fell twice", 2),
+    ("boolean", "yes I have", True), ("boolean", "no I haven't", False), ("boolean", "not really", False),
+    ("pain", "I'm not sure", None), ("count", "no idea", None),
+    ("text", "nothing really", None), ("complaints", "my knee and my back", ["my knee", "my back"]),
+])
+def test_generic_intake_reads_plain_speech_without_confirmation(kind, text, value):
+    reading = lenient_parse(kind, text)
+    assert (reading.valid, reading.value, reading.clear) == (True, value, True)
+
+
+@pytest.mark.parametrize("kind,text", [
+    ("pain", "five or six"), ("pain", "pretty bad"), ("count", "a couple"), ("boolean", "yes and no"),
+    ("boolean", "what do you mean"), ("pain", "11"),
+])
+def test_generic_intake_does_not_guess(kind, text):
+    assert lenient_parse(kind, text).valid is False
+
+
+def test_hedged_intake_answers_are_proposed_not_accepted():
+    intake = GenericIntake()
+    assert 'I heard "7"' in intake.handle("maybe like a seven")
+    assert intake.values == {}
+    intake.handle("yes")
+    assert intake.values["pain_scale"] == 7
+
+
+def test_model_read_intake_answers_still_require_confirmation():
+    class Model:
+        def interpret(self, question, transcript):
+            direct = lenient_parse(question.kind, transcript)
+            return direct if direct.valid else IntakeReading(True, 4)
+
+    intake = GenericIntake(Model())
+    assert 'I heard "4"' in intake.handle("it's been rough but manageable")
+    assert intake.values == {}
+    assert intake.handle("yes").startswith(("Got it.", "Okay.", "Thanks."))
+    assert intake.values["pain_scale"] == 4
 
 
 def test_concurrent_start_is_reserved_and_reconciles_after_restart(harness):
@@ -751,7 +791,6 @@ def test_integrated_media_preserves_hesitations_until_continuation_or_timeout(ha
         session = await harness.session()
         for _ in range(7):
             await say(session, "unknown")
-            await say(session, "yes")
         assert session.stage == "condition"
         harness.spoken.clear()
 
@@ -848,25 +887,21 @@ def test_carrier_completion_before_confirmation_still_requires_review(harness):
 ])
 def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, complaints, readback):
     intake = GenericIntake()
-    for index, response in enumerate(["7", "0", "no", answer, "no", answer, answer]):
-        prompt = intake.handle(response)
-        if index in {3, 5, 6}:
-            assert f'I heard "{readback}".' in prompt
-            assert intake.index == index
-        intake.handle("yes")
+    for response in ["7", "0", "no", answer, "no", answer, answer]:
+        intake.handle(response)
+    assert intake.complete
     payload = intake.payload()
     assert payload["fall_history"]["last_fall_description"] == notes
     assert payload["dizziness_notes"] == notes
     assert payload["primary_complaints"] == complaints
 
 
-def test_absent_notes_can_be_corrected_before_confirmation():
+def test_absent_notes_are_stored_as_none():
     intake = GenericIntake()
     for answer in ["7", "0", "no"]:
         intake.handle(answer)
-        intake.handle("yes")
-    assert '"none reported"' in intake.handle("none")
-    assert '"fell on stairs"' in intake.handle("fell on stairs")
-    assert "last_fall_description" not in intake.values
-    intake.handle("yes")
-    assert intake.values["last_fall_description"] == "fell on stairs"
+    intake.handle("none")
+    assert intake.values["last_fall_description"] is None
+    intake.handle("no")
+    intake.handle("fell on stairs")
+    assert intake.values["dizziness_notes"] == "fell on stairs"
