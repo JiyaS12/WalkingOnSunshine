@@ -26,6 +26,7 @@ import type {
   NormalizedLandmark,
   PoseResults,
 } from "../types/mediapipe";
+import type { WalkError, WalkEventName } from "../lib/integration";
 
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
@@ -122,12 +123,13 @@ function withTimeout<T>(
   ms: number,
   label: string
 ): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out`)), ms)
+      { timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms); }
     ),
-  ]);
+  ]).finally(() => clearTimeout(timer));
 }
 
 type TrackingStatus =
@@ -149,6 +151,7 @@ interface Props {
   // fires when the input mode changes: whatever the previous mode measured
   // no longer describes the active input, so the parent must drop it
   onInputReset?: () => void;
+  onLifecycle?: (event: WalkEventName, error?: WalkError) => void;
 }
 
 type Mode = "live" | "upload";
@@ -157,6 +160,7 @@ export default function WebcamFeed({
   onMetrics,
   onProcessingChange,
   onInputReset,
+  onLifecycle,
 }: Props) {
   const [mode, setMode] = useState<Mode>("live");
   const [error, setError] = useState<string | null>(null);
@@ -169,6 +173,7 @@ export default function WebcamFeed({
   const [legLengthM, setLegLengthM] = useState<number | null>(null);
   const [calibrationCount, setCalibrationCount] = useState(0);
   const [videoDiag, setVideoDiag] = useState("");
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     setEmbedded(window.self !== window.top);
@@ -210,6 +215,15 @@ export default function WebcamFeed({
   onProcessingChangeRef.current = onProcessingChange;
   const onInputResetRef = useRef(onInputReset);
   onInputResetRef.current = onInputReset;
+  const lifecycleRef = useRef(onLifecycle);
+  lifecycleRef.current = onLifecycle;
+  const reportedRef = useRef(new Set<string>());
+  const reportOnce = useCallback((event: WalkEventName, error?: WalkError) => {
+    const key = `${event}:${error ?? ""}`;
+    if (reportedRef.current.has(key)) return;
+    reportedRef.current.add(key);
+    lifecycleRef.current?.(event, error);
+  }, []);
   const setBusy = useCallback((v: boolean) => {
     setUploading(v);
     onProcessingChangeRef.current?.(v);
@@ -217,6 +231,7 @@ export default function WebcamFeed({
 
   const stopAll = useCallback(() => {
     generationRef.current += 1;
+    reportedRef.current.clear();
     cancelAnimationFrame(rafRef.current);
     abortRef.current?.abort();
     abortRef.current = null;
@@ -267,13 +282,14 @@ export default function WebcamFeed({
   // live startup/inference failures stay in live mode: the blocked panel
   // offers Retry camera and Use Upload Video instead
   const failLive = useCallback(
-    (message: string) => {
+    (message: string, code: WalkError = "tracking_lost") => {
+      reportOnce("recoverable_error", code);
       setError(message);
       stopAll();
       setCameraBlocked(message);
       setTrackingStatus("idle");
     },
-    [stopAll]
+    [reportOnce, stopAll]
   );
 
   const drawSkeleton = useCallback(
@@ -327,7 +343,10 @@ export default function WebcamFeed({
       lastResultsRef.current = results;
       setTrackingStatus(results.poseLandmarks ? "tracking" : "no-person");
       const world = results.poseWorldLandmarks;
-      if (!world || world.length < 29) return;
+      if (!world || world.length < 29) {
+        if (legLengthRef.current !== null) reportOnce("recoverable_error", "tracking_lost");
+        return;
+      }
 
       const nowMs = performance.now();
       const dt =
@@ -340,6 +359,7 @@ export default function WebcamFeed({
       if (legLengthRef.current === null) {
         const len = legLengthFrom(world);
         if (len > 0) {
+          reportOnce("calibration_started");
           calibrationRef.current.push(len);
           const n = calibrationRef.current.length;
           setCalibrationCount(n);
@@ -348,9 +368,11 @@ export default function WebcamFeed({
             const median = sorted[Math.floor(sorted.length / 2)];
             legLengthRef.current = median;
             setLegLengthM(median);
+            reportOnce("calibration_completed");
           }
         }
       }
+      if (legLengthRef.current !== null) reportOnce("capture_started");
 
       if (raw) {
         const ema = gaitEmaRef.current;
@@ -383,7 +405,7 @@ export default function WebcamFeed({
       if (timesRef.current.length > BUFFER_MAX)
         timesRef.current.splice(0, timesRef.current.length - BUFFER_MAX);
     },
-    []
+    [reportOnce]
   );
 
   const startLive = useCallback(async () => {
@@ -395,6 +417,7 @@ export default function WebcamFeed({
         !navigator.mediaDevices ||
         !navigator.mediaDevices.getUserMedia
       ) {
+        reportOnce("recoverable_error", "unsupported_browser");
         throw new Error(
           `Camera API unavailable (needs HTTPS or localhost, and a top-level tab — embedded previews block camera access)${
             window.isSecureContext ? "" : "; page is not a secure context"
@@ -434,6 +457,7 @@ export default function WebcamFeed({
         const name = err instanceof DOMException ? err.name : "";
         let msg: string;
         if (name === "NotAllowedError") {
+          reportOnce("permission_denied", "permission_denied");
           msg = embedded
             ? EMBEDDED_BLOCKED_MSG
             : "Camera permission was denied. Click the camera icon in the address bar to allow access, then Retry.";
@@ -447,6 +471,7 @@ export default function WebcamFeed({
         } else {
           msg = err instanceof Error ? err.message : String(err);
         }
+        if (name !== "NotAllowedError") reportOnce("recoverable_error", "camera_unavailable");
         stopAll();
         setCameraBlocked(msg);
         setTrackingStatus("idle");
@@ -475,7 +500,9 @@ export default function WebcamFeed({
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
       });
-      pose.onResults(handleResults);
+      pose.onResults((results) => {
+        if (!isStale()) handleResults(results);
+      });
       if (isStale()) {
         void pose.close().catch(() => undefined);
         return;
@@ -514,12 +541,14 @@ export default function WebcamFeed({
       const track = stream.getVideoTracks()[0];
       if (track) {
         track.onended = () => {
-          setCameraBlocked("Camera stream ended — retry.");
+          if (!isStale()) failLive("Camera stream ended — retry.", "camera_unavailable");
         };
         track.onmute = () => {
+          if (isStale()) return;
           mutedSinceRef.current = performance.now();
         };
         track.onunmute = () => {
+          if (isStale()) return;
           mutedSinceRef.current = 0;
         };
       }
@@ -573,6 +602,7 @@ export default function WebcamFeed({
               }
             })
             .finally(() => {
+              if (isStale()) return;
               inFlightRef.current = false;
               sendStartRef.current = 0;
             });
@@ -605,7 +635,7 @@ export default function WebcamFeed({
 
       syncIntervalRef.current = setInterval(() => {
         const buf = bufferRef.current;
-        if (buf.length < SYNC_MIN_FRAMES || sendingRef.current) return;
+        if (legLengthRef.current === null || buf.length < SYNC_MIN_FRAMES || sendingRef.current) return;
         sendingRef.current = true;
         const batch = buf.slice(-SYNC_BATCH);
         const times = timesRef.current.slice(-SYNC_BATCH);
@@ -627,12 +657,15 @@ export default function WebcamFeed({
         )
           .then((m) => {
             if (sendGen !== generationRef.current) return;
+            if (m.gait_detected) reportOnce("capture_completed");
             onMetricsRef.current(m, "live", batch.slice(-300));
             setLastSyncAt(new Date());
           })
           .catch((err) => {
+            if (sendGen !== generationRef.current) return;
             if (err instanceof DOMException && err.name === "AbortError")
               return;
+            reportOnce("recoverable_error", "network_error");
           })
           .finally(() => {
             if (sendGen === generationRef.current)
@@ -640,14 +673,16 @@ export default function WebcamFeed({
           });
       }, SYNC_INTERVAL_MS);
     } catch (err) {
+      if (isStale()) return;
       console.error("[GaitGuard live]", err);
       failLive(
         `Live camera unavailable: ${
           err instanceof Error ? err.message : String(err)
-        }`
+        }`,
+        "camera_unavailable"
       );
     }
-  }, [failLive, handleResults, stopAll, embedded, drawSkeleton]);
+  }, [failLive, handleResults, stopAll, embedded, drawSkeleton, reportOnce]);
 
   // skeleton replay for the joint frames returned by /api/process-video
   const playFrames = useCallback(
@@ -726,6 +761,8 @@ export default function WebcamFeed({
       setUploadName(file.name);
       setUploadCaption(null);
       setError(null);
+      onInputResetRef.current?.();
+      lifecycleRef.current?.("capture_started");
       try {
         const analysis: VideoAnalysis = await processVideo(
           file,
@@ -746,10 +783,12 @@ export default function WebcamFeed({
           playFrames(canvas, ctx, analysis.frames, analysis.fps);
         }
         if (analysis.metrics.gait_detected) {
+          lifecycleRef.current?.("capture_completed");
           setUploadCaption(
             `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
           );
         } else {
+          lifecycleRef.current?.("recoverable_error", "tracking_lost");
           setUploadCaption(
             `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
           );
@@ -778,6 +817,7 @@ export default function WebcamFeed({
           msg = "Video analysis is unavailable on this server";
         }
         setError(`Video analysis failed: ${msg}`);
+        lifecycleRef.current?.("recoverable_error", "network_error");
       } finally {
         if (uploadAbortRef.current === controller) {
           uploadAbortRef.current = null;
@@ -793,13 +833,13 @@ export default function WebcamFeed({
     // a retry must not leave the previous attempt's banner on screen
     setError(null);
     setCameraBlocked(null);
-    if (mode === "live") {
+    if (mode === "live" && !paused) {
       void startLive();
     } else {
       setTrackingStatus("idle");
     }
     return stopAll;
-  }, [mode, retryNonce, startLive, stopAll]);
+  }, [mode, paused, retryNonce, startLive, stopAll]);
 
   useEffect(() => {
     onInputResetRef.current?.();
@@ -855,6 +895,7 @@ export default function WebcamFeed({
               setError(null);
               setCameraBlocked(null);
               setMode("live");
+              setPaused(false);
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "live"
@@ -885,7 +926,7 @@ export default function WebcamFeed({
         <p className="mt-2 text-xs text-slate-400">
           {mode === "upload"
             ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
-            : "Client-side pose tracking; nothing leaves the browser except joint coordinates"}
+            : "Stand with your full body visible for 60 calibration frames. Then walk across the frame if safe and choose Save this walk. Only joint coordinates leave the browser."}
         </p>
         {mode === "live" && (
           <div className="mt-2 flex items-center justify-between text-xs">
@@ -896,6 +937,12 @@ export default function WebcamFeed({
             <span className="text-slate-500">{statusDetail}</span>
           </div>
         )}
+        {mode === "live" && <button className="mt-2 rounded border border-slate-600 px-2 py-1 text-xs"
+          onClick={() => {
+            onInputResetRef.current?.();
+            setPaused((value) => !value);
+          }}>{paused ? "Resume camera" : "Pause camera"}</button>}
+        {paused && mode === "live" && <p className="mt-2 text-xs">Camera paused. Your assessment has not been stopped.</p>}
       </div>
 
       {error && (
@@ -935,6 +982,8 @@ export default function WebcamFeed({
                 <button
                   onClick={() => {
                     setCameraBlocked(null);
+                    lifecycleRef.current?.("page_ready");
+                    setPaused(false);
                     setRetryNonce((n) => n + 1);
                   }}
                   className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
