@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import secrets
 import threading
@@ -122,12 +123,15 @@ def get_auth_config() -> AuthConfig:
 def credentials_match(username: str, password: str, config: AuthConfig) -> bool:
     """Compare both fields without short-circuiting on the username."""
 
-    username_matches = secrets.compare_digest(
-        username.encode("utf-8"), config.username.encode("utf-8")
-    )
-    password_matches = secrets.compare_digest(
-        password.encode("utf-8"), config.password.encode("utf-8")
-    )
+    try:
+        username_matches = secrets.compare_digest(
+            username.encode("utf-8"), config.username.encode("utf-8")
+        )
+        password_matches = secrets.compare_digest(
+            password.encode("utf-8"), config.password.encode("utf-8")
+        )
+    except UnicodeEncodeError:
+        return False
     return username_matches and password_matches
 
 
@@ -206,7 +210,7 @@ _attempts_lock = threading.Lock()
 
 
 def login_retry_after(client_key: str, config: AuthConfig) -> int | None:
-    """Record a login attempt and return seconds to wait when over quota."""
+    """Atomically reserve an attempt or return seconds until admission."""
 
     now = time.monotonic()
     cutoff = now - config.login_window_seconds
@@ -215,9 +219,17 @@ def login_retry_after(client_key: str, config: AuthConfig) -> int | None:
         while attempts and attempts[0] <= cutoff:
             attempts.popleft()
         if len(attempts) >= config.login_attempts:
-            return max(1, int(config.login_window_seconds - (now - attempts[0])))
+            remaining = config.login_window_seconds - (now - attempts[0])
+            return max(1, math.ceil(remaining))
         attempts.append(now)
     return None
+
+
+def clear_login_failures(client_key: str) -> None:
+    """Forget failures after a successful sign-in."""
+
+    with _attempts_lock:
+        _attempts.pop(client_key, None)
 
 
 def reset_login_rate_limits() -> None:

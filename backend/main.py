@@ -192,6 +192,7 @@ async def clinician_sign_in(request: Request, response: Response) -> dict:
             status_code=401, detail="invalid clinician credentials"
         )
 
+    clinician_auth.clear_login_failures(client_key)
     token, expires_at = clinician_auth.create_session(config)
     response.set_cookie(
         key=clinician_auth.SESSION_COOKIE,

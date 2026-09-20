@@ -66,8 +66,9 @@ python3.12 -m venv .venv
 ```bash
 cd backend
 cp .env.example .env
-# Fill CLINICIAN_USERNAME and CLINICIAN_PASSWORD, then generate and paste a
-# signing key with: python -c "import secrets; print(secrets.token_urlsafe(48))"
+# Fill the username/password and generate distinct clinician-session,
+# patient-link, and survey-ingest secrets with:
+# python -c "import secrets; print(secrets.token_urlsafe(48))"
 .venv/bin/uvicorn main:app --port 8000 --env-file .env
 ```
 

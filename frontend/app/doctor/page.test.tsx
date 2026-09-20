@@ -91,6 +91,33 @@ describe("doctor route authentication", () => {
     expect(fetchPatients).not.toHaveBeenCalled();
   });
 
+  it("replaces the expired-session notice with a failed sign-in error", async () => {
+    vi.mocked(getClinicianSession).mockRejectedValue(
+      new ApiError("Clinician session expired", 401, "session_expired")
+    );
+    vi.mocked(signInClinician).mockRejectedValue(
+      new Error("Invalid clinician credentials")
+    );
+    render(<DoctorPortal />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your clinician session expired. Sign in again."
+    );
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: "dr-demo" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "wrong-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Invalid clinician credentials"
+      )
+    );
+  });
+
   it("signs in without persisting the entered password", async () => {
     vi.mocked(getClinicianSession).mockRejectedValue(
       new ApiError("Clinician authentication required", 401, "session_required")
