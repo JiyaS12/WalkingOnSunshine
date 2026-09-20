@@ -576,6 +576,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       <section>
         {!walkClosed && !walkWaiting && <WebcamFeed
           key={identityEpoch}
+          patientAccess={{ patientId, token: accessToken ?? "" }}
           patientFacing
           onMetrics={handleMetrics}
           onInputReset={handleInputReset}

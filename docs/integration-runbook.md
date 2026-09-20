@@ -139,6 +139,24 @@ The integration-specific frontend fixtures mock walking status explicitly.
 
 ## Recovery, retries and reconciliation
 
+### Processing authorization and resource abuse
+
+Live frames and uploaded video from the patient page use
+`/api/patient-access/{pid}/process-frame` and `process-video`, carrying the signed
+credential in the bearer header. The unscoped `/api/process-frame` and
+`/api/process-video` routes require a clinician session. All four routes reject
+missing/invalid authorization before parsing JSON or spooling multipart bodies.
+There is no public compute fallback. Patient credentials cannot read the cohort
+or use clinician processing. Invalid/expired links require a fresh care-team link.
+
+This closes anonymous compute/upload access; it does not prevent a valid account
+or leaked unexpired link from consuming capacity. The video handler caps the file
+at 100 MiB and pose extraction at 300 sampled frames, but the file cap is checked
+after multipart parsing. Internet deployments still need proxy request-size,
+request-rate, concurrency and timeout limits, plus monitored disk/CPU capacity.
+Keep signed URLs out of proxy/access logs and rotate a compromised signing key.
+No deployment-level limits or production load capacity have been verified here.
+
 | Symptom | Interpretation and next action |
 | --- | --- |
 | Call start returns `unknown` | Main cannot prove whether provider dispatch occurred. Refresh the existing call; do not auto-redial or mint a new request ID. |
@@ -177,8 +195,18 @@ mobile camera/upload permission flows and the displayed clinician result.
 The offline harness does not validate these provider/device behaviors and does
 not certify clinical accuracy. HOOS JR/stroke raw sums remain prototype
 indicators. LLM summaries have a deterministic fallback and are decision
-support, not a diagnosis. No live call, SMS, model evaluation, deployment or
-browser test was performed as part of this integration.
+support, not a diagnosis. No live call, SMS, model evaluation or deployment
+was performed as part of this integration.
+
+The follow-up [processing authorization validation in PR #45](https://github.com/JiyaS12/WalkingOnSunshine/pull/45)
+exercised the browser flow with isolated synthetic patients and fake phone
+providers: intake, signed-link access, upload auto-save, clinician synthesis,
+invalid links/uploads, and live capture/save with synthetic camera/pose input.
+HTTP authorization, video decoding, gait computation, persistence and clinician
+reads were real; pose inference and live camera input were substituted. This
+does not validate physical cameras, MediaPipe accuracy, mobile devices or real
+telephony delivery. Use the PR's evidence for the fallback presentation, with
+these substitutions disclosed.
 
 For exact payloads and status vocabulary, see
 [the API/data contract](patient-access-contract.md).

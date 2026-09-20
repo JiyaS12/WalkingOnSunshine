@@ -8,11 +8,29 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import clinician_auth
 import video
 from main import app
 from video import _fill_gaps, extract_frames
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clinician_session(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_USERNAME", "test-clinician")
+    monkeypatch.setenv("CLINICIAN_PASSWORD", "test-password")
+    monkeypatch.setenv("CLINICIAN_SESSION_SECRET", "s" * 32)
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    clinician_auth.reset_login_rate_limits()
+    client.cookies.clear()
+    response = client.post(
+        "/api/clinician/session",
+        json={"username": "test-clinician", "password": "test-password"},
+    )
+    assert response.status_code == 200
+    yield
+    client.cookies.clear()
 
 
 class _FakeWorld:

@@ -88,7 +88,8 @@ The core endpoints that carry the cross-domain handshake:
   `SURVEY_INGEST_TOKEN` configuration (with an explicit local-only opt-out).
   Its response includes a
   complete, expiring `patient_url` for the voice/SMS service.
-- **`POST /api/process-video`** — Accepts multipart video file uploads,
+- **`POST /api/patient-access/{pid}/process-video`** — Accepts signed patient
+  multipart video uploads,
   executes batch MediaPipe pose extraction across frames, and returns computed
   stride and asymmetry telemetry.
 - **`POST /api/generate-summary`** — Compiles patient survey responses and
@@ -106,13 +107,15 @@ The core endpoints that carry the cross-domain handshake:
 | `POST` | `/api/clinician/session` | Validate server-side clinician credentials and issue an HttpOnly session. |
 | `GET` | `/api/clinician/session` | Validate the active clinician session. |
 | `DELETE` | `/api/clinician/session` | Sign out and clear the clinician session. |
-| `POST` | `/api/process-frame` | Joint telemetry (one session's frames) → `GaitMetrics`. |
-| `POST` | `/api/process-video` | Multipart `.mp4`/`.mov` upload → `VideoAnalysis`. |
+| `POST` | `/api/process-frame` | Clinician session required; joint telemetry → `GaitMetrics`. |
+| `POST` | `/api/process-video` | Clinician session required; multipart `.mp4`/`.mov`/`.webm` → `VideoAnalysis`. |
 | `POST` | `/api/generate-summary` | Plain-language clinical summary (cached). |
 | `GET` | `/api/summary-cache-stats` | Token-cache hit rate and tokens saved. |
 | `POST` | `/api/submit-survey` | Voice-agent intake payload → patient record. |
 | `GET` | `/api/auth/verify` | Magic link: exchange `patient_id` + `token` for an HttpOnly patient session cookie. |
 | `GET` | `/api/patient-access/{pid}` | Signed-link patient view (bearer token or patient session cookie). |
+| `POST` | `/api/patient-access/{pid}/process-frame` | Signed patient access; joint telemetry → `GaitMetrics`. |
+| `POST` | `/api/patient-access/{pid}/process-video` | Signed patient access; multipart video → `VideoAnalysis`. |
 | `POST` | `/api/patient-access/{pid}/sessions` | Signed-link session write (bearer token or patient session cookie). |
 | `POST` | `/api/patient-access/{pid}/summary` | Plain-language summary for the patient's own record. |
 | `GET` | `/api/patients` | Cohort list for the doctor's portal (`?q=` search). |
@@ -137,6 +140,13 @@ synthesis, and cache-statistics routes require the signed clinician session.
 The session is separate from patient-link authorization: patient link tokens
 are not accepted as clinician credentials. CORS uses the exact origins in
 `CORS_ALLOWED_ORIGINS` and never combines a wildcard origin with credentials.
+
+Processing authenticates before JSON parsing or multipart upload spooling.
+Patient bearer tokens and patient cookies are checked against the path's patient
+ID and expiration; they cannot authorize the legacy clinician processing routes.
+Cookie-authenticated writes also enforce the configured browser origins.
+Processing responses are not cached, and video failures log only the exception
+class, excluding uploaded filenames and exception text.
 
 `/api/generate-summary` and `/api/patients/{pid}/synthesis` call OpenAI
 `gpt-4o-mini` when `OPENAI_API_KEY` is set and fall back to a deterministic

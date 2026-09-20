@@ -6,11 +6,13 @@ import logging
 import os
 import secrets
 import tempfile
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
 from fastapi import (
+    APIRouter,
     Depends,
     FastAPI,
     File,
@@ -22,7 +24,10 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
@@ -299,7 +304,6 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/api/process-frame", response_model=GaitMetrics)
 def process_frame(body: ProcessFrameRequest) -> GaitMetrics:
     try:
         return GaitProcessor(
@@ -353,7 +357,6 @@ class VideoAnalysis(BaseModel):
     filename: str
 
 
-@app.post("/api/process-video", response_model=VideoAnalysis)
 async def process_video(file: UploadFile = File(...)) -> dict:
     if video is None:
         raise HTTPException(
@@ -392,7 +395,7 @@ async def process_video(file: UploadFile = File(...)) -> dict:
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         except (ZeroDivisionError, IndexError, KeyError, TypeError, RuntimeError) as e:
-            _log.exception("process-video failed for %s", name)
+            _log.error("video analysis failed (%s)", type(e).__name__)
             raise HTTPException(
                 status_code=422,
                 detail="the video could not be analysed — make sure the full body "
@@ -718,6 +721,57 @@ def _require_patient_access(
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         _check_browser_origin(request)
     _verify_patient_token(cookie, pid)
+
+
+class ProcessingRoute(APIRoute):
+    """Authorize before parsing JSON or spooling multipart uploads."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[None, None, Response]]:
+        handler = super().get_route_handler()
+
+        async def authorized(request: Request) -> Response:
+            try:
+                pid = request.path_params.get("pid")
+                if isinstance(pid, str):
+                    _require_patient_access(
+                        pid, request, request.headers.get("authorization")
+                    )
+                else:
+                    require_clinician(request, Response())
+                response = await handler(request)
+            except RequestValidationError as exc:
+                response = await request_validation_exception_handler(request, exc)
+            except HTTPException as exc:
+                exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
+                raise
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+        return authorized
+
+
+processing_router = APIRouter(route_class=ProcessingRoute)
+processing_router.add_api_route(
+    "/api/process-frame", process_frame, methods=["POST"], response_model=GaitMetrics
+)
+processing_router.add_api_route(
+    "/api/process-video", process_video, methods=["POST"], response_model=VideoAnalysis
+)
+
+
+@processing_router.post("/api/patient-access/{pid}/process-frame")
+def process_patient_frame(pid: str, body: ProcessFrameRequest) -> GaitMetrics:
+    return process_frame(body)
+
+
+@processing_router.post(
+    "/api/patient-access/{pid}/process-video", response_model=VideoAnalysis
+)
+async def process_patient_video(pid: str, file: Annotated[UploadFile, File()]) -> dict:
+    return await process_video(file)
+
+
+app.include_router(processing_router)
 
 
 @app.get("/api/auth/verify")
