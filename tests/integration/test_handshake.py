@@ -251,10 +251,9 @@ def test_real_main_phone_handshake(services, condition, sms_outcome):
     finished = poll(phone, call_id, lambda row: (
         row["finished"] and row["snapshot"]["call_status"] == "completed"
     ))
-    if sms_outcome == "rejected":
-        assert not any("walking test is saved" in text for text in finished["speech"])
-    else:
-        assert any("walking test is saved" in text for text in finished["speech"])
+    assert any("walking test is saved" in text for text in finished["speech"])
+    bounced = [text for text in finished["speech"] if "does not look like it went through" in text]
+    assert len(bounced) == (1 if sms_outcome == "rejected" else 0)
     record = ok(main.get(f"/api/patients/{pid}"))
     assert len(record["surveys"]) == len(record["gait_sessions"]) == len(record["calls"]) == 1
     assert record["surveys"][0]["call_id"] == record["gait_sessions"][0]["call_id"] == call_id
