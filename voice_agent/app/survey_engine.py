@@ -49,7 +49,7 @@ class SafeSurveyEngine:
             self.session.current_question, self.session.current_index, len(self.session.questions),
         )
 
-    def start(self) -> str:
+    def start(self, *, greet: bool = True) -> str:
         if self.session.state in TERMINAL_SPEECH:
             return TERMINAL_SPEECH[self.session.state]
         if self.session.state == "paused":
@@ -60,6 +60,8 @@ class SafeSurveyEngine:
             self.session.state = "complete"
             return speech.COMPLETE
         self.session.state = "asking"
+        if not greet:
+            return speech.first_question_text(self.session.current_question, len(self.session.questions))
         return speech.opening_text(self.session.current_question, len(self.session.questions))
 
     def _retry(self, prompt: str) -> tuple[str, None]:

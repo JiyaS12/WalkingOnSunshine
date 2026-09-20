@@ -377,7 +377,11 @@ def question_text(question, index: int, total: int) -> str:
 def opening_text(question, total: int) -> str:
     """The greeting, a beat, then the first question with its scale."""
 
-    return f"{INTRO}{PARAGRAPH}{question_text(question, 0, total)} {options_text(question)}"
+    return f"{INTRO}{PARAGRAPH}{first_question_text(question, total)}"
+
+
+def first_question_text(question, total: int) -> str:
+    return f"{question_text(question, 0, total)} {options_text(question)}"
 
 
 def options_text(question) -> str:

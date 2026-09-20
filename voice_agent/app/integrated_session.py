@@ -1,11 +1,11 @@
 """Combined survey and event-driven walking guidance, independent of audio transport."""
 
 import asyncio
+import copy
 from collections.abc import Awaitable, Callable
 
 from . import conversation_policy as policy
 from .answer_interpreter import AnswerInterpreter, clean_utterance, control_intent
-from .generic_intake import GenericIntake, build_intake_interpreter
 from .integrated_service import IntegratedService
 from .integration_contract import CallStatus, PhoneError, RegisteredCall
 from .main_backend import BackendError
@@ -21,6 +21,15 @@ Speaker = Callable[[str], Awaitable[None]]
 _CAMERA_STATUSES = {"calibrating", "ready", "capturing", "captured"}
 _PAGE_OPEN_STATUSES = _CAMERA_STATUSES | {"page_ready"}
 MAX_LINK_REMINDERS = 2
+# The phone call asks only the condition questions; the generic intake fields
+# stay in the submission contract as explicit nulls so main never infers them.
+EMPTY_INTAKE: dict[str, object] = {
+    "pain_scale": None,
+    "fall_history": {"falls_last_6_months": None, "injured": None, "last_fall_description": None},
+    "dizziness": None,
+    "dizziness_notes": None,
+    "primary_complaints": None,
+}
 
 
 class IntegratedSession:
@@ -33,7 +42,6 @@ class IntegratedSession:
         self.engine = SafeSurveyEngine(
             InMemoryPatientRepository({patient.patient_code: patient}), patient.patient_code, interpreter,
         )
-        self.generic = GenericIntake(build_intake_interpreter())
         self.service = service
         self.call = call
         self.session_id = service.receipt(call.call_id).snapshot.phone_session_id or call.call_id
@@ -44,7 +52,7 @@ class IntegratedSession:
         self.max_call_seconds = max_call_seconds
         self.finished = False
         self.paused = False
-        self.stage = "generic"
+        self.stage = "condition"
         self.link_open = False
         self._page_active = False
         self._buffer: list[str] = []
@@ -72,7 +80,7 @@ class IntegratedSession:
 
     async def begin(self) -> None:
         self._deadline = asyncio.create_task(self._expire())
-        await self._say(policy.INTEGRATED_INTRO + policy.PARAGRAPH + self.generic.prompt())
+        await self._say(policy.INTEGRATED_INTRO + policy.PARAGRAPH + _spoken(self.engine.start(greet=False)))
 
     async def _expire(self) -> None:
         await asyncio.sleep(self.max_call_seconds)
@@ -101,16 +109,7 @@ class IntegratedSession:
         if command in {"repeat", "resume"}:
             await self._say(self._current_prompt())
             return False
-        if self.stage == "generic":
-            prompt = await asyncio.to_thread(self.generic.handle, text)
-            if self.generic.state in {"stopped", "needs_review"}:
-                await self.finish("stopped" if self.generic.state == "stopped" else "completed", prompt, "needs_review")
-                return True
-            if self.generic.complete:
-                self.stage = "condition"
-                prompt = _spoken(self.engine.start())
-            await self._say(prompt)
-        elif self.stage == "condition":
+        if self.stage == "condition":
             prompt, _ = await asyncio.to_thread(self.engine.handle_response, text)
             if self.engine.session.state in {"stopped", "escalated"}:
                 await self.finish("stopped" if self.engine.session.state == "stopped" else "completed", _spoken(prompt), "needs_review")
@@ -139,10 +138,8 @@ class IntegratedSession:
         return self.finished
 
     def _current_prompt(self) -> str:
-        if self.stage == "generic":
-            return self.generic.prompt()
         if self.stage == "condition":
-            return _spoken(self.engine.start())
+            return _spoken(self.engine.start(greet=False))
         if self.stage == "submitting":
             return policy.INTEGRATED_SAVING
         if not self.link_open:
@@ -151,12 +148,12 @@ class IntegratedSession:
 
     def _payload(self) -> dict[str, object]:
         answers = self.engine.session.answers
-        if not self.generic.complete or self.engine.session.state != "complete" or not all(a.confirmed for a in answers):
+        if self.engine.session.state != "complete" or not all(a.confirmed for a in answers):
             raise ValueError("Incomplete confirmed survey.")
         return {
             "patient_id": self.call.patient_id, "call_id": self.call.call_id,
             "submission_kind": "integrated",
-            **self.generic.payload(),
+            **copy.deepcopy(EMPTY_INTAKE),
             "condition_survey": {
                 "instrument": "hoos_jr" if self.call.condition_category == "orthopedic" else "stroke_mobility",
                 "version": "1", "condition_category": self.call.condition_category,
@@ -194,6 +191,9 @@ class IntegratedSession:
                 except BackendError:
                     view = None
                 if self.finished:
+                    return
+                if not self.link_open and self.service.receipt(self.call.call_id).snapshot.sms_status == "failed":
+                    await self.finish("completed", policy.INTEGRATED_SMS_FAILED)
                     return
                 if view is not None:
                     if view.call_id != self.call.call_id or view.attempt_id != self.call.attempt_id:

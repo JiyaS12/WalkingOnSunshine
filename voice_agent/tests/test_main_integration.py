@@ -145,10 +145,7 @@ async def say(session, text):
     return await session.flush_utterance()
 
 
-async def answer_survey(session, *, unknown=False):
-    answers = ["unknown"] * 3 if unknown else ["7", "2", "no"]
-    for text in answers:
-        await say(session, text)
+async def answer_survey(session):
     for _ in range(6):
         await say(session, "mild")
 
@@ -159,11 +156,11 @@ def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness)
         await answer_survey(session)
         await harness.walk_requested.wait()
         payload = harness.submissions[0]
-        assert payload["pain_scale"] == 7
+        assert payload["pain_scale"] is None
         assert payload["fall_history"] == {
-            "falls_last_6_months": 2, "injured": None, "last_fall_description": None,
+            "falls_last_6_months": None, "injured": None, "last_fall_description": None,
         }
-        assert payload["dizziness"] is False
+        assert payload["dizziness"] is None
         assert payload["dizziness_notes"] is None
         assert payload["primary_complaints"] is None
         assert len(payload["condition_survey"]["answers"]) == 6
@@ -180,16 +177,20 @@ def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness)
     asyncio.run(scenario())
 
 
-def test_unknown_intake_never_derived_from_condition_answers(harness):
+def test_call_opens_with_first_condition_question_and_no_second_greeting(harness):
     async def scenario():
         session = await harness.session()
-        await answer_survey(session, unknown=True)
-        await harness.walk_requested.wait()
-        payload = harness.submissions[0]
-        assert payload["pain_scale"] is None
-        assert payload["dizziness"] is None
-        assert payload["primary_complaints"] is None
-        assert all(value is None for value in payload["fall_history"].values())
+        opening = harness.spoken[0]
+        assert opening.startswith(policy.INTEGRATED_INTRO)
+        assert "Question 1 of 6." in opening
+        assert "The choices are:" in opening
+        assert "scale of one to ten" not in opening.lower()
+        await say(session, "mild")
+        assert not any(policy.INTRO in text for text in harness.spoken)
+        assert any("Question 2 of 6." in text for text in harness.spoken)
+        await say(session, "repeat")
+        assert "Question 2 of 6." in harness.spoken[-1]
+        assert policy.INTRO not in harness.spoken[-1]
         await session.disconnect()
     asyncio.run(scenario())
 
@@ -226,10 +227,10 @@ def test_stroke_call_uses_captured_condition_and_stroke_ids(harness):
 def test_stop_during_unconfirmed_intake_never_submits(harness):
     async def scenario():
         session = await harness.session()
-        await say(session, "maybe a 7")
+        await say(session, "mild")
         await say(session, "stop")
         assert session.finished
-        assert not session.generic.values
+        assert len(session.engine.session.answers) == 1
         assert harness.submissions == []
         assert harness.provider.messages == 0
         assert store.get_call("patient1", session.call.call_id)["survey_status"] == "stopped"
@@ -376,6 +377,21 @@ def test_failed_sms_reserved_retry_and_delivery_replays(harness):
         assert harness.service.receipt(session.call.call_id).snapshot.sms_status == "delivered"
         assert harness.service.receipt(session.call.call_id).snapshot.version == version
         assert store.get_call("patient1", session.call.call_id)["sms_status"] == "delivered"
+    asyncio.run(scenario())
+
+
+def test_carrier_undelivered_sms_ends_the_wait_honestly(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        assert any(text == policy.INTEGRATED_LINK_SENT for text in harness.spoken)
+        await harness.service.sms_event(session.call.call_id, 0, "SMfake1", "failed", error="provider_rejected")
+        await asyncio.wait_for(session._background, 1)
+        assert session.finished
+        assert harness.spoken[-1] == policy.INTEGRATED_SMS_FAILED
+        assert store.get_call("patient1", session.call.call_id)["call_status"] == "completed"
+        assert store.get_call("patient1", session.call.call_id)["sms_status"] == "failed"
     asyncio.run(scenario())
 
 
@@ -819,8 +835,6 @@ def test_backend_rejects_redirect_and_maps_timeout_without_retry():
 def test_integrated_media_preserves_hesitations_until_continuation_or_timeout(harness, continued):
     async def scenario():
         session = await harness.session()
-        for _ in range(len(QUESTIONS)):
-            await say(session, "unknown")
         assert session.stage == "condition"
         harness.spoken.clear()
 
