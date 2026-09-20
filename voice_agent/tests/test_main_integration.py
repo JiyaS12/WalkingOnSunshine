@@ -683,3 +683,81 @@ def test_integrated_media_preserves_hesitations_until_continuation_or_timeout(ha
             await session.disconnect()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", ["completed", "busy", "no-answer", "failed", "canceled"])
+def test_carrier_completion_during_submission_preserves_confirmed_intake(harness, status):
+    async def scenario():
+        session = await harness.session()
+        submitting = asyncio.Event()
+        release = asyncio.Event()
+        original_submit = harness.backend.submit
+
+        async def delayed_submit(payload):
+            submitting.set()
+            await release.wait()
+            return await original_submit(payload)
+
+        try:
+            with patch.object(harness.backend, "submit", delayed_submit):
+                await answer_survey(session)
+                await asyncio.wait_for(submitting.wait(), 1)
+                await harness.service.carrier(session.call.call_id, "CAfake1", status, sequence=1)
+                current = store.get_call("patient1", session.call.call_id)
+                assert current["call_status"] in {"completed", "failed"}
+                assert current["survey_status"] == "in_progress"
+                release.set()
+                await asyncio.wait_for(harness.walk_requested.wait(), 1)
+            assert store.get_call("patient1", session.call.call_id)["survey_status"] == "stored"
+            assert len(store.get_patient("patient1")["surveys"]) == 2
+            await harness.service.retry_submission(session.call.call_id)
+            assert len(store.get_patient("patient1")["surveys"]) == 2
+            assert harness.provider.messages == 1
+        finally:
+            release.set()
+            await session.disconnect()
+
+    asyncio.run(scenario())
+
+
+def test_carrier_completion_before_confirmation_still_requires_review(harness):
+    async def scenario():
+        session = await harness.session()
+        await say(session, "7")
+        await harness.service.carrier(session.call.call_id, "CAfake1", "completed", sequence=1)
+        assert store.get_call("patient1", session.call.call_id)["survey_status"] == "needs_review"
+        assert harness.submissions == []
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("answer,notes,complaints,readback", [
+    (" NONE. ", None, [], "none reported"),
+    ("unknown", None, None, "unknown"),
+    ("none since surgery", "none since surgery", ["none since surgery"], "none since surgery"),
+])
+def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, complaints, readback):
+    intake = GenericIntake()
+    for index, response in enumerate(["7", "0", "no", answer, "no", answer, answer]):
+        prompt = intake.handle(response)
+        if index in {3, 5, 6}:
+            assert f'I heard "{readback}".' in prompt
+            assert intake.index == index
+        intake.handle("yes")
+    payload = intake.payload()
+    assert payload["fall_history"]["last_fall_description"] == notes
+    assert payload["dizziness_notes"] == notes
+    assert payload["primary_complaints"] == complaints
+
+
+def test_absent_notes_can_be_corrected_before_confirmation():
+    intake = GenericIntake()
+    for answer in ["7", "0", "no"]:
+        intake.handle(answer)
+        intake.handle("yes")
+    assert '"none reported"' in intake.handle("none")
+    assert '"fell on stairs"' in intake.handle("fell on stairs")
+    assert "last_fall_description" not in intake.values
+    intake.handle("yes")
+    assert intake.values["last_fall_description"] == "fell on stairs"

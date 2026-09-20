@@ -108,6 +108,8 @@ class GenericIntake:
             "yes" if value is True else "no" if value is False else
             "; ".join(value) if isinstance(value, list) else str(value)
         )
+        if question.kind in {"text", "complaints"} and cleaned == "none":
+            display = "none reported"
         self.confirmation = f'I heard "{display}". Is that correct? Say yes or no.'
         return self.confirmation
 
@@ -129,6 +131,8 @@ def parse_value(kind: str, text: str) -> tuple[bool, Value]:
     cleaned = clean_utterance(text)
     if cleaned in UNKNOWN:
         return True, None
+    if kind in {"text", "complaints"} and cleaned == "none":
+        return True, [] if kind == "complaints" else None
     if kind in {"pain", "count"}:
         value = NUMBERS.get(cleaned)
         if re.fullmatch(r"\d{1,6}", cleaned):

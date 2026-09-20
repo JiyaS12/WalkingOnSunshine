@@ -193,7 +193,11 @@ class IntegratedService:
                     "failed": "provider_rejected", "canceled": "disconnected",
                 }
                 snapshot.error_code = errors[status]
-            if snapshot.call_status in TERMINAL_CALL and snapshot.survey_status not in TERMINAL_SURVEY:
+            if (
+                snapshot.call_status in TERMINAL_CALL
+                and snapshot.survey_status not in TERMINAL_SURVEY
+                and call_id not in self.submissions
+            ):
                 snapshot.survey_status = "needs_review"
         return await self.update(call_id, change)
 
