@@ -391,10 +391,20 @@ def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
 
     async def interrupt() -> None:
         await until(lambda: bridge._interruptible)
+        # Background noise (voice detector only) and the handset echoing our
+        # own words back must not cut the question off.
         ScriptedTranscriber.queue.extend(
             [
                 SpeechEvent("speech_started"),
-                SpeechEvent("transcript", "moderate", True),
+                SpeechEvent("transcript", "how much pain", False),
+            ]
+        )
+        await asyncio.sleep(0.1)
+        assert bridge.bot_speaking
+        assert not any(message["event"] == "clear" for message in websocket.sent)
+        ScriptedTranscriber.queue.extend(
+            [
+                SpeechEvent("transcript", "I'd say moderate", True),
                 SpeechEvent("utterance_end"),
             ]
         )
@@ -408,7 +418,7 @@ def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
     asyncio.run(drive())
 
     record = client.app.state.persistence.calls["sess-2"]
-    assert any(line.startswith("patient: moderate") for line in record.transcript)
+    assert any(line.startswith("patient: I'd say moderate") for line in record.transcript)
     assert any(message["event"] == "clear" for message in websocket.sent)
 
 
