@@ -215,13 +215,13 @@ class IntegratedSession:
                         self._page_active = True
                     if key != seen:
                         seen = key
-                        if view.status == "page_ready" and not was_open:
-                            self._page_active = True
-                            await self._say(policy.INTEGRATED_PAGE_OPENED)
-                        elif view.last_event == "permission_denied":
+                        if view.last_event == "permission_denied":
                             await self._say(policy.INTEGRATED_PERMISSION_DENIED)
                         elif view.last_event == "recoverable_error":
                             await self._say(policy.INTEGRATED_PAGE_ERROR)
+                        elif view.status == "page_ready" and not was_open:
+                            self._page_active = True
+                            await self._say(policy.INTEGRATED_PAGE_OPENED)
                         elif view.status == "ready":
                             await self._say(policy.INTEGRATED_READY)
                         elif view.status == "capturing":

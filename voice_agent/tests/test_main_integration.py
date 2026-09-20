@@ -493,6 +493,20 @@ def test_page_ready_event_opens_link_and_gives_camera_setup_once(harness):
     asyncio.run(scenario())
 
 
+def test_camera_error_on_freshly_opened_page_is_not_hidden(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 3, "permission_denied")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        assert harness.spoken[-1] == policy.INTEGRATED_PERMISSION_DENIED
+        assert policy.INTEGRATED_PAGE_OPENED not in harness.spoken
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
 def test_verbal_ready_and_elapsed_timer_never_mean_saved(harness):
     async def scenario():
         session = await harness.session()
