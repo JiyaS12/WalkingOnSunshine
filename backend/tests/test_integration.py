@@ -340,9 +340,11 @@ def test_call_idempotency_persists_and_hides_phone(rig):
         ).status_code
         == 409
     )
-    assert NUMBER not in path.read_text()
+    durable_call = json.loads(path.read_text())[PID]["calls"][0]
+    assert durable_call["_destination_phone"] == NUMBER
     public = client.get(f"/api/patients/{PID}").text
     assert "_fingerprint" not in public
+    assert "_destination_phone" not in public
     assert NUMBER not in public
     assert "test-operator-token" not in public
     assert len(client.get(f"/api/patients/{PID}/calls").json()["calls"]) == 1
@@ -765,7 +767,11 @@ def test_walking_events_and_session_save_are_correlated_and_scoped(rig):
     payload["metrics"]["fall_risk_score"] = 0.9
     assert client.post(save_route, json=payload, headers=headers).status_code == 409
     assert "condition_survey" not in response.text
-    assert NUMBER not in response.text and NUMBER not in path.read_text()
+    assert NUMBER not in response.text
+    durable = json.loads(path.read_text())[PID]
+    linked_call = next(item for item in durable["calls"] if item["call_id"] == saved["call_id"])
+    assert linked_call["_destination_phone"] == NUMBER
+    assert linked_call["attempt_id"] == saved["attempt_id"]
     assert (
         callback(
             client, phone, survey_status="stored", call_status="completed"

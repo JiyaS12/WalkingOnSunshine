@@ -8,6 +8,7 @@ import { ApiError, addPatientAccessSession, fetchPatientAccess } from "../lib/ap
 const apiMocks = vi.hoisted(() => ({
   fetchPatientAccess: vi.fn(),
   addPatientAccessSession: vi.fn(),
+  fetchPatientWalking: vi.fn(),
 }));
 
 const webcamHarness = vi.hoisted(() => ({ props: null as unknown }));
@@ -35,10 +36,12 @@ vi.mock("../lib/api", async () => {
     ...actual,
     fetchPatientAccess: apiMocks.fetchPatientAccess,
     addPatientAccessSession: apiMocks.addPatientAccessSession,
+    fetchPatientWalking: apiMocks.fetchPatientWalking,
   };
 });
 
 interface WebcamProps {
+  patientFacing?: boolean;
   onMetrics: (
     metrics: GaitMetrics,
     source: "live" | "upload",
@@ -93,6 +96,7 @@ beforeEach(() => {
   openPatient("RGN-0417");
   apiMocks.fetchPatientAccess.mockResolvedValue(patientRecord());
   apiMocks.addPatientAccessSession.mockResolvedValue(patientRecord());
+  apiMocks.fetchPatientWalking.mockResolvedValue({ walking: null });
 });
 
 afterEach(() => {
@@ -131,6 +135,10 @@ describe("signed patient screening", () => {
     expect(localStorageSpy).not.toHaveBeenCalled();
     expect(screen.queryByText(/Doctor's Portal/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/phone survey/i)).not.toBeInTheDocument();
+    expect(webcamProps().patientFacing).toBe(true);
+    expect(screen.queryByText("Fall Risk")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stride Length")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("trend-graph")).not.toBeInTheDocument();
   });
 
   it.each([401, 404])(
@@ -225,7 +233,7 @@ describe("signed patient screening", () => {
 
     await act(async () => resolveSave(patientRecord("RGN-0417", "Demo Patient", [savedSession])));
     expect(await screen.findByText("Walk saved successfully.")).toBeInTheDocument();
-    expect(screen.getByTestId("trend-graph")).toHaveTextContent("Upload 12:00:00");
+    expect(screen.queryByTestId("trend-graph")).not.toBeInTheDocument();
   });
 
   it("prevents invalid and duplicate live submissions", async () => {
@@ -297,9 +305,10 @@ describe("signed patient screening", () => {
       metrics: secondMetrics,
     };
     await act(async () => resolvers[1](patientRecord("RGN-0417", "Demo Patient", [firstSession, secondSession])));
-    expect(screen.getByTestId("trend-graph")).toHaveTextContent("First,Second");
+    expect(await screen.findByRole("button", { name: "Saved" })).toBeDisabled();
 
     await act(async () => resolvers[0](patientRecord("RGN-0417", "Demo Patient", [firstSession])));
-    expect(screen.getByTestId("trend-graph")).toHaveTextContent("First,Second");
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+    expect(screen.queryByTestId("trend-graph")).not.toBeInTheDocument();
   });
 });

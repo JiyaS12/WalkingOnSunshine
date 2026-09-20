@@ -4,29 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
-  Footprints,
-  Gauge,
   Loader2,
   RefreshCw,
   Save,
   ShieldAlert,
-  TrendingDown,
   User,
   WifiOff,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import TrendGraph, { TrendSession } from "./TrendGraph";
 import {
   ApiError,
   GaitMetrics,
@@ -39,7 +26,6 @@ import {
 import { WalkingReporter, type WalkingReport } from "../lib/walkingReporter";
 import type { WalkError, WalkEventName } from "../lib/integration";
 
-const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
 type AccessStatus = "loading" | "ready" | "missing" | "invalid" | "offline" | "unavailable";
@@ -65,66 +51,6 @@ interface SaveMessage {
   kind: "success" | "error";
   text: string;
   retry?: MetricReading;
-}
-
-interface CardProps {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-  badge?: { label: string; classes: string };
-  sub?: string;
-}
-
-function riskLevel(score: number): { label: string; classes: string } {
-  if (score < 0.3) {
-    return {
-      label: "LOW",
-      classes: "border-0 bg-pastel-green text-foreground",
-    };
-  }
-  if (score < 0.5) {
-    return {
-      label: "MODERATE",
-      classes: "border-0 bg-pastel-peach/70 text-foreground",
-    };
-  }
-  return {
-    label: "HIGH",
-    classes: "border-0 bg-pastel-peach text-foreground",
-  };
-}
-
-function MetricCard({ title, value, icon, badge, sub }: CardProps) {
-  return (
-    <Card className="[--card-spacing:1.5rem]">
-      <CardHeader className="pb-0">
-        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {title}
-        </CardTitle>
-        <CardAction>
-          <span className="text-muted-foreground">{icon}</span>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="pt-2">
-        <div className="flex flex-wrap items-end gap-2">
-          <span className="text-3xl font-semibold text-foreground">
-            {value}
-          </span>
-          {badge && (
-            <Badge
-              variant="outline"
-              className={`mb-1 text-[10px] font-semibold ${badge.classes}`}
-            >
-              {badge.label}
-            </Badge>
-          )}
-        </div>
-        {sub && (
-          <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
-        )}
-      </CardContent>
-    </Card>
-  );
 }
 
 function AccessPanel({
@@ -178,15 +104,6 @@ function AccessPanel({
       </div>
     </main>
   );
-}
-
-function toTrendSessions(record: PatientAccessRecord | null): TrendSession[] {
-  return (record?.gait_sessions ?? []).map((session) => ({
-    label: session.label,
-    asymmetry_pct: session.metrics.asymmetry_pct,
-    fall_risk_score: session.metrics.fall_risk_score,
-    stride_length_m: session.metrics.stride_length_m,
-  }));
 }
 
 function isAbortError(error: unknown): boolean {
@@ -538,19 +455,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     reporterRef.current?.emit(event, error);
   }, [activeReporter, identityEpoch]);
 
-  const trendSessions = useMemo(() => {
-    const sessions = toTrendSessions(patient);
-    if (reading?.metrics.gait_detected && !reading.saved) {
-      sessions.push({
-        label: UNSAVED_LABEL[reading.source],
-        asymmetry_pct: reading.metrics.asymmetry_pct,
-        fall_risk_score: reading.metrics.fall_risk_score,
-        stride_length_m: reading.metrics.stride_length_m,
-      });
-    }
-    return sessions;
-  }, [patient, reading]);
-
   if (currentAccess === "loading") {
     return (
       <main
@@ -631,7 +535,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   return (
     <main className="min-h-screen p-6 text-foreground">
-      <header className="mx-auto mb-8 flex max-w-6xl flex-wrap items-center justify-between gap-4">
+      <header className="mx-auto mb-8 flex max-w-3xl flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
           <div>
@@ -645,12 +549,12 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         </span>
       </header>
 
-      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div className="rounded-3xl bg-pastel-sage/60 p-5 shadow-pillow-sm">
-        <h2 className="text-sm font-medium text-foreground">Complete one walking test</h2>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Use the live camera or upload a walking video. For live capture, wait for calibration, walk across the frame only if safe, then choose Save this walk.
-          Uploads are analyzed and saved automatically when walking is detected. Completion is confirmed only after the server saves your walk.
+        <h2 className="text-xl font-medium text-foreground">Complete one walking test</h2>
+        <p className="mt-2 text-base leading-relaxed text-muted-foreground">
+          Keep your whole body in view and wait until the camera is ready. Walk across the screen only if it feels safe, then choose Save this walk.
+          You can also upload a walking video. We’ll let you know when your walk has been saved.
         </p>
         {walking?.view && <p className="mt-2 text-xs">Walking status: {walking.view.status === "saved" && walking.view.session_id ? "Saved to your care team" : walking.view.status.replaceAll("_", " ")}</p>}
         {walking?.stopping && walking.view?.status !== "stopped" && <p className="mt-2 text-xs">Stop requested. Waiting for server confirmation.</p>}
@@ -672,6 +576,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       <section>
         {!walkClosed && !walkWaiting && <WebcamFeed
           key={identityEpoch}
+          patientFacing
           onMetrics={handleMetrics}
           onInputReset={handleInputReset}
           onLifecycle={handleLifecycle}
@@ -679,40 +584,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         <div className="mt-3">{captureFeedback}</div>
       </section>
 
-        <section className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 lg:grid-cols-5">
-            <MetricCard
-              title="Stride Length"
-              value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
-              icon={<Footprints className="h-4 w-4" />}
-              sub={metrics?.stride_ratio ? `×${metrics.stride_ratio.toFixed(2)} leg` : undefined}
-            />
-            <MetricCard
-              title="Asymmetry"
-              value={metrics ? `${metrics.asymmetry_pct.toFixed(1)}%` : "—"}
-              icon={<Gauge className="h-4 w-4" />}
-            />
-            <MetricCard
-              title="Velocity Degradation"
-              value={metrics ? `${metrics.velocity_degradation_pct.toFixed(1)}%` : "—"}
-              icon={<TrendingDown className="h-4 w-4" />}
-            />
-            <MetricCard
-              title="Fall Risk"
-              value={metrics ? metrics.fall_risk_score.toFixed(3) : "—"}
-              icon={<AlertTriangle className="h-4 w-4" />}
-              badge={metrics ? riskLevel(metrics.fall_risk_score) : undefined}
-            />
-          <MetricCard
-            title="Cadence"
-            value={metrics ? metrics.cadence_steps_per_min.toFixed(0) : "—"}
-            icon={<Activity className="h-4 w-4" />}
-            sub={metrics ? "steps/min" : undefined}
-          />
-        </section>
 
-        <section>
-          <TrendGraph sessions={trendSessions} />
-        </section>
       </div>
     </main>
   );

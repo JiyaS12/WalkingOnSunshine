@@ -81,6 +81,7 @@ def create_router(clinician_auth: Callable, patient_auth: Callable) -> APIRouter
             body.request_id,
             body.condition_category,
             phone.fingerprint(body.model_dump(mode="json")),
+            destination_phone=body.to_number,
         )
         if created:
             try:

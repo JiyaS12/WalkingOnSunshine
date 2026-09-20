@@ -35,8 +35,22 @@ def wait_ready(client: httpx.Client, path: str, process: subprocess.Popen) -> No
     pytest.fail("Fixture process did not become ready")
 
 
+@pytest.fixture(scope="session")
+def matplotlib_cache(tmp_path_factory):
+    # MediaPipe imports Matplotlib. On a fresh macOS cache its font scan can
+    # exceed the HTTP startup deadline. Warm one isolated, non-patient cache
+    # before starting services, then share it across the fixture processes.
+    cache = tmp_path_factory.mktemp("matplotlib")
+    subprocess.run(
+        [str(ROOT / "backend/.venv/bin/python"), "-c", "import matplotlib.font_manager"],
+        env={"PATH": os.environ["PATH"], "MPLCONFIGDIR": str(cache)},
+        check=True, timeout=120, capture_output=True,
+    )
+    return cache
+
+
 @pytest.fixture
-def services(tmp_path):
+def services(tmp_path, matplotlib_cache):
     main_socket, phone_socket = socket.socket(), socket.socket()
     for listener in (main_socket, phone_socket):
         listener.bind(("127.0.0.1", 0))
@@ -51,6 +65,7 @@ def services(tmp_path):
         "PATH": os.environ["PATH"],
         "HOME": str(tmp_path),
         "PYTHONUNBUFFERED": "1",
+        "MPLCONFIGDIR": str(matplotlib_cache),
         "OPENAI_API_KEY": "",
         "SURVEY_EXTRACTOR": "exact",
         "SURVEY_INGEST_TOKEN": INGEST,

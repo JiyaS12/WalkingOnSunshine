@@ -163,6 +163,8 @@ def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness)
         assert len(payload["condition_survey"]["answers"]) == 6
         assert {answer["normalized_value"] for answer in payload["condition_survey"]["answers"]} == {"mild"}
         assert harness.url in harness.provider.last_body
+        assert harness.provider.last_sms_destination == harness.payload.to_number
+        assert harness.provider.last_call_destination == harness.payload.to_number
         assert harness.service.receipt(session.call.call_id).snapshot.survey_status == "stored"
         assert harness.url not in harness.path.read_bytes().decode(errors="ignore")
         assert "MAIN-CANONICAL-TOKEN" not in json.dumps([r.model_dump() for r in harness.service.store.all()])
@@ -707,7 +709,7 @@ def test_signature_covers_repeated_form_values():
 
 
 def test_default_app_needs_no_secrets_and_never_uses_demo_identity():
-    with patch.dict("os.environ", {}, clear=True):
+    with patch.dict("os.environ", {}, clear=True), patch.object(phone_app, "load_dotenv"):
         app = phone_app.create_app()
         with TestClient(app) as client:
             assert client.get("/api/config").json() == {"mode": "integrated", "ready": False}

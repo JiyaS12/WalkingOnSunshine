@@ -80,14 +80,18 @@ class FakePhoneProvider:
         self.calls = 0
         self.messages = 0
         self.last_body: str | None = None
+        self.last_call_destination: str | None = None
+        self.last_sms_destination: str | None = None
         self.sms_outcome = "sent"
 
     async def call(self, to_number: str, voice_url: str, status_url: str) -> ProviderResult:
         self.calls += 1
+        self.last_call_destination = to_number
         return ProviderResult(sid=f"CAfake{self.calls}", status="queued")
 
     async def sms(self, to_number: str, body: str, status_url: str) -> ProviderResult:
         self.messages += 1
+        self.last_sms_destination = to_number
         self.last_body = body
         if self.sms_outcome == "rejected":
             raise ProviderRejected()

@@ -428,6 +428,33 @@ text, and confirmed survey results. Raw audio is not stored. Inspect saved
 rows at `GET /api/results` (requires the `OPERATOR_TOKEN` bearer header) or the `patient_conversation_results` view. See
 [DATABASE.md](DATABASE.md).
 
+### Voice results dashboard
+
+The desktop service also provides `/results`: patient-code search, status
+filters, exact question wording, confirmed versus pending answers, prototype
+scores, patient quotations and expandable transcripts. It refreshes every
+10 seconds while visible. Missing/incomplete scores are displayed as a dash;
+these raw sums are not official clinical scores.
+
+Enter `OPERATOR_TOKEN` to unlock. The page sends it only in the authorization
+header and retains it in tab-scoped session storage, never in a URL. Locking or
+an authentication failure clears displayed records and the stored token.
+Patient text is rendered as text, not HTML. Supabase, temporary local results,
+and merged recovery results are clearly distinguished; recovered records are
+individually labeled. Local copies disappear on restart.
+
+When running the complete WalkingOnSunshine stack, serve this optional desktop
+app on **8002**, not main's 8000 or phone's 8001:
+
+```bash
+.venv/bin/uvicorn voice_app:create_app --factory --host 127.0.0.1 --port 8002 --no-access-log
+```
+
+This is the standalone voice-demo store. The integrated phone-to-walking flow
+continues to use main's patient store and clinician portal; it does not send its
+clinical records to this Supabase dashboard. No migration is needed to use the
+dashboard against the existing voice-demo schema.
+
 The active survey implementation is in `app/`; this checkout does not include
 the earlier `survey_intelligence/` prototype.
 

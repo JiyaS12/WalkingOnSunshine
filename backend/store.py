@@ -1,7 +1,7 @@
 """Patient record store for Sana.
 
-JSON-persisted at backend/.cache/patients.json; seeded on first load from
-data/mock_patients.json.
+Server-side Supabase persistence when PATIENT_STORE=supabase; otherwise the
+explicit local JSON demo store seeded from data/mock_patients.json.
 """
 
 from __future__ import annotations
@@ -15,6 +15,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+if __package__:
+    from .supabase_store import SupabasePatientStore
+else:
+    from supabase_store import SupabasePatientStore
 
 
 CACHE_PATH = Path(__file__).resolve().parent / ".cache" / "patients.json"
@@ -29,6 +33,17 @@ _cache_path = CACHE_PATH
 _lock = threading.Lock()
 _MAX_CALLS = 100
 _MAX_EVENTS = 200
+_supabase: SupabasePatientStore | None = None
+_test_json_store = False
+
+
+def _uses_supabase() -> bool:
+    if _test_json_store:
+        return False
+    mode = os.getenv("PATIENT_STORE", "json").strip().lower()
+    if mode not in {"json", "supabase"}:
+        raise StoreUnavailable("invalid patient store configuration")
+    return mode == "supabase"
 
 
 class Conflict(ValueError):
@@ -51,6 +66,7 @@ def _public_call(call: dict) -> dict:
     result = deepcopy(call)
     result.pop("_fingerprint", None)
     result.pop("_phone_snapshot", None)
+    result.pop("_destination_phone", None)
     return result
 
 
@@ -68,6 +84,7 @@ def _public_record(record: dict) -> dict:
 
 
 def _commit(patients: dict, pid: str, record: dict) -> None:
+    global _patients, _supabase
     old = patients.get(pid)
     patients[pid] = record
     try:
@@ -77,6 +94,11 @@ def _commit(patients: dict, pid: str, record: dict) -> None:
             del patients[pid]
         else:
             patients[pid] = old
+        if _uses_supabase():
+            # A timed-out response may already have committed. Reload before
+            # any later request; do not pretend local rollback rolled back SQL.
+            _patients = None
+            _supabase = None
         raise
 
 
@@ -92,6 +114,11 @@ def _mutate_patient(pid: str, mutate: Callable[[dict], None]) -> dict:
 
 
 def _persist() -> None:
+    if _uses_supabase():
+        if _supabase is None or _patients is None:
+            raise StoreUnavailable("Supabase patient store was not loaded")
+        _supabase.save(_patients)
+        return
     _cache_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _cache_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(_patients))
@@ -99,9 +126,23 @@ def _persist() -> None:
 
 
 def _load() -> dict:
-    global _patients
+    global _patients, _supabase
     if _patients is not None:
         return _patients
+    if _uses_supabase():
+        try:
+            _supabase = SupabasePatientStore.from_env()
+            loaded = _supabase.load()
+            # Explicit synthetic-seed opt-in only. Never import a local cache
+            # or fall back to JSON when the authoritative database fails.
+            if os.getenv("SUPABASE_SEED_DEMO", "false").lower() == "true":
+                loaded = {**_read_seeds(), **loaded}
+                _supabase.save(loaded)
+            _patients = loaded
+            return _patients
+        except (OSError, ValueError) as exc:
+            _supabase = None
+            raise StoreUnavailable("Supabase patient store unavailable; apply its migration and check server configuration") from exc
     try:
         loaded = json.loads(_cache_path.read_text())
         if not isinstance(loaded, dict) or not all(isinstance(record, dict) for record in loaded.values()):
@@ -290,7 +331,7 @@ def ensure_patient(
     with _lock:
         patients = _load()
         if pid in patients:
-            return json.loads(json.dumps(patients[pid])), False
+            return _public_record(patients[pid]), False
         if not allow_create:
             raise CreationDisabled(pid)
         return _append_survey_locked(patients, survey), True
@@ -363,7 +404,7 @@ def set_condition(pid: str, category: str) -> dict:
     return _mutate_patient(pid, update)
 
 
-def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: str) -> tuple[dict, bool]:
+def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: str, destination_phone: str | None = None) -> tuple[dict, bool]:
     with _lock:
         patients = _load()
         if pid not in patients:
@@ -391,6 +432,7 @@ def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: s
             "provider_call_id": None, "phone_session_id": None, "message_id": None,
             "error_code": None, "version": 1, "phone_version": 0,
             "created_at": now, "updated_at": now, "_fingerprint": fingerprint,
+            "_destination_phone": destination_phone,
             "walking": {
                 "status": "waiting", "last_sequence": 0, "last_event": None,
                 "session_id": None, "events": [],
@@ -565,6 +607,8 @@ def add_walking_event(pid: str, event: dict) -> dict:
 
 
 def reset_for_tests(path: Path | str) -> None:
-    global _patients, _cache_path
+    global _patients, _cache_path, _supabase, _test_json_store
     _patients = None
     _cache_path = Path(path)
+    _supabase = None
+    _test_json_store = True

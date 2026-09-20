@@ -161,6 +161,7 @@ type TrackingStatus =
   | "no-person";
 
 interface Props {
+  patientFacing?: boolean;
   onMetrics: (
     metrics: GaitMetrics,
     source: "live" | "upload",
@@ -177,6 +178,7 @@ interface Props {
 type Mode = "live" | "upload";
 
 export default function WebcamFeed({
+  patientFacing = false,
   onMetrics,
   onProcessingChange,
   onInputReset,
@@ -313,7 +315,7 @@ export default function WebcamFeed({
       canvas: HTMLCanvasElement,
       lm: PoseResults["poseLandmarks"]
     ) => {
-      if (!lm) return;
+      if (patientFacing || !lm) return;
       ctx.strokeStyle = "#8FB4D2";
       ctx.lineWidth = 2;
       for (const [a, b] of SKELETON_PAIRS) {
@@ -346,7 +348,7 @@ export default function WebcamFeed({
         ctx.fill();
       });
     },
-    []
+    [patientFacing]
   );
 
   const updateFraming = useCallback((lm: PoseResults["poseLandmarks"]) => {
@@ -785,13 +787,13 @@ export default function WebcamFeed({
           canvas.height = 360;
         }
         const ctx = canvas?.getContext("2d");
-        if (canvas && ctx) {
+        if (canvas && ctx && !patientFacing) {
           playFrames(canvas, ctx, analysis.frames, analysis.fps);
         }
         if (analysis.metrics.gait_detected) {
           lifecycleRef.current?.("capture_completed");
           setUploadCaption(
-            `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
+            patientFacing ? "Your walking video has been checked. Saving your result…" : `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
           );
         } else {
           lifecycleRef.current?.("recoverable_error", "tracking_lost");
@@ -831,7 +833,7 @@ export default function WebcamFeed({
         }
       }
     },
-    [playFrames, setBusy]
+    [playFrames, setBusy, patientFacing]
   );
 
   useEffect(() => {
@@ -910,7 +912,7 @@ export default function WebcamFeed({
             }`}
           >
             <Camera className="h-4 w-4" />
-            Live Camera (MediaPipe Pose)
+            {patientFacing ? "Use camera" : "Live Camera (MediaPipe Pose)"}
           </button>
           <button
             role="radio"
@@ -930,7 +932,7 @@ export default function WebcamFeed({
           </button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          {mode === "upload"
+          {patientFacing ? (mode === "upload" ? "Choose a video of yourself walking, with your whole body visible." : "Stand where your whole body is visible. Wait for the camera to be ready, then walk only if it feels safe.") : mode === "upload"
             ? "Upload a walking video (.mp4/.mov/.webm, ≤100 MB) for server-side pose analysis"
             : "Stand with your full body visible for 60 calibration frames. Then walk across the frame if safe and choose Save this walk. Only joint coordinates leave the browser."}
         </p>
@@ -955,10 +957,10 @@ export default function WebcamFeed({
             <>
               <span className="flex items-center gap-1.5">
                 <span className={`h-2 w-2 rounded-full ${statusDot}`} />
-                {statusText}
+                {patientFacing ? (cameraBlocked ? "Camera unavailable" : trackingStatus === "no-person" ? "Please move into view" : legLengthM ? "Ready for your walk" : "Getting the camera ready…") : statusText}
               </span>
               <span className="flex items-center gap-2">
-                {statusDetail && <span className="opacity-70">{statusDetail}</span>}
+                {!patientFacing && statusDetail && <span className="opacity-70">{statusDetail}</span>}
                 <span className="rounded-full bg-pastel-peach px-2 py-0.5 text-[10px] font-semibold tracking-wider">
                   LIVE
                 </span>
@@ -979,8 +981,8 @@ export default function WebcamFeed({
           autoPlay
           muted
           playsInline
-          // hidden from view but still decoding: the canvas paints the frames
-          className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover opacity-0"
+          // Patients see the plain video, never the tracking overlay.
+          className={`pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover ${patientFacing ? "" : "opacity-0"}`}
           style={{ display: mode === "live" ? "block" : "none" }}
         />
         {mode === "live" && !cameraBlocked && bodyOutOfFrame && (
@@ -1036,6 +1038,8 @@ export default function WebcamFeed({
         )}
         <canvas
           ref={canvasRef}
+          hidden={patientFacing}
+          aria-hidden="true"
           width={640}
           height={360}
           className={`pointer-events-none h-full w-full ${
@@ -1069,7 +1073,7 @@ export default function WebcamFeed({
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin" />
             <span className="text-sm">
-              Analysing video… extracting pose landmarks
+              {patientFacing ? "Checking your walking video…" : "Analysing video… extracting pose landmarks"}
             </span>
           </div>
         )}

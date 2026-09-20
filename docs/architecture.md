@@ -53,7 +53,7 @@ credentials or libraries to start. Run one worker for each Python service.
        └─ Select canonical patient + explicit condition; request call
              │
              ▼
-[ Main :8000 / JSON store ] ── reserve call/attempt ──► [ Phone :8001 ]
+[ Main :8000 / patient store ] ── reserve call/attempt ──► [ Phone :8001 ]
        │
        ◄── confirmed generic + condition surveys ────────────┘
        ├── persist once; issue canonical signed URL ────────► SMS provider
@@ -166,9 +166,11 @@ defined in [`docs/patient-access-contract.md`](patient-access-contract.md).
 | Live voice guidance during the walking test | Implemented: backend event polling and persisted-session completion gate; physical flow not validated here. |
 
 See the [operator runbook](integration-runbook.md) for provisioning, offline
-verification, provider validation and recovery limits. The JSON patient store
-is authoritative. Optional Supabase remains confined to the standalone voice
-demo; it is not a migration target for the integrated flow.
+verification, provider validation and recovery limits. Main's configured patient
+store is authoritative: [Supabase](supabase-patient-store.md) uses a separate
+private integrated table; explicit JSON mode remains available for local demos.
+Patient-facing capture hides the analysis overlay, scores and charts while still
+collecting and saving the results for the clinician.
 
 ## Code map
 

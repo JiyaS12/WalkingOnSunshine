@@ -45,6 +45,20 @@ beforeEach(() => {
 afterEach(() => { cleanup(); delete window.Pose; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("real webcam lifecycle wiring", () => {
+  it("keeps patient video simple while still returning analysis for persistence", async () => {
+    const onMetrics = vi.fn();
+    const view = render(<WebcamFeed patientFacing onMetrics={onMetrics} />);
+    await settle();
+    expect(screen.getByRole("radio", { name: "Use camera" })).toBeInTheDocument();
+    expect(view.container.querySelector("canvas")).not.toBeVisible();
+    expect(screen.queryByText(/Tracking pose|calibration frames|leg .* m|Last sync/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Upload Video" }));
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]');
+    await act(async () => fireEvent.change(input!, { target: { files: [new File(["fake"], "walk.mp4", { type: "video/mp4" })] } }));
+    expect(onMetrics).toHaveBeenCalledWith(metrics, "upload", []);
+    expect(screen.queryByText(/fall risk|90 frames/i)).not.toBeInTheDocument();
+    expect(view.container.querySelector("canvas")).not.toBeVisible();
+  });
   it("waits for observed landmarks and calibration before reporting ready/capture, and ignores late callbacks after pause", async () => {
     const lifecycle = vi.fn();
     const onMetrics = vi.fn();

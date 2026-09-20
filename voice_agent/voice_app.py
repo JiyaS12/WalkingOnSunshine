@@ -31,6 +31,7 @@ from app.deepgram import DEFAULT_VOICE, stream_speech_with_deepgram, transcribe_
 from app import conversation_policy as speech
 from app.question_loader import QUESTION_BANKS
 from app.persistence import CompositePersistence, build_persistence
+from app.database import DatabaseConversationStore
 
 ROOT = Path(__file__).resolve().parent
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -149,8 +150,22 @@ def create_app(
         }
 
     @app.get("/api/results", dependencies=[Depends(operator)])
-    def results(patient_code: str | None = None) -> dict[str, object]:
-        return {"results": store.list_results(patient_code)}
+    def results(response: Response, patient_code: str | None = None) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        if isinstance(store, CompositePersistence):
+            payload = store.results_snapshot(patient_code)
+        else:
+            database = isinstance(store, DatabaseConversationStore)
+            payload = {"results": store.list_results(patient_code),
+                       "source": "supabase" if database else "in_memory",
+                       "warning": None if database else "Temporary local results only. They disappear when the app restarts."}
+        payload["question_catalog"] = {
+            question.id: {"prompt": question.prompt, "topic": question.topic,
+                          "category": category.value, "order": index + 1}
+            for category, questions in QUESTION_BANKS.items()
+            for index, question in enumerate(questions)
+        }
+        return payload
 
     @app.post("/api/sessions", dependencies=[Depends(operator)])
     def create_session(patient_code: str = "RGN-0417") -> dict[str, object]:
@@ -253,6 +268,11 @@ def create_app(
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(ROOT / "voice_web" / "index.html")
+
+    @app.get("/results")
+    def results_dashboard() -> FileResponse:
+        # Public shell only: all patient data still requires OperatorAuth.
+        return FileResponse(ROOT / "voice_web" / "results.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=ROOT / "voice_web"), name="static")
     return app
