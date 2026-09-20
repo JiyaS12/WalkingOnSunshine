@@ -18,6 +18,14 @@ import {
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
 import TrendGraph, { TrendSession } from "./TrendGraph";
+import { Badge } from "../../components/ui/badge";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card";
 import {
   ApiError,
   GaitMetrics,
@@ -65,40 +73,47 @@ function riskLevel(score: number): { label: string; classes: string } {
   if (score < 0.3) {
     return {
       label: "LOW",
-      classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40",
+      classes: "border-0 rounded-full bg-[#E4F5D6] text-[#4F7A3A]",
     };
   }
   if (score < 0.5) {
     return {
       label: "MODERATE",
-      classes: "bg-amber-600/20 text-amber-300 border-amber-500/40",
+      classes: "border-0 rounded-full bg-[#FBEBD2] text-[#9A6B2F]",
     };
   }
   return {
     label: "HIGH",
-    classes: "bg-rose-600/20 text-rose-300 border-rose-500/40",
+    classes: "border-0 rounded-full bg-pastel-peach text-[#9A4B32]",
   };
 }
 
 function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-400">{title}</span>
-        <span className="text-slate-500">{icon}</span>
-      </div>
-      <div className="mt-2 flex items-end gap-2">
-        <span className="text-2xl font-semibold text-slate-100">{value}</span>
+    <Card>
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </CardTitle>
+        <CardAction>
+          <span className="text-muted-foreground">{icon}</span>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="pt-1">
+        <div className="flex items-end gap-2">
+          <span className="text-2xl font-semibold text-card-foreground">{value}</span>
         {badge && (
-          <span
-            className={`mb-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.classes}`}
+          <Badge
+            variant="outline"
+            className={`mb-0.5 text-[10px] font-semibold ${badge.classes}`}
           >
             {badge.label}
-          </span>
+          </Badge>
         )}
-      </div>
-      {sub && <p className="mt-1 text-[10px] text-slate-500">{sub}</p>}
-    </div>
+        </div>
+        {sub && <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -111,40 +126,40 @@ function AccessPanel({
 }) {
   const content = {
     missing: {
-      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-amber-300" />,
+      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-pastel-peach" />,
       title: "Secure link required",
       detail:
         "Open the complete link sent by your care team. A patient ID by itself cannot open a screening.",
     },
     invalid: {
-      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-amber-300" />,
+      icon: <ShieldAlert className="mx-auto mb-3 h-9 w-9 text-pastel-peach" />,
       title: "This link is no longer valid",
       detail:
         "The link may be expired or incomplete. Ask your care team to send a new secure link.",
     },
     offline: {
-      icon: <WifiOff className="mx-auto mb-3 h-9 w-9 text-rose-300" />,
+      icon: <WifiOff className="mx-auto mb-3 h-9 w-9 text-[#9A4B32]" />,
       title: "You appear to be offline",
       detail: "Check your connection, then try opening the screening again.",
     },
     unavailable: {
-      icon: <AlertTriangle className="mx-auto mb-3 h-9 w-9 text-rose-300" />,
+      icon: <AlertTriangle className="mx-auto mb-3 h-9 w-9 text-[#9A4B32]" />,
       title: "Screening is temporarily unavailable",
       detail: "Please try again. If the problem continues, contact your care team.",
     },
   }[status];
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
-      <div role="alert" className="max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6 text-center">
+    <main className="flex min-h-screen items-center justify-center p-6 text-slate-600">
+      <div role="alert" className="max-w-sm rounded-3xl bg-white p-8 text-center shadow-pillow">
         {content.icon}
-        <h1 className="text-lg font-semibold text-slate-100">{content.title}</h1>
+        <h1 className="text-lg font-semibold text-slate-700">{content.title}</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">{content.detail}</p>
         {(status === "offline" || status === "unavailable") && (
           <button
             type="button"
             onClick={onRetry}
-            className="mx-auto mt-4 flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+            className="mx-auto mt-4 flex items-center gap-2 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-slate-700 shadow-pillow-sm"
           >
             <RefreshCw className="h-4 w-4" />
             Try again
@@ -460,7 +475,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     return (
       <main
         role="status"
-        className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400"
+        className="flex min-h-screen items-center justify-center text-slate-400"
       >
         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your screening…
       </main>
@@ -480,23 +495,23 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const isSaving = reading !== null && savingReadingId === reading.id;
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
+    <main className="min-h-screen p-6 text-slate-600">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Activity className="h-8 w-8 text-emerald-400" />
+          <Activity className="h-8 w-8 text-pastel-blue" />
           <div>
-            <h1 className="text-2xl font-bold">GaitGuard AI</h1>
+            <h1 className="text-2xl font-bold text-slate-700">GaitGuard AI</h1>
             <p className="text-xs text-slate-400">Your secure walking assessment</p>
           </div>
         </div>
-        <span className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
+        <span className="flex items-center gap-2 rounded-full border-0 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-pillow-sm">
           <User className="h-3.5 w-3.5 text-slate-400" />
           {patient.name ?? "Patient"}
         </span>
       </header>
 
-      <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4">
-        <h2 className="text-sm font-medium text-emerald-200">Complete one walking test</h2>
+      <div className="mb-4 rounded-3xl bg-white p-4 shadow-pillow">
+        <h2 className="text-sm font-medium text-slate-700">Complete one walking test</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-400">
           Use the live camera or upload a walking video. A valid walk is saved securely to your care team.
         </p>
@@ -541,15 +556,15 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           />
 
           {metrics && !metrics.gait_detected && (
-            <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
+            <p role="alert" className="rounded-2xl border-0 bg-[#FBEBD2] px-3 py-2 text-xs text-slate-600">
               No walking detected — walk across the frame or upload a clip with walking before saving.
             </p>
           )}
 
           {reading?.source === "live" && (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3">
+            <div className="flex items-center gap-2 rounded-3xl bg-white p-4 shadow-pillow">
               {reading.saved ? (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-[#4F7A3A]" />
               ) : (
                 <Save className="h-4 w-4 shrink-0 text-slate-400" />
               )}
@@ -560,7 +575,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                 type="button"
                 onClick={() => void saveSession(reading)}
                 disabled={isSaving || reading.saved || !reading.metrics.gait_detected}
-                className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                className="rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-slate-700 shadow-pillow-sm disabled:opacity-50"
               >
                 {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
               </button>
@@ -570,10 +585,10 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           {currentSaveMessage && (
             <div
               role={currentSaveMessage.kind === "error" ? "alert" : "status"}
-              className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+              className={`flex items-center justify-between gap-3 rounded-2xl border-0 px-3 py-2 text-xs ${
                 currentSaveMessage.kind === "error"
-                  ? "border-rose-500/40 bg-rose-600/10 text-rose-300"
-                  : "border-emerald-500/40 bg-emerald-600/10 text-emerald-300"
+                  ? "bg-pastel-peach text-[#9A4B32]"
+                  : "bg-[#E4F5D6] text-[#4F7A3A]"
               }`}
             >
               <span>{currentSaveMessage.text}</span>
@@ -582,7 +597,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                   type="button"
                   disabled={savingReadingId === currentSaveMessage.retry.id}
                   onClick={() => void saveSession(currentSaveMessage.retry!)}
-                  className="flex shrink-0 items-center gap-1 rounded-md border border-rose-400/50 px-2 py-1 font-medium hover:bg-rose-500/10 disabled:opacity-50"
+                  className="flex shrink-0 items-center gap-1 rounded-xl border border-current/40 px-2 py-1 font-medium disabled:opacity-50"
                 >
                   <RefreshCw className="h-3 w-3" />
                   Retry save
