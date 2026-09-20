@@ -79,6 +79,42 @@ describe("doctor route authentication", () => {
     await waitFor(() => expect(fetchPatients).toHaveBeenCalled());
   });
 
+  it("lets a slow patient list finish instead of superseding it on the next poll", async () => {
+    let resolveSlowList!: (
+      rows: Awaited<ReturnType<typeof fetchPatients>>
+    ) => void;
+    const slowList = new Promise<Awaited<ReturnType<typeof fetchPatients>>>((resolve) => {
+      resolveSlowList = resolve;
+    });
+    vi.mocked(fetchPatients)
+      .mockImplementationOnce(() => slowList)
+      .mockResolvedValue([]);
+    vi.mocked(getClinicianSession).mockResolvedValue(activeSession);
+    render(<DoctorPortal />);
+
+    expect(await screen.findByRole("heading", { name: "Doctor's Portal" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchPatients).toHaveBeenCalledTimes(1));
+    expect(document.visibilityState).toBe("visible");
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(fetchPatients).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSlowList([
+        {
+          patient_id: "slow-patient",
+          name: "Slow Patient",
+          primary_complaints: [],
+        },
+      ]);
+      await slowList;
+    });
+
+    expect(await screen.findByText("Slow Patient")).toBeInTheDocument();
+  });
+
   it("shows an explicit expired-session flow", async () => {
     vi.mocked(getClinicianSession).mockRejectedValue(
       new ApiError("Clinician session expired", 401, "session_expired")
