@@ -13,6 +13,9 @@ import os
 from pathlib import Path
 
 from openai import OpenAI
+from pydantic import ValidationError
+
+from integration_models import ConditionSurvey, OPTION_WEIGHTS
 
 CACHE_PATH = Path(__file__).resolve().parent / ".cache" / "summaries.json"
 
@@ -189,14 +192,17 @@ _SYNTHESIS_SYSTEM_PROMPT = (
     "symptoms are concordant or discordant with the measured gait changes "
     "and why, (2) name the specific metrics that support this, (3) flag any "
     "red flags for fall risk, (4) end with one suggested next step. Do not "
-    "invent data not provided."
+    "invent data not provided. Null generic intake fields mean unknown, never "
+    "no symptoms. Condition Likert responses do not imply numeric pain, falls, "
+    "or dizziness. Prototype raw sums are not validated HOOS JR interval scores "
+    "or validated stroke scale scores."
 )
 
 
 def _synthesis_key(record: dict) -> str:
     blob = json.dumps(
         [
-            "synthesis-v1",
+            "synthesis-v2",
             _synthesis_prompt(record),
             record["gait_sessions"][-1]["metrics"],
         ],
@@ -223,12 +229,33 @@ def _synthesis_prompt(record: dict) -> str:
         f"{record.get('age')}). "
         f"Latest survey ({survey.get('recorded_at')}): "
         f"pain {survey.get('pain_scale')}/10; "
-        f"falls in last 6 months: {falls.get('falls_last_6_months', 0)} "
-        f"(injured: {bool(falls.get('injured'))}); "
-        f"dizziness: {'yes' if survey.get('dizziness') else 'no'} {notes}; "
-        f"complaints: {', '.join(survey.get('primary_complaints', []))}. "
+        f"falls in last 6 months: {falls.get('falls_last_6_months')} "
+        f"(injured: {falls.get('injured')}; description: {falls.get('last_fall_description')}); "
+        f"dizziness: {survey.get('dizziness')} {notes}; "
+        f"complaints: {survey.get('primary_complaints')}. "
+        f"{_condition_summary(record)} "
         f"Gait telemetry — {gait}"
     )
+
+
+def _condition_summary(record: dict) -> str:
+    for survey in reversed(record["surveys"]):
+        section = survey.get("condition_survey")
+        if not section:
+            continue
+        try:
+            instrument = ConditionSurvey.model_validate(section)
+        except ValidationError:
+            continue
+        total = sum(OPTION_WEIGHTS[answer.normalized_value] for answer in instrument.answers)
+        answers = ", ".join(f"{answer.question_id}={answer.normalized_value}" for answer in instrument.answers)
+        return (
+            f"Confirmed condition survey ({survey.get('recorded_at')}): "
+            f"{instrument.instrument} v{instrument.version}; {answers}. "
+            f"Prototype raw item sum {total}/24; not a validated HOOS JR interval "
+            "score or validated stroke scale score."
+        )
+    return "No confirmed condition survey is available."
 
 
 def _template_synthesis(record: dict) -> str:
@@ -236,9 +263,9 @@ def _template_synthesis(record: dict) -> str:
     sessions = record["gait_sessions"]
     latest = sessions[-1]["metrics"]
     falls = survey.get("fall_history") or {}
-    pain = survey.get("pain_scale", 0)
-    n_falls = falls.get("falls_last_6_months", 0)
-    dizzy = bool(survey.get("dizziness"))
+    pain = survey.get("pain_scale")
+    n_falls = falls.get("falls_last_6_months")
+    dizzy = survey.get("dizziness")
     risk = latest["fall_risk_score"]
     if len(sessions) > 1:
         first_risk = sessions[0]["metrics"]["fall_risk_score"]
@@ -247,8 +274,13 @@ def _template_synthesis(record: dict) -> str:
         ) + f" {first_risk:.2f}"
     else:
         trend = "single session"
-    subjective_flag = pain >= 6 or n_falls >= 1 or dizzy
-    if subjective_flag and risk >= 0.5:
+    subjective_flag = (pain is not None and pain >= 6) or (n_falls is not None and n_falls >= 1) or dizzy is True
+    if pain is None or n_falls is None or dizzy is None:
+        verdict, reason = (
+            "undetermined",
+            "generic intake is incomplete; condition answers do not establish pain, fall count, or dizziness",
+        )
+    elif subjective_flag and risk >= 0.5:
         verdict, reason = (
             "concordant",
             "reported symptoms and elevated objective fall risk agree",
@@ -272,10 +304,13 @@ def _template_synthesis(record: dict) -> str:
             "patient may underestimate their risk",
         )
     return (
-        f"Subjective: {record.get('name')} reports pain {pain}/10, "
-        f"{n_falls} fall(s) in 6 months, dizziness "
-        f"{'present' if dizzy else 'absent'}; primary complaints: "
-        f"{', '.join(survey.get('primary_complaints', []))}. "
+        f"Subjective: {record.get('name')} reports pain {pain if pain is not None else 'unknown'}/10, "
+        f"{n_falls if n_falls is not None else 'unknown'} fall(s) in 6 months, dizziness "
+        f"{'unknown' if dizzy is None else 'present' if dizzy else 'absent'}; primary complaints: "
+        f"{', '.join(survey.get('primary_complaints') or []) or 'not recorded'}. "
+        f"Fall injury: {falls.get('injured')}; fall description: {falls.get('last_fall_description')}; "
+        f"dizziness notes: {survey.get('dizziness_notes')}. "
+        f"{_condition_summary(record)} "
         f"Objective: fall-risk score {risk:.2f} ({trend}), "
         f"asymmetry {latest['asymmetry_pct']:.1f}%, "
         f"stride {latest['stride_length_m']:.2f} m, "
