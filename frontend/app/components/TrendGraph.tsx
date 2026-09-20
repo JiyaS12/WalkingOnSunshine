@@ -84,18 +84,15 @@ export default function TrendGraph({ sessions }: Props) {
           <Grid horizontal stroke="#E8E3D9" />
           <XAxis numTicks={Math.min(Math.max(sessions.length, 2), 6)} />
           <ChartTooltip
-            rows={(point) => [
-              {
-                color: "var(--chart-1)",
-                label: "Asymmetry %",
-                value: `${(point.asymmetry as number).toFixed(1)}%`,
-              },
-              {
-                color: "var(--chart-2)",
-                label: "Fall Risk ×100",
-                value: `${(point.fallRisk as number).toFixed(1)}`,
-              },
-            ]}
+            rows={(point) =>
+              SERIES.filter((s) => !hidden.has(s.key)).map((s) => ({
+                color: s.color,
+                label: s.label,
+                value: `${(point[s.key] as number).toFixed(1)}${
+                  s.key === "asymmetry" ? "%" : ""
+                }`,
+              }))
+            }
           />
           {!hidden.has("asymmetry") && (
             <Area
