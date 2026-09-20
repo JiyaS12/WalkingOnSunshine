@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { Zap } from "lucide-react";
-import { API_URL, SummaryResponse } from "../lib/api";
-
-interface CacheStats {
-  entries: number;
-  cache_hits: number;
-  estimated_tokens_saved: number;
-}
+import {
+  fetchSummaryCacheStats,
+  SummaryCacheStats,
+  SummaryResponse,
+} from "../lib/api";
 
 interface Props {
   refresh: number;
@@ -37,11 +35,10 @@ function lastRequestBadge(last: SummaryResponse | null): {
 }
 
 export default function TokenEfficiency({ refresh, lastResult }: Props) {
-  const [stats, setStats] = useState<CacheStats | null>(null);
+  const [stats, setStats] = useState<SummaryCacheStats | null>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/summary-cache-stats`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    fetchSummaryCacheStats()
       .then(setStats)
       .catch(() => undefined);
   }, [refresh]);
