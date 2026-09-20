@@ -56,7 +56,7 @@ export default function TrendGraph({ sessions }: Props) {
         </CardTitle>
       </CardHeader>
       <CardContent className="px-4 pb-4 pt-2">
-        <div className="mb-2 flex items-center gap-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           {SERIES.map((s) => (
             <button
               key={s.key}
