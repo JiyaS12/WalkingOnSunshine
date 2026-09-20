@@ -290,7 +290,7 @@ async function patientAccessRequest<T>(
     ...init,
     headers,
     cache: "no-store",
-    credentials: "omit",
+    credentials: API_URL === "" ? "same-origin" : "omit",
     referrerPolicy: "no-referrer",
   });
   if (!res.ok) {
