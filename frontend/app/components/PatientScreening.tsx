@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import TrendGraph, { TrendSession } from "./TrendGraph";
-import TokenEfficiency from "./TokenEfficiency";
 import {
   GaitMetrics,
   JointFrame,
@@ -116,7 +115,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [summaryCount, setSummaryCount] = useState(0);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
@@ -233,7 +231,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     setSummaryError(null);
     try {
       setSummary(await generateSummary(patientId));
-      setSummaryCount((c) => c + 1);
     } catch (err) {
       setSummaryError(
         err instanceof Error ? err.message : "summary request failed"
@@ -433,8 +430,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           )}
 
           <TrendGraph sessions={sessions} />
-
-          <TokenEfficiency refresh={summaryCount} lastResult={summary} />
 
           <div className="rounded-3xl bg-card p-5 shadow-pillow">
             <h2 className="text-sm font-medium text-foreground">
