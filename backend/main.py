@@ -1,4 +1,4 @@
-"""GaitGuard AI — Phase 1 FastAPI backend."""
+"""Sana — Phase 1 FastAPI backend."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ except ImportError as exc:
 else:
     _VIDEO_IMPORT_ERROR = None
 
-app = FastAPI(title="GaitGuard AI")
+app = FastAPI(title="Sana")
 
 
 def _cors_origins(raw: str | None = None) -> list[str]:
@@ -127,7 +127,10 @@ def _auth_error(code: str) -> HTTPException:
 def _check_browser_origin(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin and origin.rstrip("/") not in _ALLOWED_CORS_ORIGINS:
-        raise HTTPException(status_code=403, detail="request origin is not allowed")
+        raise HTTPException(
+            status_code=403,
+            detail=f"request origin {origin} is not allowed",
+        )
 
 
 def require_clinician(

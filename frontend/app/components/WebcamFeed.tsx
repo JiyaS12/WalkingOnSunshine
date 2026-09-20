@@ -564,7 +564,7 @@ export default function WebcamFeed({
               if (!sendFailedRef.current && !isStale()) {
                 sendFailedRef.current = true;
                 loopActiveRef.current = false;
-                console.error("[GaitGuard] pose.send failed", err);
+                console.error("[Sana] pose.send failed", err);
                 failLive(
                   `MediaPipe inference failed: ${
                     err instanceof Error ? err.message : String(err)
@@ -585,7 +585,7 @@ export default function WebcamFeed({
         ) {
           sendFailedRef.current = true;
           loopActiveRef.current = false;
-          console.error("[GaitGuard] pose.send hung");
+          console.error("[Sana] pose.send hung");
           failLive(
             "MediaPipe inference hung: pose.send did not resolve within 20s"
           );
@@ -640,7 +640,7 @@ export default function WebcamFeed({
           });
       }, SYNC_INTERVAL_MS);
     } catch (err) {
-      console.error("[GaitGuard live]", err);
+      console.error("[Sana live]", err);
       failLive(
         `Live camera unavailable: ${
           err instanceof Error ? err.message : String(err)

@@ -1,6 +1,6 @@
-# GaitGuard AI — Architecture
+# Sana — Architecture
 
-GaitGuard AI is a multi-modal post-stroke/surgery analysis platform that
+Sana is a multi-modal post-stroke/surgery analysis platform that
 bridges patient-facing mobile screening with clinician-facing diagnostic
 tools. The system correlates subjective patient intake data with objective
 biomechanical telemetry to evaluate fall risk and mobility degradation.

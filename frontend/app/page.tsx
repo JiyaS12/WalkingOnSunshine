@@ -26,6 +26,7 @@ export default function Home() {
   const [idInput, setIdInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [goError, setGoError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -43,10 +44,15 @@ export default function Home() {
     if (!id || creating) return;
     setCreating(true);
     setGoError(null);
+    setAuthRequired(false);
     try {
       await ensureDemoPatient(id);
       router.push(`/patient/${encodeURIComponent(id)}`);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthRequired(true);
+        return;
+      }
       setGoError(
         err instanceof ApiError
           ? err.message
@@ -63,7 +69,7 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <Activity className="h-8 w-8 text-pastel-blue" />
           <div>
-            <h1 className="text-2xl font-bold text-foreground">GaitGuard AI</h1>
+            <h1 className="text-2xl font-bold text-foreground">Sana</h1>
             <p className="text-xs text-muted-foreground">
               Clinical gait monitoring & fall-risk analytics
             </p>
@@ -134,6 +140,18 @@ export default function Home() {
             Any new ID auto-creates a demo profile (pain 3/10, no prior falls)
             so you can test right away.
           </p>
+          {authRequired && (
+            <p className="mb-4 text-xs text-foreground">
+              Patient records are protected.{" "}
+              <Link
+                href={`/doctor?next=${encodeURIComponent("/")}`}
+                className="font-medium underline underline-offset-2"
+              >
+                Sign in as a clinician
+              </Link>{" "}
+              to open or create a screening.
+            </p>
+          )}
           {goError && <p className="mb-4 text-xs text-foreground">{goError}</p>}
 
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

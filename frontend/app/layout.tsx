@@ -15,7 +15,7 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "GaitGuard AI",
+  title: "Sana",
   description: "Clinical gait monitoring dashboard",
 };
 

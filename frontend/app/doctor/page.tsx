@@ -60,7 +60,7 @@ function riskBadge(score: number | null | undefined) {
 function safeReturnPath(): string | null {
   if (typeof window === "undefined") return null;
   const next = new URLSearchParams(window.location.search).get("next");
-  return next && /^\/patient\/[^/?#]+$/.test(next) ? next : null;
+  return next && /^\/(patient\/[^/?#]+)?$/.test(next) ? next : null;
 }
 
 export default function DoctorPortal() {

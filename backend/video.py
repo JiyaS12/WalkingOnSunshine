@@ -1,4 +1,4 @@
-"""Video upload processing for GaitGuard AI.
+"""Video upload processing for Sana.
 
 Runs MediaPipe Pose (legacy solutions API) over an uploaded video and returns
 joint frames compatible with GaitProcessor (6 joints, y flipped so up is

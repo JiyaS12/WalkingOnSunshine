@@ -337,7 +337,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         <div className="flex items-center gap-3">
           <Activity className="h-8 w-8 text-pastel-blue" />
           <div>
-            <h1 className="text-2xl font-bold text-foreground">GaitGuard AI</h1>
+            <h1 className="text-2xl font-bold text-foreground">Sana</h1>
             <p className="text-xs text-muted-foreground">
               Gait screening for {patient?.name ?? patientId} · {patientId}
             </p>

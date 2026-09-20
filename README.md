@@ -1,4 +1,4 @@
-# GaitGuard AI
+# Sana
 
 AI-assisted gait analysis for clinical mobility monitoring. A
 Python/FastAPI backend processes MediaPipe-style joint telemetry
