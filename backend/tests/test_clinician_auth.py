@@ -80,6 +80,27 @@ def test_invalid_login_is_generic_and_does_not_set_cookie():
     assert "set-cookie" not in response.headers
 
 
+def test_untrusted_browser_origin_cannot_login_or_mutate():
+    credentials = {
+        "username": "dr-demo",
+        "password": "correct horse battery staple",
+    }
+    denied_login = client.post(
+        "/api/clinician/session",
+        json=credentials,
+        headers={"Origin": "https://untrusted.example"},
+    )
+    assert denied_login.status_code == 403
+    assert "set-cookie" not in denied_login.headers
+
+    assert _sign_in().status_code == 200
+    denied_mutation = client.post(
+        "/api/patients/RGN-0417/synthesis",
+        headers={"Origin": "https://untrusted.example"},
+    )
+    assert denied_mutation.status_code == 403
+
+
 def test_expired_session_is_rejected_with_explicit_reason():
     config = clinician_auth.get_auth_config()
     token, _ = clinician_auth.create_session(

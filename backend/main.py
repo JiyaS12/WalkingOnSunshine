@@ -76,9 +76,12 @@ def _cors_origins(raw: str | None = None) -> list[str]:
     return origins
 
 
+_ALLOWED_CORS_ORIGINS = _cors_origins()
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins(),
+    allow_origins=_ALLOWED_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Survey-Token"],
@@ -119,9 +122,17 @@ def _auth_error(code: str) -> HTTPException:
     )
 
 
+def _check_browser_origin(request: Request) -> None:
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") not in _ALLOWED_CORS_ORIGINS:
+        raise HTTPException(status_code=403, detail="request origin is not allowed")
+
+
 def require_clinician(
     request: Request, response: Response
 ) -> clinician_auth.ClinicianSession:
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        _check_browser_origin(request)
     config = _auth_config()
     try:
         session = clinician_auth.verify_session(
@@ -135,6 +146,7 @@ def require_clinician(
 
 @app.post("/api/clinician/session")
 async def clinician_sign_in(request: Request, response: Response) -> dict:
+    _check_browser_origin(request)
     config = _auth_config()
     client_key = request.client.host if request.client else "unknown"
     retry_after = clinician_auth.login_retry_after(client_key, config)
