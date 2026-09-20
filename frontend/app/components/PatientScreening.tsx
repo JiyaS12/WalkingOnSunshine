@@ -200,7 +200,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       const url = new URL(window.location.href);
       url.searchParams.delete("token");
       window.history.replaceState(
-        window.history.state,
+        null,
         "",
         `${url.pathname}${url.search}${url.hash}`
       );
@@ -349,6 +349,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           {
             label: `${candidate.source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
             source: candidate.source,
+            idempotency_key: candidate.id,
             metrics: candidate.metrics,
             frames: candidate.frames,
           },
@@ -362,7 +363,12 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         }
 
         completedSavesRef.current.add(candidate.id);
-        setPatientState({ epoch, record });
+        setPatientState((current) =>
+          current?.epoch === epoch &&
+          current.record.gait_sessions.length > record.gait_sessions.length
+            ? current
+            : { epoch, record }
+        );
         setReadingState((current) =>
           current?.epoch === epoch && current.id === candidate.id
             ? { ...current, saved: true }
@@ -412,7 +418,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
       let id = metricIdsRef.current.get(metrics);
       if (!id) {
-        id = `${source}-${++metricSequenceRef.current}`;
+        id = `${source}-${crypto.randomUUID().replaceAll("-", "")}-${++metricSequenceRef.current}`;
         metricIdsRef.current.set(metrics, id);
       }
       const candidate: MetricReading = {

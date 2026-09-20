@@ -111,7 +111,11 @@ describe("signed patient screening", () => {
   });
 
   it("captures the token in memory, scrubs it from the URL, and loads only its patient", async () => {
-    window.history.replaceState({}, "", `/patient/RGN-0417?keep=yes&token=${TOKEN}`);
+    window.history.replaceState(
+      { unsafeCopy: `/patient/RGN-0417?token=${TOKEN}` },
+      "",
+      `/patient/RGN-0417?keep=yes&token=${TOKEN}`
+    );
     const localStorageSpy = vi.spyOn(Storage.prototype, "setItem");
 
     render(<PatientScreening patientId="RGN-0417" />);
@@ -123,6 +127,7 @@ describe("signed patient screening", () => {
       expect.any(AbortSignal)
     );
     expect(window.location.search).toBe("?keep=yes");
+    expect(window.history.state).toBeNull();
     expect(localStorageSpy).not.toHaveBeenCalled();
     expect(screen.queryByText(/Doctor's Portal/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/phone survey/i)).not.toBeInTheDocument();
@@ -243,5 +248,58 @@ describe("signed patient screening", () => {
 
     await act(async () => resolveSave(patientRecord()));
     expect(await screen.findByRole("button", { name: "Saved" })).toBeDisabled();
+  });
+
+  it("reuses the same idempotency key after an ambiguous save failure", async () => {
+    apiMocks.addPatientAccessSession
+      .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce(patientRecord());
+    render(<PatientScreening patientId="RGN-0417" />);
+    await screen.findByText("Demo Patient");
+
+    act(() => webcamProps().onMetrics(walkingMetrics, "live", []));
+    fireEvent.click(screen.getByRole("button", { name: "Save this walk" }));
+    expect(await screen.findByRole("button", { name: "Retry save" })).toBeInTheDocument();
+
+    const firstBody = apiMocks.addPatientAccessSession.mock.calls[0][2];
+    fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
+    await waitFor(() => expect(addPatientAccessSession).toHaveBeenCalledTimes(2));
+    const secondBody = apiMocks.addPatientAccessSession.mock.calls[1][2];
+
+    expect(firstBody.idempotency_key).toMatch(/^live-[A-Za-z0-9_-]{16,}$/);
+    expect(secondBody.idempotency_key).toBe(firstBody.idempotency_key);
+  });
+
+  it("does not replace a newer timeline with an older concurrent response", async () => {
+    const resolvers: Array<(record: PatientAccessRecord) => void> = [];
+    apiMocks.addPatientAccessSession.mockImplementation(
+      () => new Promise<PatientAccessRecord>((resolve) => resolvers.push(resolve))
+    );
+    render(<PatientScreening patientId="RGN-0417" />);
+    await screen.findByText("Demo Patient");
+
+    const firstMetrics = { ...walkingMetrics, stride_length_m: 1.01 };
+    const secondMetrics = { ...walkingMetrics, stride_length_m: 1.02 };
+    act(() => webcamProps().onMetrics(firstMetrics, "live", []));
+    fireEvent.click(screen.getByRole("button", { name: "Save this walk" }));
+    act(() => webcamProps().onMetrics(secondMetrics, "live", []));
+    fireEvent.click(screen.getByRole("button", { name: "Save this walk" }));
+    await waitFor(() => expect(addPatientAccessSession).toHaveBeenCalledTimes(2));
+
+    const firstSession: PatientAccessRecord["gait_sessions"][number] = {
+      label: "First",
+      source: "live",
+      metrics: firstMetrics,
+    };
+    const secondSession: PatientAccessRecord["gait_sessions"][number] = {
+      label: "Second",
+      source: "live",
+      metrics: secondMetrics,
+    };
+    await act(async () => resolvers[1](patientRecord("RGN-0417", "Demo Patient", [firstSession, secondSession])));
+    expect(screen.getByTestId("trend-graph")).toHaveTextContent("First,Second");
+
+    await act(async () => resolvers[0](patientRecord("RGN-0417", "Demo Patient", [firstSession])));
+    expect(screen.getByTestId("trend-graph")).toHaveTextContent("First,Second");
   });
 });
