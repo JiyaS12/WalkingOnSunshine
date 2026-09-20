@@ -79,7 +79,7 @@ export default function DoctorPortal() {
   const [synthError, setSynthError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listGenRef = useRef(0);
-  const listPendingRef = useRef(0);
+  const listPendingGenRef = useRef<number | null>(null);
   const detailGenRef = useRef(0);
   const synthGenRef = useRef(0);
   const queryRef = useRef(query);
@@ -91,6 +91,7 @@ export default function DoctorPortal() {
 
   const clearProtectedData = useCallback(() => {
     listGenRef.current += 1;
+    listPendingGenRef.current = null;
     detailGenRef.current += 1;
     synthGenRef.current += 1;
     setPatients([]);
@@ -119,9 +120,9 @@ export default function DoctorPortal() {
   );
 
   const loadList = useCallback((q: string, showSpinner = true) => {
-    if (!showSpinner && listPendingRef.current > 0) return;
+    if (!showSpinner && listPendingGenRef.current === listGenRef.current) return;
     const gen = ++listGenRef.current;
-    listPendingRef.current += 1;
+    listPendingGenRef.current = gen;
     if (showSpinner) setLoadingList(true);
     fetchPatients(q || undefined)
       .then((rows) => {
@@ -138,7 +139,7 @@ export default function DoctorPortal() {
           setListError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
-        listPendingRef.current -= 1;
+        if (gen === listPendingGenRef.current) listPendingGenRef.current = null;
         if (gen === listGenRef.current) setLoadingList(false);
       });
   }, [handleAuthFailure]);
