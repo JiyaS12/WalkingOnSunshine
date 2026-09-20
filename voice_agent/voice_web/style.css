@@ -1,0 +1,17 @@
+:root { font-family: system-ui, sans-serif; color: #203127; background: #f4f7f2; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+main { width: min(680px, calc(100% - 32px)); background: white; padding: 28px; border-radius: 16px; box-shadow: 0 10px 35px #20312718; }
+h1 { margin-top: 0; }
+.muted { color: #65736a; }
+label { display: block; font-weight: 700; margin: 24px 0 8px; }
+.row { display: flex; gap: 8px; }
+input, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #c9d5ca; }
+input { flex: 1; }
+button { background: #2c6844; color: white; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+#conversation { min-height: 220px; margin: 24px 0; padding: 16px; background: #f4f7f2; border-radius: 10px; white-space: pre-wrap; }
+#conversation p { line-height: 1.5; }
+#conversation .user { color: #315c86; }
+#conversation .assistant { color: #2c6844; }
+audio { display: block; width: 100%; margin: 0 0 16px; }
+audio[hidden] { display: none; }
