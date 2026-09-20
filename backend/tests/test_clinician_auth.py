@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -197,12 +199,29 @@ def test_retry_after_rounds_up_remaining_window(monkeypatch):
     )
     clinician_auth.reset_login_rate_limits()
 
-    clinician_auth.record_failed_login("rounding-client", config)
+    assert clinician_auth.login_retry_after("rounding-client", config) is None
     current_time[0] = 100.2
-    clinician_auth.record_failed_login("rounding-client", config)
+    assert clinician_auth.login_retry_after("rounding-client", config) is None
     current_time[0] = 158.3
 
     assert clinician_auth.login_retry_after("rounding-client", config) == 2
+
+
+def test_parallel_login_admission_is_capped(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_LOGIN_MAX_ATTEMPTS", "2")
+    config = clinician_auth.get_auth_config()
+    clinician_auth.reset_login_rate_limits()
+    barrier = threading.Barrier(10)
+
+    def attempt_login():
+        barrier.wait()
+        return clinician_auth.login_retry_after("parallel-client", config)
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(lambda _: attempt_login(), range(10)))
+
+    assert sum(result is None for result in results) == 2
+    assert all(result is None or result >= 1 for result in results)
 
 
 def test_cors_allows_configured_local_frontend_only():

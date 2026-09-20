@@ -123,12 +123,15 @@ def get_auth_config() -> AuthConfig:
 def credentials_match(username: str, password: str, config: AuthConfig) -> bool:
     """Compare both fields without short-circuiting on the username."""
 
-    username_matches = secrets.compare_digest(
-        username.encode("utf-8"), config.username.encode("utf-8")
-    )
-    password_matches = secrets.compare_digest(
-        password.encode("utf-8"), config.password.encode("utf-8")
-    )
+    try:
+        username_matches = secrets.compare_digest(
+            username.encode("utf-8"), config.username.encode("utf-8")
+        )
+        password_matches = secrets.compare_digest(
+            password.encode("utf-8"), config.password.encode("utf-8")
+        )
+    except UnicodeEncodeError:
+        return False
     return username_matches and password_matches
 
 
@@ -207,7 +210,7 @@ _attempts_lock = threading.Lock()
 
 
 def login_retry_after(client_key: str, config: AuthConfig) -> int | None:
-    """Return seconds to wait when the client has exhausted failed attempts."""
+    """Atomically reserve an attempt or return seconds until admission."""
 
     now = time.monotonic()
     cutoff = now - config.login_window_seconds
@@ -218,19 +221,8 @@ def login_retry_after(client_key: str, config: AuthConfig) -> int | None:
         if len(attempts) >= config.login_attempts:
             remaining = config.login_window_seconds - (now - attempts[0])
             return max(1, math.ceil(remaining))
-    return None
-
-
-def record_failed_login(client_key: str, config: AuthConfig) -> None:
-    """Record one failed sign-in after pruning the client's expired attempts."""
-
-    now = time.monotonic()
-    cutoff = now - config.login_window_seconds
-    with _attempts_lock:
-        attempts = _attempts[client_key]
-        while attempts and attempts[0] <= cutoff:
-            attempts.popleft()
         attempts.append(now)
+    return None
 
 
 def clear_login_failures(client_key: str) -> None:

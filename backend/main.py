@@ -181,7 +181,6 @@ async def clinician_sign_in(request: Request, response: Response) -> dict:
     try:
         credentials = ClinicianLogin.model_validate_json(bytes(body))
     except ValidationError:
-        clinician_auth.record_failed_login(client_key, config)
         raise HTTPException(
             status_code=400, detail="invalid sign-in request"
         ) from None
@@ -189,7 +188,6 @@ async def clinician_sign_in(request: Request, response: Response) -> dict:
     if not clinician_auth.credentials_match(
         credentials.username, credentials.password, config
     ):
-        clinician_auth.record_failed_login(client_key, config)
         raise HTTPException(
             status_code=401, detail="invalid clinician credentials"
         )
