@@ -106,7 +106,7 @@ function MetricCard({ title, value, icon, badge, sub }: CardProps) {
         </CardAction>
       </CardHeader>
       <CardContent className="pt-2">
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           <span className="text-3xl font-semibold text-foreground">
             {value}
           </span>
@@ -679,7 +679,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         <div className="mt-3">{captureFeedback}</div>
       </section>
 
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <section className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 lg:grid-cols-5">
             <MetricCard
               title="Stride Length"
               value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}
@@ -704,8 +704,9 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             />
           <MetricCard
             title="Cadence"
-            value={metrics ? `${metrics.cadence_steps_per_min.toFixed(0)} steps/min` : "—"}
+            value={metrics ? metrics.cadence_steps_per_min.toFixed(0) : "—"}
             icon={<Activity className="h-4 w-4" />}
+            sub={metrics ? "steps/min" : undefined}
           />
         </section>
 
