@@ -28,13 +28,17 @@ import TrendGraph, { TrendSession } from "./TrendGraph";
 import {
   GaitMetrics,
   JointFrame,
-  PatientRecord,
+  PatientView,
   SummaryResponse,
   ApiError,
   addPatientSession,
+  addPatientViewSession,
   ensureDemoPatient,
   fetchPatient,
+  fetchPatientView,
+  generatePatientViewSummary,
   generateSummary,
+  verifyPatientToken,
 } from "../lib/api";
 
 // trend labels for a reading that has not been saved to the record yet;
@@ -99,12 +103,24 @@ function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   );
 }
 
-export default function PatientScreening({ patientId }: { patientId: string }) {
-  const [patient, setPatient] = useState<PatientRecord | null>(null);
+// how the current visitor is authorised: a magic-link patient session cookie
+// (patient-scoped API) or a clinician session (full record API)
+type Access = "patient" | "clinician";
+
+export default function PatientScreening({
+  patientId,
+  token = null,
+}: {
+  patientId: string;
+  token?: string | null;
+}) {
+  const [patient, setPatient] = useState<PatientView | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const accessRef = useRef<Access | null>(null);
 
   const [metrics, setMetrics] = useState<GaitMetrics | null>(null);
   const [metricsFrames, setMetricsFrames] = useState<JointFrame[] | null>(null);
@@ -127,7 +143,15 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     setLoadError(null);
     setAuthRequired(false);
     try {
-      const rec = await fetchPatient(patientId);
+      let rec: PatientView;
+      try {
+        rec = await fetchPatientView(patientId);
+        accessRef.current = "patient";
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 401)) throw err;
+        rec = await fetchPatient(patientId);
+        accessRef.current = "clinician";
+      }
       if (gen !== patientGenRef.current) return;
       setPatient(rec);
       setSessions(
@@ -154,8 +178,40 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
 
   useEffect(() => {
     setLoading(true);
-    void loadPatient();
-  }, [loadPatient]);
+    setLinkError(null);
+    if (!token) {
+      void loadPatient();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await verifyPatientToken(patientId, token);
+      } catch (err) {
+        if (cancelled) return;
+        setLinkError(
+          err instanceof ApiError && err.status === 401
+            ? "This link has expired or is not valid."
+            : err instanceof Error
+              ? err.message
+              : String(err)
+        );
+        setLoading(false);
+        return;
+      }
+      if (cancelled) return;
+      // the token is a credential: drop it from the address bar and history
+      window.history.replaceState(
+        window.history.state,
+        "",
+        window.location.pathname
+      );
+      void loadPatient();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, patientId, loadPatient]);
 
   const saveSession = useCallback(
     async (
@@ -167,12 +223,17 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       setSaving(true);
       setSaveNote(null);
       try {
-        await addPatientSession(patientId, {
+        const body = {
           label: `${source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
           source,
           metrics: m,
           frames,
-        });
+        };
+        if (accessRef.current === "patient") {
+          await addPatientViewSession(patientId, body);
+        } else {
+          await addPatientSession(patientId, body);
+        }
         setSaveNote("Saved — your doctor's portal is updated");
         await loadPatient();
       } catch (err) {
@@ -230,7 +291,11 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     setSummaryLoading(true);
     setSummaryError(null);
     try {
-      setSummary(await generateSummary(patientId));
+      setSummary(
+        await (accessRef.current === "patient"
+          ? generatePatientViewSummary(patientId)
+          : generateSummary(patientId))
+      );
     } catch (err) {
       setSummaryError(
         err instanceof Error ? err.message : "summary request failed"
@@ -295,13 +360,34 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     );
   }
 
+  if (linkError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
+        <div className="w-full max-w-sm rounded-[2.25rem] bg-card p-6 text-center shadow-pillow">
+          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-pastel-peach" />
+          <p className="text-sm">{linkError}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Ask your care team to send a new link, or open the home page to
+            look up your record.
+          </p>
+          <Link
+            href="/"
+            className="mt-4 inline-block rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep"
+          >
+            Back to home
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   if (authRequired) {
     return (
       <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
         <div className="w-full max-w-sm rounded-[2.25rem] bg-card p-6 text-center shadow-pillow">
           <p className="text-sm">
-            Patient records are protected. Sign in as a clinician to open this
-            screening.
+            Patient records are protected. Open the screening link from your
+            text message, or sign in as a clinician to open this screening.
           </p>
           <Link
             href={`/doctor?next=${encodeURIComponent(`/patient/${patientId}`)}`}
