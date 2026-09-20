@@ -174,6 +174,30 @@ def test_broken_left_right_alternation_is_not_scorable():
     assert result.features is None
 
 
+def test_same_foot_stride_is_excluded_from_step_timing(monkeypatch):
+    detections = iter([
+        ([0, 30, 60, 102], [(0, 8), (30, 38), (60, 68)]),
+        ([15, 84, 129], [(15, 23), (84, 92), (129, 137)]),
+    ])
+    monkeypatch.setattr(experimental_risk, "_transitions", lambda *_: next(detections))
+    result = _processor(gait_gen.recovered_session()).experimental_feature_result()
+    assert result.features is not None
+    assert result.features["median_step_time_s"] == pytest.approx(0.6)
+    assert result.features["step_time_cv_pct"] == pytest.approx(100 * 1.4826 * 0.1 / 0.6)
+
+
+def test_same_foot_stride_cannot_satisfy_minimum_step_intervals(monkeypatch):
+    detections = iter([
+        ([0, 30, 60, 90], [(0, 8), (30, 38), (60, 68)]),
+        ([5, 75, 105], [(5, 13), (75, 83), (105, 113)]),
+    ])
+    monkeypatch.setattr(experimental_risk, "_transitions", lambda *_: next(detections))
+    result = _processor(gait_gen.recovered_session()).experimental_feature_result()
+    assert result.features is None
+    assert result.status == "not_scorable"
+    assert "too few plausible step intervals were detected" in result.warnings
+
+
 def test_model_scoring_is_percentile_mapped_and_has_contributions():
     feature_values = dict(zip(FEATURE_NAMES, [0.5, 5.0, 5.0, 40.0, 5.0, 0.1]))
     scored = score_features(FeatureResult("scored", feature_values), _artifact())

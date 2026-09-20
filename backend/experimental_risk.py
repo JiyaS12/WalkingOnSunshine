@@ -118,6 +118,15 @@ def _knee_flexion(hip: np.ndarray, knee: np.ndarray, ankle: np.ndarray) -> np.nd
     return 180.0 - np.degrees(np.arccos(cosine))
 
 
+def _step_times(ordered: list[tuple[int, str]], fps: float) -> np.ndarray:
+    intervals = np.asarray([
+        (current - previous) / fps
+        for (previous, previous_side), (current, current_side) in zip(ordered, ordered[1:])
+        if current_side != previous_side
+    ])
+    return intervals[(intervals >= 0.20) & (intervals <= 2.0)]
+
+
 def extract_features(
     joints: dict[str, np.ndarray],
     *,
@@ -263,8 +272,7 @@ def extract_features(
             events=strikes,
         )
 
-    step_times = np.diff([idx for idx, _ in ordered]) / fps
-    step_times = step_times[(step_times >= 0.20) & (step_times <= 2.0)]
+    step_times = _step_times(ordered, fps)
     if len(step_times) < 5:
         return FeatureResult(
             "not_scorable",

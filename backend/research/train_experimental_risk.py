@@ -40,6 +40,7 @@ from experimental_risk import (  # noqa: E402
     FEATURE_NAMES,
     MODEL_PATH,
     _smooth,
+    _step_times,
     _transitions,
 )
 from processor import GaitProcessor  # noqa: E402
@@ -334,8 +335,7 @@ def _load_xsens_reference() -> pd.DataFrame:
                 for side, indices in strikes.items()
                 for index in indices
             )
-            intervals = np.diff([index for index, _ in ordered]) / fps
-            intervals = intervals[(intervals >= 0.20) & (intervals <= 2.0)]
+            intervals = _step_times(ordered, fps)
             if len(intervals) < 5:
                 continue
             step_time = float(np.median(intervals))
