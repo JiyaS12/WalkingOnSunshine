@@ -157,7 +157,9 @@ def upsert_survey(survey: dict) -> dict:
         return _append_survey_locked(patients, survey)
 
 
-def ensure_patient(pid: str, survey: dict) -> tuple[dict, bool]:
+def ensure_patient(
+    pid: str, survey: dict, allow_create: bool = True
+) -> tuple[dict, bool]:
     """Return (record, created). Under a single lock acquisition, returns the
     existing record without mutating if `pid` exists; otherwise appends
     `survey` exactly as `upsert_survey` would for a new patient.
@@ -173,6 +175,8 @@ def ensure_patient(pid: str, survey: dict) -> tuple[dict, bool]:
         patients = _load()
         if pid in patients:
             return json.loads(json.dumps(patients[pid])), False
+        if not allow_create:
+            raise PermissionError(f"creation disabled for patient: {pid}")
         return _append_survey_locked(patients, survey), True
 
 

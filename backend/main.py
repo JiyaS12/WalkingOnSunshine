@@ -256,16 +256,9 @@ _PID_PATH = Path(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
 
 @app.post("/api/patients/{pid}/ensure-demo")
 def ensure_demo_patient(pid: str = _PID_PATH) -> dict:
-    if os.getenv("SURVEY_INGEST_TOKEN") and os.getenv(
+    allow_create = not os.getenv("SURVEY_INGEST_TOKEN") or os.getenv(
         "ALLOW_DEMO_PATIENTS", ""
-    ).lower() not in ("1", "true", "yes"):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "demo patient creation is disabled when survey ingestion is "
-                "token-protected; set ALLOW_DEMO_PATIENTS=1 to enable"
-            ),
-        )
+    ).lower() in ("1", "true", "yes")
     survey = SurveyPayload(
         patient_id=pid,
         patient_name=pid,
@@ -281,8 +274,16 @@ def ensure_demo_patient(pid: str = _PID_PATH) -> dict:
     )
     try:
         record, created = store.ensure_patient(
-            pid, survey.model_dump(mode="json")
+            pid, survey.model_dump(mode="json"), allow_create=allow_create
         )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "demo patient creation is disabled when survey ingestion is "
+                "token-protected; set ALLOW_DEMO_PATIENTS=1 to enable"
+            ),
+        ) from exc
     except (OSError, TypeError) as exc:
         raise HTTPException(
             status_code=500, detail="failed to persist patient record"

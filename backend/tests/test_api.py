@@ -216,6 +216,9 @@ def test_ensure_demo_blocked_when_token_set(monkeypatch):
     resp = client.post("/api/patients/NEW-004/ensure-demo")
     assert resp.status_code == 403
     assert "ALLOW_DEMO_PATIENTS" in resp.json()["detail"]
+    existing = client.post("/api/patients/RGN-0417/ensure-demo")
+    assert existing.status_code == 200
+    assert existing.json()["created"] is False
 
 
 def test_ensure_demo_allowed_with_opt_in(monkeypatch):
