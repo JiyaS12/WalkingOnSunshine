@@ -39,6 +39,9 @@ _NOT_READY = re.compile(
     r"(?:have|see|find|get|open|load)"
     r"|(?:don'?t|do not|not sure|unsure)\s+(?:think|know|believe)\b)"
 )
+# Clause boundaries: punctuation and contrast/temporal words a correction follows.
+_CLAUSE_BREAK = re.compile(r"[,.;!?]+|\b(?:but|though|although|however|anyway|now)\b")
+_FILLER = re.compile(r"(?:okay|ok|yes|yeah|yep|sure|alright|right|fine)")
 _READY_WORDS = re.compile(
     r"\b(ready|got it|open(?:ed)?|it'?s up|have it|see it|i'?m (?:set|on|there|in)|"
     r"okay|ok|yes|yeah|yep|sure|go ahead|all set|loaded|done)\b"
@@ -284,21 +287,34 @@ class PhoneCallSession:
 def link_reply_intent(transcript: str) -> str:
     """Classify what a caller said while we wait for them to open the text.
 
-    Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. Stop,
-    missing and negated readiness are checked first so "no, I didn't get it"
-    and "I'm not ready" are not read as a yes.
+    Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. A stop
+    anywhere wins. Otherwise the caller's *last* clause that says something
+    decides, so "it wouldn't open before, but it's open now" is a yes and
+    "it opened before, but it isn't open now" is not; a trailing bare "okay"
+    does not overturn "no, I didn't get it". Within a clause, missing and
+    negated readiness are checked before ready words.
     """
 
     text = transcript.lower()
     if _STOP_WORDS.search(text):
         return "stop"
-    if _MISSING_WORDS.search(text):
-        return "missing"
-    if _NOT_READY.search(text):
-        return "unclear"
-    if _READY_WORDS.search(text):
-        return "ready"
-    return "unclear"
+    decided = "unclear"
+    for clause in _CLAUSE_BREAK.split(text):
+        clause = clause.strip()
+        if not clause:
+            continue
+        if _MISSING_WORDS.search(clause):
+            intent = "missing"
+        elif _NOT_READY.search(clause):
+            intent = "negated"
+        elif _READY_WORDS.search(clause):
+            if _FILLER.fullmatch(clause) and decided != "unclear":
+                continue
+            intent = "ready"
+        else:
+            continue
+        decided = intent
+    return "unclear" if decided == "negated" else decided
 
 
 def _spoken(prompt: str) -> str:
