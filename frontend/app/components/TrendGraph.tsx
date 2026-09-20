@@ -54,6 +54,7 @@ export default function TrendGraph({ sessions }: Props) {
           xDataKey="date"
           xLabelKey="label"
           aspectRatio="2.5 / 1"
+          margin={{ top: 8, right: 12, bottom: 28, left: 12 }}
           className="w-full"
         >
           <Grid horizontal stroke="#EFE6DA" />
