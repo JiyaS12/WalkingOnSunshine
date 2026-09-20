@@ -126,7 +126,11 @@ def _load() -> dict:
     missing = {pid: p for pid, p in seeds.items() if pid not in loaded}
     _patients = {**loaded, **missing}
     if missing:
-        _persist()
+        try:
+            _persist()
+        except Exception:
+            _patients = None
+            raise
     return _patients
 
 
