@@ -10,7 +10,6 @@ import {
 } from "react";
 import Link from "next/link";
 import {
-  Copy,
   Loader2,
   LogOut,
   Search,
@@ -21,6 +20,8 @@ import {
 } from "lucide-react";
 import SkeletonReplay from "../components/SkeletonReplay";
 import TrendGraph, { TrendSession } from "../components/TrendGraph";
+import ClinicianCalls from "../components/ClinicianCalls";
+import SurveyDetails from "../components/SurveyDetails";
 import {
   ApiError,
   ClinicianSession,
@@ -87,7 +88,6 @@ export default function DoctorPortal() {
   const selectedIdStateRef = useRef<string | null>(null);
   selectedIdStateRef.current = selectedId;
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const clearProtectedData = useCallback(() => {
     listGenRef.current += 1;
@@ -163,6 +163,7 @@ export default function DoctorPortal() {
         }
       })
       .catch((err) => {
+        if (gen !== detailGenRef.current) return;
         if (handleAuthFailure(err)) return;
         if (gen === detailGenRef.current)
           setDetailError(
@@ -260,6 +261,13 @@ export default function DoctorPortal() {
   );
   const latestSession = sessions.length ? sessions[sessions.length - 1] : null;
   const firstSession = sessions.length ? sessions[0] : null;
+  const surveyCount = record?.surveys.length ?? 0;
+  useEffect(() => {
+    synthGenRef.current += 1;
+    setSynthesis(null);
+    setSynthLoading(false);
+    setSynthError(null);
+  }, [selectedId, surveyCount, sessions.length]);
   const replaySession: GaitSession | null = useMemo(() => {
     for (let i = sessions.length - 1; i >= 0; i -= 1) {
       if (sessions[i].frames && sessions[i].frames!.length > 0)
@@ -289,6 +297,7 @@ export default function DoctorPortal() {
       const result = await generateSynthesis(selectedId);
       if (gen === synthGenRef.current) setSynthesis(result);
     } catch (err) {
+      if (gen !== synthGenRef.current) return;
       if (handleAuthFailure(err)) return;
       if (gen === synthGenRef.current)
         setSynthError(err instanceof Error ? err.message : String(err));
@@ -576,22 +585,6 @@ export default function DoctorPortal() {
                   ? "Loading…"
                   : "Select a patient"}
             </p>
-            {record && (
-              <button
-                type="button"
-                onClick={() => {
-                  void navigator.clipboard.writeText(
-                    `${window.location.origin}/patient/${encodeURIComponent(record.patient_id)}`
-                  );
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
-              >
-                <Copy className="h-3 w-3" />
-                {copied ? "Copied" : "Copy patient link"}
-              </button>
-            )}
             {lastSyncedAt && (
               <span className="flex items-center gap-1.5 text-slate-500">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -612,6 +605,9 @@ export default function DoctorPortal() {
             <p className="text-xs text-slate-400">No patient selected.</p>
           )}
 
+          {record && record.patient_id === selectedId && (
+            <ClinicianCalls key={record.patient_id} patient={record} onAuthFailure={handleAuthFailure} />
+          )}
           {record && (
             <div className="grid gap-4 md:grid-cols-3">
               <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
@@ -619,53 +615,7 @@ export default function DoctorPortal() {
                   Subjective — Phone Survey
                 </h3>
                 {latestSurvey ? (
-                  <div className="flex flex-col gap-2 text-xs">
-                    <div>
-                      <p className="text-slate-400">
-                        Pain: {latestSurvey.pain_scale}/10
-                      </p>
-                      <div className="mt-1 h-2 w-full rounded-full bg-slate-800">
-                        <div
-                          className="h-2 rounded-full bg-amber-500"
-                          style={{
-                            width: `${latestSurvey.pain_scale * 10}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <p className="text-slate-300">
-                      Falls (6 mo):{" "}
-                      {latestSurvey.fall_history.falls_last_6_months}
-                      {latestSurvey.fall_history.injured && " · injured"}
-                    </p>
-                    {latestSurvey.fall_history.last_fall_description && (
-                      <p className="text-slate-400">
-                        “{latestSurvey.fall_history.last_fall_description}”
-                      </p>
-                    )}
-                    <p className="text-slate-300">
-                      Dizziness: {latestSurvey.dizziness ? "yes" : "no"}
-                    </p>
-                    {latestSurvey.dizziness_notes && (
-                      <p className="text-slate-400">
-                        {latestSurvey.dizziness_notes}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-1">
-                      {latestSurvey.primary_complaints.map((c) => (
-                        <span
-                          key={c}
-                          className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300"
-                        >
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-slate-500">
-                      Recorded {latestSurvey.recorded_at?.slice(0, 10) ?? "—"}
-                      {latestSurvey.call_id && ` · ${latestSurvey.call_id}`}
-                    </p>
-                  </div>
+                  <SurveyDetails survey={latestSurvey} />
                 ) : (
                   <p className="text-xs text-slate-500">No survey on file.</p>
                 )}
@@ -762,6 +712,24 @@ export default function DoctorPortal() {
                 )}
               </div>
             </div>
+          )}
+          {record && (
+            <section aria-label="Clinical history" className="mt-4 space-y-3 text-xs">
+              <h3 className="font-semibold">Clinical history</h3>
+              {[...record.surveys].reverse().map((survey, index) => (
+                <details key={survey.survey_id ?? `${survey.recorded_at}-${index}`} className="rounded border border-slate-700 p-3">
+                  <summary>Survey · {survey.recorded_at ?? "Unknown time"} · {survey.call_id ?? "No call association"}</summary>
+                  <SurveyDetails survey={survey} />
+                </details>
+              ))}
+              {[...record.gait_sessions].reverse().map((gait, index) => (
+                <p key={gait.session_id ?? `${gait.recorded_at}-${index}`}>
+                  Gait · {gait.recorded_at ?? "Unknown time"} · {gait.label} · {gait.source} ·
+                  Call {gait.call_id ?? "Not recorded"} · Attempt {gait.attempt_id ?? "Not recorded"} · Session {gait.session_id ?? "Legacy"} ·
+                  Fall risk {gait.metrics.fall_risk_score.toFixed(2)}
+                </p>
+              ))}
+            </section>
           )}
         </div>
       </div>

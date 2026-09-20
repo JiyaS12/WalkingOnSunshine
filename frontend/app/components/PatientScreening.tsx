@@ -23,9 +23,12 @@ import {
   GaitMetrics,
   JointFrame,
   PatientAccessRecord,
+  PatientSessionInput,
   addPatientAccessSession,
   fetchPatientAccess,
 } from "../lib/api";
+import { WalkingReporter, type WalkingReport } from "../lib/walkingReporter";
+import type { WalkError, WalkEventName } from "../lib/integration";
 
 const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
@@ -44,6 +47,8 @@ interface MetricReading {
   metrics: GaitMetrics;
   frames: JointFrame[] | null;
   saved: boolean;
+  reporter: WalkingReporter | null;
+  body: PatientSessionInput;
 }
 
 interface SaveMessage {
@@ -241,6 +246,9 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const metricSequenceRef = useRef(0);
   const inFlightSavesRef = useRef(new Set<string>());
   const completedSavesRef = useRef(new Set<string>());
+  const reporterRef = useRef<WalkingReporter | null>(null);
+  const [walkingState, setWalkingState] = useState<(WalkingReport & { epoch: number }) | null>(null);
+  const bodiesRef = useRef(new WeakMap<GaitMetrics, PatientSessionInput>());
 
   useEffect(() => {
     loadAbortRef.current?.abort();
@@ -252,12 +260,15 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     metricSequenceRef.current = 0;
     inFlightSavesRef.current.clear();
     completedSavesRef.current.clear();
+    bodiesRef.current = new WeakMap<GaitMetrics, PatientSessionInput>();
+    setWalkingState(null);
     setPatientState(null);
     setReadingState(null);
     setSaveMessage(null);
     setSavingReadingId(null);
 
     return () => {
+      reporterRef.current?.dispose();
       loadAbortRef.current?.abort();
       for (const controller of identitySaveControllers) controller.abort();
       identitySaveControllers.clear();
@@ -279,15 +290,36 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     loadAbortRef.current?.abort();
     loadAbortRef.current = controller;
     setAccess({ epoch, status: "loading" });
+    reporterRef.current?.dispose();
+    reporterRef.current = null;
+    setReadingState(null);
+    setSaveMessage(null);
+    setWalkingState(null);
+    for (const saveController of saveControllersRef.current) saveController.abort();
 
     void fetchPatientAccess(patientId, accessToken, controller.signal)
-      .then((record) => {
+      .then(async (record) => {
         if (controller.signal.aborted || activeEpochRef.current !== epoch) return;
         if (record.patient_id !== patientId) {
           setPatientState(null);
           setAccess({ epoch, status: "invalid" });
           return;
         }
+        const reporter = new WalkingReporter(patientId, accessToken, (report) => {
+          if (!controller.signal.aborted && activeEpochRef.current === epoch && reporterRef.current === reporter) {
+            setWalkingState({ epoch, ...report });
+          }
+        }, () => {
+          if (!controller.signal.aborted && activeEpochRef.current === epoch) {
+            setPatientState(null);
+            setAccess({ epoch, status: "invalid" });
+            controller.abort();
+            for (const saveController of saveControllersRef.current) saveController.abort();
+          }
+        });
+        reporterRef.current = reporter;
+        await reporter.load();
+        if (controller.signal.aborted || activeEpochRef.current !== epoch || reporterRef.current !== reporter) return;
         setPatientState({ epoch, record });
         setAccess({ epoch, status: "ready" });
       })
@@ -307,7 +339,10 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      reporterRef.current?.dispose();
+    };
   }, [accessToken, identityEpoch, patientId, retryNonce, tokenIsUsable]);
 
   const currentAccess: AccessStatus =
@@ -321,6 +356,10 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const patient = patientState?.epoch === identityEpoch ? patientState.record : null;
   const reading = readingState?.epoch === identityEpoch ? readingState : null;
   const currentSaveMessage = saveMessage?.epoch === identityEpoch ? saveMessage : null;
+  const walking = walkingState?.epoch === identityEpoch ? walkingState : null;
+  const walkClosed = walking?.changed || walking?.stopping || walking?.view?.status === "saved" || walking?.view?.status === "stopped";
+  const walkWaiting = walking?.view && walking.view.survey_status !== "stored";
+  const activeReporter = reporterRef.current;
 
   const saveSession = useCallback(
     async (candidate: MetricReading) => {
@@ -330,6 +369,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         accessToken === null ||
         !tokenIsUsable ||
         !candidate.metrics.gait_detected ||
+        candidate.reporter !== reporterRef.current ||
+        (candidate.reporter?.blocked && candidate.reporter.view?.status !== "saved") ||
         inFlightSavesRef.current.has(candidate.id) ||
         completedSavesRef.current.has(candidate.id)
       ) {
@@ -343,25 +384,35 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       saveControllersRef.current.add(controller);
 
       try {
+        if (candidate.reporter && !await candidate.reporter.verifyScope()) {
+          if (controller.signal.aborted) return;
+          setSaveMessage({ epoch, kind: "error", text: "The assessment could not be verified. Check your connection or load the current assessment.", ...(!candidate.reporter.blocked ? { retry: candidate } : {}) });
+          return;
+        }
+        if (controller.signal.aborted || candidate.reporter !== reporterRef.current || activeEpochRef.current !== epoch ||
+          candidate.reporter?.blocked && candidate.reporter.view?.status !== "saved") return;
         const record = await addPatientAccessSession(
           patientId,
           accessToken,
-          {
-            label: `${candidate.source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
-            source: candidate.source,
-            idempotency_key: candidate.id,
-            metrics: candidate.metrics,
-            frames: candidate.frames,
-          },
+          candidate.body,
           controller.signal
         );
-        if (controller.signal.aborted || activeEpochRef.current !== epoch) return;
+        if (controller.signal.aborted || activeEpochRef.current !== epoch || candidate.reporter !== reporterRef.current || candidate.reporter?.view?.attempt_id !== candidate.body.attempt_id || candidate.reporter?.blocked && candidate.reporter.view?.status !== "saved") return;
         if (record.patient_id !== patientId) {
           setPatientState(null);
           setAccess({ epoch, status: "invalid" });
           return;
         }
 
+        if (candidate.body.call_id) {
+          const stored = record.gait_sessions.find((session) =>
+            session.idempotency_key === candidate.id &&
+            session.call_id === candidate.body.call_id &&
+            session.attempt_id === candidate.body.attempt_id && session.session_id
+          );
+          if (!stored?.session_id) throw new ApiError("Saved session could not be verified", 500);
+          candidate.reporter?.saved(stored.session_id);
+        }
         completedSavesRef.current.add(candidate.id);
         setPatientState((current) =>
           current?.epoch === epoch &&
@@ -376,27 +427,33 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         );
         setSaveMessage({ epoch, kind: "success", text: "Walk saved successfully." });
       } catch (error: unknown) {
-        if (isAbortError(error) || controller.signal.aborted || activeEpochRef.current !== epoch) {
+        if (isAbortError(error) || controller.signal.aborted || activeEpochRef.current !== epoch || candidate.reporter !== reporterRef.current) {
           return;
         }
         if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+          candidate.reporter?.dispose();
           setPatientState(null);
           setSaveMessage(null);
           setAccess({ epoch, status: "invalid" });
+        } else if (error instanceof ApiError && error.status === 409) {
+          candidate.reporter?.conflict();
+          setSaveMessage({ epoch, kind: "error", text: "This assessment changed or no longer accepts this walk. Load the current assessment or contact your care team." });
         } else if (error instanceof ApiError && error.status === 422) {
+          candidate.reporter?.emit("recoverable_error", "save_failed");
           setSaveMessage({
             epoch,
             kind: "error",
             text: "This walk could not be saved. Please record another walk.",
           });
         } else {
+          candidate.reporter?.emit("recoverable_error", "save_failed");
           setSaveMessage({
             epoch,
             kind: "error",
             text:
               error instanceof ApiError && error.status === 503
                 ? "Saving is temporarily unavailable."
-                : "The walk was not saved. Check your connection and try again.",
+                : "Saving was not confirmed. Check your connection and retry the same walk.",
             retry: candidate,
           });
         }
@@ -414,12 +471,22 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const handleMetrics = useCallback(
     (metrics: GaitMetrics, source: "live" | "upload", frames?: JointFrame[]) => {
       const epoch = identityEpoch;
-      if (activeEpochRef.current !== epoch) return;
+      if (activeEpochRef.current !== epoch || loadAbortRef.current?.signal.aborted || activeReporter !== reporterRef.current || reporterRef.current?.blocked) return;
 
       let id = metricIdsRef.current.get(metrics);
       if (!id) {
         id = `${source}-${crypto.randomUUID().replaceAll("-", "")}-${++metricSequenceRef.current}`;
         metricIdsRef.current.set(metrics, id);
+      }
+      let body = bodiesRef.current.get(metrics);
+      if (!body) {
+        const context = reporterRef.current?.view;
+        body = {
+          label: `${source === "live" ? "Live" : "Upload"} ${new Date().toLocaleTimeString("en-GB", { hour12: false })}`,
+          source, idempotency_key: id, metrics, frames: frames ?? null,
+          ...(context ? { call_id: context.call_id, attempt_id: context.attempt_id } : {}),
+        };
+        bodiesRef.current.set(metrics, body);
       }
       const candidate: MetricReading = {
         epoch,
@@ -428,6 +495,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         metrics,
         frames: frames ?? null,
         saved: completedSavesRef.current.has(id),
+        reporter: reporterRef.current,
+        body,
       };
       setReadingState(candidate);
       setSaveMessage(null);
@@ -435,13 +504,19 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         void saveSession(candidate);
       }
     },
-    [identityEpoch, saveSession]
+    [activeReporter, identityEpoch, saveSession]
   );
 
   const handleInputReset = useCallback(() => {
+    if (activeEpochRef.current !== identityEpoch || loadAbortRef.current?.signal.aborted || activeReporter !== reporterRef.current) return;
     setReadingState((current) => (current?.epoch === identityEpoch ? null : current));
     setSaveMessage((current) => (current?.epoch === identityEpoch ? null : current));
-  }, [identityEpoch]);
+  }, [activeReporter, identityEpoch]);
+
+  const handleLifecycle = useCallback((event: WalkEventName, error?: WalkError) => {
+    if (activeEpochRef.current !== identityEpoch || loadAbortRef.current?.signal.aborted || activeReporter !== reporterRef.current) return;
+    reporterRef.current?.emit(event, error);
+  }, [activeReporter, identityEpoch]);
 
   const trendSessions = useMemo(() => {
     const sessions = toTrendSessions(patient);
@@ -498,16 +573,33 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4">
         <h2 className="text-sm font-medium text-emerald-200">Complete one walking test</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-400">
-          Use the live camera or upload a walking video. A valid walk is saved securely to your care team.
+          Use the live camera or upload a walking video. For live capture, wait for calibration, walk across the frame only if safe, then choose Save this walk.
+          Uploads are analyzed and saved automatically when walking is detected. Completion is confirmed only after the server saves your walk.
         </p>
+        {walking?.view && <p className="mt-2 text-xs">Walking status: {walking.view.status === "saved" && walking.view.session_id ? "Saved to your care team" : walking.view.status.replaceAll("_", " ")}</p>}
+        {walking?.stopping && walking.view?.status !== "stopped" && <p className="mt-2 text-xs">Stop requested. Waiting for server confirmation.</p>}
+        {walkWaiting && <p className="mt-2 text-xs">Your survey must finish before this walking assessment can begin.</p>}
+        {walking?.warning && <p role="status" className="mt-2 text-xs text-amber-200">{walking.warning}</p>}
+        {walking?.changed ? (
+          <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => setRetryNonce((value) => value + 1)}>Load current assessment</button>
+        ) : walking?.warning && (
+          <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => { void reporterRef.current?.verifyScope(); void reporterRef.current?.flush(); }}>Retry progress sync</button>
+        )}
+        {walking?.view && !walkClosed && !walkWaiting && (
+          <button className="ml-2 mt-2 rounded border px-3 py-1 text-xs" disabled={savingReadingId !== null}
+            onClick={() => {
+              if (window.confirm("Stop this assessment? It cannot be restarted without a new assessment from your care team.")) void reporterRef.current?.stop();
+            }}>Stop assessment</button>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <WebcamFeed
+        {!walkClosed && !walkWaiting && <WebcamFeed
           key={identityEpoch}
           onMetrics={handleMetrics}
           onInputReset={handleInputReset}
-        />
+          onLifecycle={handleLifecycle}
+        />}
 
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4">
@@ -559,7 +651,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               <button
                 type="button"
                 onClick={() => void saveSession(reading)}
-                disabled={isSaving || reading.saved || !reading.metrics.gait_detected}
+                disabled={isSaving || reading.saved || !reading.metrics.gait_detected || Boolean(walkClosed) || Boolean(walkWaiting)}
                 className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
               >
                 {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
