@@ -6,7 +6,16 @@ import os
 import tempfile
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Path,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
@@ -322,6 +331,37 @@ def add_patient_session_with_access(
 ) -> dict:
     response.headers["Cache-Control"] = "no-store"
     return _patient_view(_store_patient_session(pid, body))
+
+
+_PID_PATH = Path(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+@app.post("/api/patients/{pid}/ensure-demo")
+def ensure_demo_patient(pid: str = _PID_PATH) -> dict:
+    try:
+        record = store.get_patient(pid)
+    except KeyError:
+        survey = SurveyPayload(
+            patient_id=pid,
+            patient_name=pid,
+            pain_scale=3,
+            fall_history=FallHistory(
+                falls_last_6_months=0,
+                injured=False,
+                last_fall_description=None,
+            ),
+            dizziness=False,
+            primary_complaints=["Demo profile — auto-created for testing"],
+            call_id="demo-auto",
+        )
+        try:
+            record = store.upsert_survey(survey.model_dump(mode="json"))
+        except (OSError, TypeError) as exc:
+            raise HTTPException(
+                status_code=500, detail="failed to persist patient record"
+            ) from exc
+        return {"created": True, "patient": record}
+    return {"created": False, "patient": record}
 
 
 @app.post("/api/patients/{pid}/synthesis")

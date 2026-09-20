@@ -24,9 +24,14 @@ import {
   SummaryResponse,
   ApiError,
   addPatientSession,
+  ensureDemoPatient,
   fetchPatient,
   generateSummary,
 } from "../lib/api";
+
+// trend labels for a reading that has not been saved to the record yet;
+// saved sessions carry a timestamped label, so these never collide
+const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
 
 function riskLevel(score: number): { label: string; classes: string } {
   if (score < 0.3)
@@ -121,33 +126,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     void loadPatient();
   }, [loadPatient]);
 
-  const handleMetrics = useCallback(
-    (m: GaitMetrics, source: "live" | "upload", frames?: JointFrame[]) => {
-      setMetrics(m);
-      setMetricsSource(source);
-      setMetricsFrames(frames ?? null);
-      setSessions((prev) => {
-        const label = source === "upload" ? "Upload" : "Live";
-        const rest = prev.filter((s) => s.label !== label);
-        if (!m.gait_detected) return rest;
-        return [
-          ...rest,
-          {
-            label,
-            asymmetry_pct: m.asymmetry_pct,
-            fall_risk_score: m.fall_risk_score,
-            stride_length_m: m.stride_length_m,
-          },
-        ];
-      });
-      if (source === "upload" && m.gait_detected) {
-        void saveSession("upload", m, frames ?? null);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
-
   const saveSession = useCallback(
     async (
       source: "live" | "upload",
@@ -177,6 +155,46 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     [patientId, metrics, metricsFrames, loadPatient]
   );
 
+  const handleMetrics = useCallback(
+    (m: GaitMetrics, source: "live" | "upload", frames?: JointFrame[]) => {
+      setMetrics(m);
+      setMetricsSource(source);
+      setMetricsFrames(frames ?? null);
+      setSessions((prev) => {
+        const label = UNSAVED_LABEL[source];
+        const rest = prev.filter((s) => s.label !== label);
+        if (!m.gait_detected) return rest;
+        return [
+          ...rest,
+          {
+            label,
+            asymmetry_pct: m.asymmetry_pct,
+            fall_risk_score: m.fall_risk_score,
+            stride_length_m: m.stride_length_m,
+          },
+        ];
+      });
+      if (source === "upload" && m.gait_detected) {
+        void saveSession("upload", m, frames ?? null);
+      }
+    },
+    [saveSession]
+  );
+
+  // switching input mode discards the previous mode's reading, so the cards
+  // never show numbers that belong to an input the user has navigated away from
+  const handleInputReset = useCallback(() => {
+    setMetrics(null);
+    setMetricsSource(null);
+    setMetricsFrames(null);
+    setSaveNote(null);
+    setSessions((prev) =>
+      prev.filter(
+        (s) => s.label !== UNSAVED_LABEL.live && s.label !== UNSAVED_LABEL.upload
+      )
+    );
+  }, []);
+
   const handleSummary = useCallback(async () => {
     setSummaryLoading(true);
     setSummaryError(null);
@@ -200,6 +218,20 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           <p className="text-sm text-slate-200">
             We couldn&apos;t find this patient link.
           </p>
+          <button
+            onClick={() => {
+              void ensureDemoPatient(patientId)
+                .then(() => {
+                  setNotFound(false);
+                  setLoading(true);
+                  void loadPatient();
+                })
+                .catch(() => undefined);
+            }}
+            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10"
+          >
+            Create demo profile for {patientId}
+          </button>
           <Link
             href="/"
             className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
@@ -293,7 +325,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <WebcamFeed onMetrics={handleMetrics} />
+        <WebcamFeed onMetrics={handleMetrics} onInputReset={handleInputReset} />
 
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4">
