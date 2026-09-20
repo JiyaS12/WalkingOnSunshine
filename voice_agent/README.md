@@ -1,34 +1,43 @@
-# VoiceAIThing
+# WalkingOnSunshine voice service
 
-This repository now contains a safer, staged survey runtime instead of the earlier ad hoc spoken-demo prototype.
+The phone service integrates the confirmed survey runtime with the main
+WalkingOnSunshine backend. Main owns patient identity, clinician-selected
+conditions, clinical storage, signed links, walking events and saved sessions.
 
 ## What is in this repo now
 
 The active runtime is the `app/` package. It enforces:
 
-- patient lookup by code before starting the survey
+- authenticated main-backend lookup before dialing a registered call
+- deterministic generic intake, kept separate from the condition instrument
 - strict condition-based question selection
 - direct option selection and confirmation of inferred answers, with bounded retry limits
-- persisted call metadata in the in-memory fallback layer
-- a voice/handoff boundary that prepares a gait-checker payload without sending real external links
+- durable provider dispatch receipts and versioned status publication to main
+- SMS of the exact backend-issued patient URL after successful survey ingestion
 
 The first-release scope is intentionally narrow:
 
 - orthopedic and stroke branches are supported
 - HOOS JR is the default orthopedic instrument
-- patient records are not guessed; missing codes fail loudly
-- real telephony, real external delivery, and production database wiring remain out of scope
+- patient records and clinical facts are never guessed
+- offline tests use injected providers; live telephony requires separate credentials
 
 ## Quickstart
 
 ```bash
+# Run inside voice_agent; do not activate the main backend's virtualenv.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m pytest -q
+node --test tests/test_voice_ui.cjs
 ```
 
-The safe core can be exercised directly from Python:
+Keep this virtualenv separate: the main backend pins `openai==3.16.1`;
+this service requires `openai<3`. Main startup and tests do not require
+Twilio, Deepgram or voice-side OpenAI credentials.
+
+The standalone demo core can still be exercised directly from Python:
 
 ```python
 from app.patient_repository import InMemoryPatientRepository
@@ -60,8 +69,8 @@ OPENAI_MODEL=gpt-4.1-mini
 
 Without an OpenAI key, or with `SURVEY_EXTRACTOR=exact`, the app accepts exact
 answer labels and basic repeat/pause/resume/stop commands offline. It asks for a
-choice when free-form language cannot be interpreted. `/api/config` reports
-`llm_configured` so callers can distinguish these modes. Direct Python users can
+choice when free-form language cannot be interpreted. Generic intake is always
+deterministic, regardless of this setting. Direct Python users can
 pass `interpreter=build_answer_interpreter()` (from `app.answer_interpreter`) to
 `SafeSurveyEngine`; its default remains offline.
 
@@ -162,66 +171,207 @@ python -m pytest -q
 
 The repo is intentionally designed as a staged, reviewable stack rather than a giant one-shot rewrite.
 
-## Phone call survey (Twilio + Deepgram)
+## Integrated phone runtime and downstream contract
 
-`phone_app.py` runs the survey over a real phone call. Twilio dials the patient
-and streams the call audio to the server; Deepgram transcribes it live and
-speaks each prompt back into the call. Both API keys stay on the server.
+The root [operator runbook](../docs/integration-runbook.md) covers the combined
+runtime and real-process offline harness. The canonical API/data contract is
+in [patient access](../docs/patient-access-contract.md). Keep `voice_agent/.venv`
+separate from `backend/.venv` because their OpenAI requirements conflict.
+
+Run main on **8000**, phone on **8001**, frontend on **3000**. Use one phone
+process/worker with a persistent receipt volume. Run `python phone_app.py`, or
+`uvicorn phone_app:create_app --factory --port 8001 --no-access-log`.
+The default factory is integrated; it does not expose the old demo dialer.
+The clinician frontend calls main, which reserves the call before contacting phone.
+
+Configure `MAIN_BACKEND_URL` (default `http://127.0.0.1:8000`),
+`SURVEY_INGEST_TOKEN` (same as main), and `OPERATOR_TOKEN` (same as main's
+phone-client token, at least 16 characters). Real dialing additionally requires
+`DEEPGRAM_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_FROM_NUMBER`, and `PUBLIC_BASE_URL`. Point the HTTPS tunnel to 8001.
+All provider credentials remain server-side. Origins must be HTTPS, except
+loopback HTTP for local use. Keep request-body tracing disabled at proxies.
+
+With no credentials the app starts; `GET /api/config` returns
+`{"mode":"integrated","ready":false}` and dialing fails closed with 503.
+There is no environment switch that fakes successful clinical storage or sends.
+For local fake mode, inject `MainBackend(..., transport=httpx.MockTransport(...))`
+and `FakePhoneProvider` into `IntegratedService`, then pass it as
+`create_app(settings, auth, integrated_service=service)`.
+`tests/test_main_integration.py` supplies a complete runnable example using the
+actual backend JSON-store implementation, a temporary store and synthetic data:
 
 ```bash
-cp .env.example .env
-# Set DEEPGRAM_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
-# Set OPERATOR_TOKEN to a long random value (openssl rand -hex 32)
-ngrok http 8000                 # in a second terminal
-# Put the https tunnel URL in PUBLIC_BASE_URL, then:
-python phone_app.py
+SURVEY_EXTRACTOR=exact .venv/bin/python -m pytest -q tests/test_main_integration.py
 ```
 
-Open <http://127.0.0.1:8000>, enter the patient's number in E.164 format
-(`+14155550123`), the `OPERATOR_TOKEN`, and a patient code (`RGN-0417`
-orthopedic, `RGN-0500` stroke), then click **Call patient**. Every `/api/*`
-route requires `Authorization: Bearer <OPERATOR_TOKEN>` because the tunnel
-exposes them publicly; the Twilio webhooks are verified by request signature
-instead. The page polls the live transcript while the call
-runs. Twilio must reach `PUBLIC_BASE_URL` over HTTPS, so keep the tunnel up for
-the whole call.
+Explicit `create_app(settings, auth)` injection without an integration service
+retains the old standalone test/demo routes. It is not the CLI's runtime.
+Desktop `voice_app.py` remains a standalone condition-survey demo.
 
-How a call flows:
+### Main → phone (operator bearer authentication)
 
-| Step | Endpoint |
+All routes below require `Authorization: Bearer <OPERATOR_TOKEN>` and return a
+**bare `PhoneSnapshot`**, without a `call` wrapper.
+
+| Endpoint | Body / purpose |
 | --- | --- |
-| Operator starts the call | `POST /api/calls` places the Twilio call |
-| Twilio asks what to do | `POST /twilio/voice` returns `<Connect><Stream>` TwiML with a one-time stream ticket |
-| Call audio both ways | `WS /twilio/media` mu-law 8 kHz frames; the `start` message must present that ticket |
-| Call lifecycle | `POST /twilio/status` |
+| `POST /api/calls` | `patient_id`, `call_id`, `attempt_id`, `request_id`, `to_number` (E.164), `condition_category` (`orthopedic` or `stroke`) |
+| `GET /api/calls/{call_id}` | Latest durable receipt; also retries publication of an unacknowledged snapshot |
+| `POST /api/calls/{call_id}/sms-retries` | `patient_id`, `call_id`, `attempt_id`, `request_id`, `sms_attempt` (1–5), `patient_url`, `patient_access_expires_at`; main must first reserve this request/attempt |
+| `POST /api/calls/{call_id}/survey-retries` | No body; operator explicitly replays the identical confirmed submission retained in this process |
 
-The websocket bridge feeds inbound audio to Deepgram, waits for `UtteranceEnd`
-before answering, interrupts its own playback when the patient starts talking,
-re-prompts on silence, and escalates for human review after repeated confusion
-or silence. Webhook requests are rejected unless the `X-Twilio-Signature`
-header validates against `TWILIO_AUTH_TOKEN`.
+Snapshot fields: `patient_id`, `call_id`, monotonic integer `version`,
+`call_status`, `survey_status`, `sms_status`, `sms_attempt`,
+nullable `provider_call_id`, `phone_session_id`, `message_id`, `error_code`.
 
-`python scripts/check_deepgram.py` verifies the Deepgram speech round trip in
-the telephony audio format without placing a call.
+- Call: `dispatching`, `unknown`, `dialing`, `in_progress`, `completed`, `failed`, `stopped`.
+- Survey: `pending`, `in_progress`, `stored`, `stopped`, `needs_review`.
+- SMS: `not_requested`, `sending`, `unknown`, `sent`, `delivered`, `failed`.
+- Errors: `provider_rejected`, `provider_unavailable`, `timeout`, `busy`,
+  `no_answer`, `disconnected`, `stopped`, `needs_review`, or null.
+- Identifiers use letters/digits/underscore/hyphen; patient IDs 1–32 characters,
+  call/attempt/provider IDs 1–64, request IDs 16–128.
+- Unknown receipt: 404; invalid input: 422; authentication: 401/503;
+  changed request/scope or reconciliation conflict: 409; unavailable main: 503.
 
-Tuning what the patient hears and how well they are understood:
+Call IDs come from main. The phone reserves durably before dispatch, fingerprints
+the authenticated payload, and never redials an existing receipt. Main patient
+and registered-call lookup must agree with the captured patient/attempt/condition
+before dispatch and stream entry. Missing clinical context never selects a demo.
 
-- `DEEPGRAM_STT_MODEL`: `nova-3` (default) or `nova-2-phonecall`, which is
-  trained on 8 kHz call audio. Either way the survey answer words (none, mild,
-  moderate, …) are boosted, via `keyterm` on Nova-3 and `keywords` elsewhere.
-- `DEEPGRAM_TTS_MODEL`: any Aura-2 voice. `python scripts/audition_voices.py`
-  renders the call opening in a handful of warm voices to `voice_samples/` so you
-  can pick one by ear before changing it.
-- `UTTERANCE_END_MS`: how long a silence ends the patient's turn (default 1200).
+### Phone → main (service-token authentication)
 
-After the last answer the call texts the patient a link to the walking check.
-The link is `GAIT_CHECKER_BASE_URL/patient/<code>?token=…`, signed exactly the
-way `backend/patient_access.py` signs its own patient links, so set
-`PATIENT_LINK_SIGNING_SECRET` (32+ bytes) to the same value the backend uses and
-`GAIT_CHECKER_BASE_URL` to the patient app's HTTPS origin (`PATIENT_APP_BASE_URL`
-on the backend). `PATIENT_LINK_TTL_SECONDS` (default 900) bounds the link's life.
-If either is missing, no text is sent and the call record's handoff is marked
-`unavailable` rather than sending a placeholder or unsigned URL.
+Each request carries `X-Survey-Token: <SURVEY_INGEST_TOKEN>`, with a five-second
+timeout, redirects disabled and no automatic transport retries:
+
+| Endpoint | Use |
+| --- | --- |
+| `GET /api/integration/patients/{patient_id}` | Authoritative metadata and active call |
+| `GET /api/integration/patients/{patient_id}/calls/{call_id}` | Captured call context and reserved SMS retry |
+| `POST /api/integration/patients/{patient_id}/calls/{call_id}/status` | Versioned bare snapshot |
+| `POST /api/submit-survey` | Complete confirmed generic and condition survey |
+| `GET /api/integration/patients/{patient_id}/calls/{call_id}/walking` | Patient/attempt-scoped walking state |
+
+Survey submission is frozen only after all seven generic questions and all six
+condition questions are complete. Generic questions each require a read-back
+and explicit yes; unknown/refused values are explicitly confirmed as null.
+Three unsuccessful clarification/rejection attempts end intake without
+submitting an incomplete record. Pause/repeat/resume preserve pending answers.
+No Likert value supplies a numeric pain score, fall count or dizziness value.
+
+```json
+{
+  "patient_id": "patient1",
+  "call_id": "main-issued-call-id",
+  "submission_kind": "integrated",
+  "pain_scale": 7,
+  "fall_history": {
+    "falls_last_6_months": 2,
+    "injured": true,
+    "last_fall_description": "Patient-confirmed description"
+  },
+  "dizziness": false,
+  "dizziness_notes": "Patient-confirmed notes",
+  "primary_complaints": ["Patient-confirmed complaint"],
+  "condition_survey": {
+    "instrument": "hoos_jr",
+    "version": "1",
+    "condition_category": "orthopedic",
+    "answers": [
+      {
+        "question_id": "hoos_stairs",
+        "normalized_value": "mild",
+        "confirmed": true,
+        "acceptance_method": "explicit_selection",
+        "confidence": 1.0,
+        "clarification_attempts": 0
+      }
+    ]
+  }
+}
+```
+
+The example abbreviates `answers`; a valid payload contains exactly six canonical
+IDs once each: HOOS JR uses `hoos_stairs`, `hoos_uneven_surface`, `hoos_rising`,
+`hoos_bending`, `hoos_lying_bed`, `hoos_sitting`. Stroke uses instrument
+`stroke_mobility`, condition `stroke`, and `stroke_balance`, `stroke_weakness`,
+`stroke_stairs`, `stroke_turning`, `stroke_walking`, `stroke_recovery`.
+Both instruments use version `"1"` and values `none`, `mild`, `moderate`,
+`severe`, `extreme`. Existing `SafeSurveyEngine` still distinguishes direct
+`explicit_selection` from separate `confirmation` of validated proposals.
+Raw utterances, timestamps and invented patient names are not added to the payload.
+
+Pain accepts 1–10; falls accept nonnegative counts. Booleans require yes/no.
+Free text is bounded to 500 characters; complaints are semicolon-separated,
+at most ten entries of 120 characters. Explicit unknown is retained as null
+independently in each field.
+
+Successful ingestion must return `status:"stored"`, `patient_url`, and
+`patient_access_expires_at`. The URL is validated for the patient path and used
+**verbatim** in SMS; phone never constructs or signs a replacement and does not
+need `PATIENT_LINK_SIGNING_SECRET`. A 409 does not change the call ID or payload.
+Unconfirmed saving yields truthful no-link speech. An operator can replay the
+frozen payload; no automatic survey/SMS retry occurs.
+
+### Provider receipts, callbacks and recovery
+
+Twilio REST dispatch has an eight-second bound and no retries. Definitive 4xx
+rejections (except 408) become failures; timeout, 5xx and malformed success
+responses become unknown. A missing response is never proof no call/message
+was sent. `sent` means provider-reported sent; only `delivered` confirms delivery.
+
+Twilio posts signed callbacks to `/twilio/voice?call_id=...`,
+`/twilio/status?call_id=...`, and
+`/twilio/sms-status?call_id=...&attempt=...`. Validation covers the exact public
+URL, query and complete form, including repeated values, then checks account
+and provider IDs. Call `SequenceNumber` and terminal states reject stale
+progress; message state cannot regress and previous attempts cannot overwrite
+the current message. Media uses `/twilio/media`, a one-use stream ticket and
+bound main call/phone session/provider call IDs. A consumed stream cannot resume
+or repeat a survey.
+
+`PHONE_RECEIPTS_PATH` defaults to
+`~/.local/share/walking-on-sunshine/phone_receipts.sqlite3`. SQLite receipts
+contain identifiers, HMAC request fingerprints, versions, provider IDs and
+retry reservations. They contain no clinical answers, transcript, raw audio,
+phone number, URL, patient token or credential. The file is mode 0600; place
+it on persistent restricted storage and retain the same operator token for
+request-fingerprint comparisons. Run one process/worker; this is not a
+distributed dispatch queue.
+
+On restart, uncertain dispatch/message reservations remain unknown; stored
+receipts are published without repeating sends. Main can reconcile using GET.
+Destination numbers and frozen survey payloads exist only in process memory;
+after restart, missing payloads yield 409 and a reserved SMS retry without its
+destination fails without sending. Reconcile with main/provider records before
+starting a new call. Never delete a receipt to force another dispatch.
+
+### Walking guidance
+
+Verbal “ready” is conversational only. Polling waits for main `ready`
+(camera calibration), then prompts the patient to start capture when safe.
+Permission denial and recoverable errors produce retry guidance. Pause and stop
+remain responsive because backend polling runs outside the serialized speech
+turn. Default walking wait is 180 seconds and total call limit 600 seconds
+(`MAX_CALL_SECONDS`).
+
+Fifteen seconds is only suggested walking duration. Capture completion, verbal
+completion or an elapsed timer never means a saved test. Only a matching
+`call_id`/`attempt_id` with backend `status:"saved"` **and** `session_id` triggers
+saved-result speech. Missing or unavailable evidence produces “cannot confirm”
+speech. No clinician-follow-up task or notification is promised.
+
+### Offline validation and provider limits
+
+Python tests cover both instruments, independent unknown generic fields,
+idempotency, lost responses, failed/unknown SMS and delivery callbacks, signature
+checks, stream scope, pause/stop and backend-confirmed saves. All calls, SMS,
+links and audio in those tests are synthetic. Live Twilio/Deepgram delivery and
+paid OpenAI evaluations require separate explicit validation; none were run for
+this integration. Existing Node desktop tests fail eight cases because their
+VM fixture lacks `sessionStorage`; the same failure reproduces on the supplied
+backend foundation commit, and those tests are unchanged.
 
 ## Desktop voice demo with Deepgram
 
@@ -281,13 +431,14 @@ rows at `GET /api/results` (requires the `OPERATOR_TOKEN` bearer header) or the 
 The active survey implementation is in `app/`; this checkout does not include
 the earlier `survey_intelligence/` prototype.
 
-## Database / Supabase (additive, optional)
+## Standalone demo database / Supabase (additive, optional)
 
-The voice app looks up patients in memory. When Supabase server credentials are
+The standalone desktop demo looks up patients in memory. When Supabase server credentials are
 set, it also stores each conversation's synthetic patient id, transcript text,
 and confirmed survey results. An optional Postgres/Supabase schema supports
 longitudinal storage, confirmed-value scoring, a clinician dashboard view, and
-an answer-audit view.
+an answer-audit view. The integrated phone runtime does not use this layer;
+main's JSON patient store remains authoritative and requires no Supabase migration.
 
 This layer is **synthetic/demo data only** and is **not HIPAA compliant**.
 It does not store raw audio. Scoring uses confirmed answers only, never AI

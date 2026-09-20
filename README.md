@@ -45,8 +45,8 @@ gaitguard-ai/
     store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
   frontend/
-    app/page.tsx              landing page (patient ID lookup)
-    app/patient/[id]/page.tsx per-patient screening (webcam / upload)
+    app/page.tsx              public secure-link instructions
+    app/patient/[id]/page.tsx signed per-patient screening (webcam / upload)
     app/doctor/page.tsx       clinician dashboard (live-syncs)
     app/components/PatientScreening.tsx  patient screening view
   data/
@@ -57,9 +57,28 @@ gaitguard-ai/
     app/             survey engine, conversation policy, telephony bridge
 ```
 
-The automated voice agent lives in [`voice_agent/`](voice_agent/README.md) and
-has its own virtualenv, `.env`, and test suite; it points patients at this
-app's `/patient/[id]` page via `GAIT_CHECKER_BASE_URL`.
+The automated voice agent lives in [`voice_agent/`](voice_agent/README.md).
+Main runs on **8000**, phone on **8001**, and the frontend on **3000**.
+Use separate Python virtualenvs: main pins `openai==3.16.1`, while voice
+requires `openai<3`. Main starts and tests without any telephony credentials.
+
+The authenticated clinician selects an existing patient and explicitly supplies
+`orthopedic` or `stroke` condition metadata. Main reserves the call; phone
+collects the generic intake and confirmed HOOS JR/stroke items separately.
+Main persists both in its JSON patient store and issues the signed patient
+URL. Phone texts that exact URL, then polls the patient's walking events.
+Only a persisted session with matching call/attempt IDs confirms completion.
+The clinician timeline and synthesis join that saved result to its survey.
+Unknown condition metadata is never inferred from complaints, age, or cohort.
+
+See the [integration/operator runbook](docs/integration-runbook.md) for setup,
+the offline deterministic demo, failure recovery and live validation steps.
+The Sana screens use the shared pastel design system. Patient access still
+requires the complete signed SMS link; the public landing page does not offer
+patient-ID lookup.
+The [API/data contract](docs/patient-access-contract.md) describes all three
+authentication boundaries and the call/survey/walking payloads. Supabase remains
+an optional standalone voice-demo integration, not the integrated patient store.
 
 ## Backend setup
 
@@ -111,7 +130,7 @@ Required patient-link configuration:
 - `PATIENT_LINK_TTL_SECONDS` — link lifetime from 60 to 604800 seconds (default
   `900`).
 
-Optional environment variables:
+Service authentication and optional environment variables:
 - `OPENAI_API_KEY` — enable LLM-generated summaries/synthesis
   (deterministic template fallback without it). Summaries are cached in
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
@@ -119,11 +138,14 @@ Optional environment variables:
 - `SURVEY_INGEST_TOKEN` — required for `POST /api/submit-survey`; callers send
   it in `X-Survey-Token`. It also disables `POST
   /api/patients/{id}/ensure-demo` (403) unless `ALLOW_DEMO_PATIENTS` is set.
+- `PHONE_SERVICE_BASE_URL` — optional phone origin (local `http://127.0.0.1:8001`).
+  `OPERATOR_TOKEN` must match the phone service's server-only bearer token.
 - `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` — local-only escape hatch. Set to
   `1`/`true`/`yes` to run survey ingestion without a token. Never enable this
   in a shared or production environment.
-- `ALLOW_DEMO_PATIENTS` — set to `1`/`true`/`yes` to keep auto-created demo
-  patient profiles enabled while survey ingestion is token-protected.
+- `ALLOW_DEMO_PATIENTS` — local-only support for the clinician-authenticated
+  demo-record endpoint. It does not make `/patient/[id]` public or bypass a
+  signed patient link.
 
 See [the patient access contract](docs/patient-access-contract.md) for stable
 request/response examples used by the patient UI and voice/SMS integrations.
@@ -143,29 +165,47 @@ clinician credentials or access tokens to the frontend environment. For cookie
 delivery, deploy the frontend and API on the same site and list the frontend's
 exact origin in `CORS_ALLOWED_ORIGINS`.
 
-## Demo flow
+## Local-only signed-link demo
 
-1. `cd backend && .venv/bin/uvicorn main:app --port 8000`
-2. `cd frontend && npm run dev`
-3. Open http://localhost:3000 — pick a patient link, type a patient ID, or
-   click **Load Demo Patient RGN-0417**; any unknown ID auto-creates a demo
-   profile (pain 3/10, no prior falls) so you can test right away.
-4. On `/patient/<id>`: do a **Live Camera** walk or **Upload Video** —
-   metrics update, sessions save to the patient's record.
-5. Open `/doctor`, sign in with the backend-configured clinician credentials,
-   and select the patient. The portal live-syncs every 5 s and provides the
-   Unified Clinical Synthesis Report (survey + gait trend + skeleton replay).
+The public home page never lists patients, accepts arbitrary IDs, or creates
+demo records. A local demo uses the same signed handshake as production:
+
+1. In the backend's local `.env`, set a random
+   `PATIENT_LINK_SIGNING_SECRET`, set `SURVEY_INGEST_TOKEN=local-demo-only`, and
+   leave `PATIENT_APP_BASE_URL=http://localhost:3000`.
+2. Start the backend and frontend development servers.
+3. Submit a local intake and copy the returned `patient_url` (treat it as a
+   credential and do not paste it into shared logs):
+
+   ```bash
+   curl -sS http://localhost:8000/api/submit-survey \
+     -H 'Content-Type: application/json' \
+     -H 'X-Survey-Token: local-demo-only' \
+     -d '{"patient_id":"RGN-0417","patient_name":"Local Demo Patient","pain_scale":3,"fall_history":{"falls_last_6_months":0,"injured":false},"dizziness":false,"primary_complaints":["local demo"]}'
+   ```
+
+4. Open the complete returned URL. A bare `/patient/RGN-0417` path is expected
+   to fail. Complete a **Live Camera** or **Upload Video** walk; only a detected
+   walk can be saved.
+5. Open `/doctor` directly, sign in with the backend-configured clinician
+   credentials, and confirm the saved session appears in that patient's
+   timeline.
 
 ## Verify a clean checkout
 
-From the repository root, create a fresh Python 3.12 environment and run the
-backend suite:
+From the repository root, use separate Python 3.12 environments:
 
 ```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install -r backend/requirements.txt
-python -m pytest -q backend/tests
+python3.12 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+OPENAI_API_KEY= backend/.venv/bin/python -m pytest -q backend/tests
+python3.12 -m venv voice_agent/.venv
+voice_agent/.venv/bin/pip install -r voice_agent/requirements.txt
+(cd voice_agent && OPENAI_API_KEY= RUN_LIVE_SURVEY_TESTS= SURVEY_EXTRACTOR=exact \
+  .venv/bin/python -m pytest -q -m 'not live')
+node --test voice_agent/tests/*.cjs
+mkdir -p .cache
+backend/.venv/bin/python -m pytest -q tests/integration/test_handshake.py --basetemp=.cache/handshake
 ```
 
 Then use Node 20.19.x to install exactly the locked frontend dependencies,
@@ -181,8 +221,13 @@ npm run type-check
 npm run build
 ```
 
-These checks require no repository secrets. GitHub Actions runs the same gates
-for every push and pull request with npm and pip dependency caching enabled.
+These checks require no repository secrets. The handshake starts real main and
+phone HTTP processes on ephemeral loopback ports, using their separate
+virtualenvs, fake telephony and synthetic gait frames. It covers both conditions,
+unknown generic answers, SMS failure/ambiguity, retries, event ordering, scoped
+authorization and saved-session synthesis without cameras or paid providers.
+GitHub Actions preserves backend/frontend gates and adds offline voice Python,
+voice JavaScript and the integrated handshake.
 
 ## License
 

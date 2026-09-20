@@ -11,7 +11,6 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import {
-  Copy,
   Loader2,
   LogOut,
   Search,
@@ -20,6 +19,8 @@ import {
 } from "lucide-react";
 import SkeletonReplay from "../components/SkeletonReplay";
 import TrendGraph, { TrendSession } from "../components/TrendGraph";
+import ClinicianCalls from "../components/ClinicianCalls";
+import SurveyDetails from "../components/SurveyDetails";
 import {
   ApiError,
   ClinicianSession,
@@ -83,6 +84,8 @@ export default function DoctorPortal() {
   const [synthLoading, setSynthLoading] = useState(false);
   const [synthError, setSynthError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listGenRef = useRef(0);
+  const listPendingGenRef = useRef<number | null>(null);
   const detailGenRef = useRef(0);
   const synthGenRef = useRef(0);
   const queryRef = useRef(query);
@@ -90,9 +93,10 @@ export default function DoctorPortal() {
   const selectedIdStateRef = useRef<string | null>(null);
   selectedIdStateRef.current = selectedId;
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const clearProtectedData = useCallback(() => {
+    listGenRef.current += 1;
+    listPendingGenRef.current = null;
     detailGenRef.current += 1;
     synthGenRef.current += 1;
     setPatients([]);
@@ -121,19 +125,28 @@ export default function DoctorPortal() {
   );
 
   const loadList = useCallback((q: string, showSpinner = true) => {
+    if (!showSpinner && listPendingGenRef.current === listGenRef.current) return;
+    const gen = ++listGenRef.current;
+    listPendingGenRef.current = gen;
     if (showSpinner) setLoadingList(true);
     fetchPatients(q || undefined)
       .then((rows) => {
-        setPatients(rows);
-        setListError(null);
-        setSelectedId((prev) => prev ?? (rows[0]?.patient_id ?? null));
-        setLastSyncedAt(new Date());
+        if (gen === listGenRef.current) {
+          setPatients(rows);
+          setListError(null);
+          setSelectedId((prev) => prev ?? (rows[0]?.patient_id ?? null));
+          setLastSyncedAt(new Date());
+        }
       })
       .catch((err) => {
+        if (gen !== listGenRef.current) return;
         if (!handleAuthFailure(err))
           setListError(err instanceof Error ? err.message : String(err));
       })
-      .finally(() => setLoadingList(false));
+      .finally(() => {
+        if (gen === listPendingGenRef.current) listPendingGenRef.current = null;
+        if (gen === listGenRef.current) setLoadingList(false);
+      });
   }, [handleAuthFailure]);
 
   const loadDetail = useCallback((id: string, reset = true) => {
@@ -155,6 +168,7 @@ export default function DoctorPortal() {
         }
       })
       .catch((err) => {
+        if (gen !== detailGenRef.current) return;
         if (handleAuthFailure(err)) return;
         if (gen === detailGenRef.current)
           setDetailError(
@@ -252,6 +266,13 @@ export default function DoctorPortal() {
   );
   const latestSession = sessions.length ? sessions[sessions.length - 1] : null;
   const firstSession = sessions.length ? sessions[0] : null;
+  const surveyCount = record?.surveys.length ?? 0;
+  useEffect(() => {
+    synthGenRef.current += 1;
+    setSynthesis(null);
+    setSynthLoading(false);
+    setSynthError(null);
+  }, [selectedId, surveyCount, sessions.length]);
   const replaySession: GaitSession | null = useMemo(() => {
     for (let i = sessions.length - 1; i >= 0; i -= 1) {
       if (sessions[i].frames && sessions[i].frames!.length > 0)
@@ -281,6 +302,7 @@ export default function DoctorPortal() {
       const result = await generateSynthesis(selectedId);
       if (gen === synthGenRef.current) setSynthesis(result);
     } catch (err) {
+      if (gen !== synthGenRef.current) return;
       if (handleAuthFailure(err)) return;
       if (gen === synthGenRef.current)
         setSynthError(err instanceof Error ? err.message : String(err));
@@ -429,7 +451,7 @@ export default function DoctorPortal() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border-0 bg-muted px-3 py-1.5 text-xs text-muted-foreground shadow-pillow-inset">
             {session?.username}
           </span>
@@ -450,7 +472,7 @@ export default function DoctorPortal() {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
           <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
             <Search className="h-4 w-4 text-muted-foreground" />
@@ -566,7 +588,7 @@ export default function DoctorPortal() {
             </h2>
           </div>
           <div className="p-5">
-          <div className="mb-4 flex items-center justify-between text-xs">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs">
             <p className="text-muted-foreground">
               {record
                 ? `${record.name ?? record.patient_id} · ${record.patient_id}${
@@ -576,22 +598,6 @@ export default function DoctorPortal() {
                   ? "Loading…"
                   : "Select a patient"}
             </p>
-            {record && (
-              <button
-                type="button"
-                onClick={() => {
-                  void navigator.clipboard.writeText(
-                    `${window.location.origin}/patient/${encodeURIComponent(record.patient_id)}`
-                  );
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                className="flex items-center gap-1 rounded-2xl border-0 bg-card px-2 py-0.5 text-[10px] text-muted-foreground shadow-pillow-sm hover:bg-pastel-sand"
-              >
-                <Copy className="h-3 w-3" />
-                {copied ? "Copied" : "Copy patient link"}
-              </button>
-            )}
             {lastSyncedAt && (
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <span className="h-1.5 w-1.5 rounded-full bg-pastel-sagedeep" />
@@ -612,66 +618,23 @@ export default function DoctorPortal() {
             <p className="text-xs text-muted-foreground">No patient selected.</p>
           )}
 
+          {record && record.patient_id === selectedId && (
+            <ClinicianCalls key={record.patient_id} patient={record} onAuthFailure={handleAuthFailure} />
+          )}
           {record && (
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="min-w-0 break-words rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Subjective — Phone Survey
                 </h3>
                 {latestSurvey ? (
-                  <div className="flex flex-col gap-2 text-xs">
-                    <div>
-                      <p className="text-muted-foreground">
-                        Pain: {latestSurvey.pain_scale}/10
-                      </p>
-                      <div className="mt-1 h-2 w-full rounded-full bg-card">
-                        <div
-                          className="h-2 rounded-full bg-pastel-peach"
-                          style={{
-                            width: `${latestSurvey.pain_scale * 10}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <p className="text-foreground">
-                      Falls (6 mo):{" "}
-                      {latestSurvey.fall_history.falls_last_6_months}
-                      {latestSurvey.fall_history.injured && " · injured"}
-                    </p>
-                    {latestSurvey.fall_history.last_fall_description && (
-                      <p className="text-muted-foreground">
-                        “{latestSurvey.fall_history.last_fall_description}”
-                      </p>
-                    )}
-                    <p className="text-foreground">
-                      Dizziness: {latestSurvey.dizziness ? "yes" : "no"}
-                    </p>
-                    {latestSurvey.dizziness_notes && (
-                      <p className="text-muted-foreground">
-                        {latestSurvey.dizziness_notes}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-1">
-                      {latestSurvey.primary_complaints.map((c) => (
-                        <span
-                          key={c}
-                          className="rounded-full border-0 bg-card px-2 py-0.5 text-[10px] text-muted-foreground"
-                        >
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Recorded {latestSurvey.recorded_at?.slice(0, 10) ?? "—"}
-                      {latestSurvey.call_id && ` · ${latestSurvey.call_id}`}
-                    </p>
-                  </div>
+                  <SurveyDetails survey={latestSurvey} />
                 ) : (
                   <p className="text-xs text-muted-foreground">No survey on file.</p>
                 )}
               </div>
 
-              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+              <div className="min-w-0 break-words rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Objective — Gait Analysis
                 </h3>
@@ -724,7 +687,7 @@ export default function DoctorPortal() {
                 )}
               </div>
 
-              <div className="rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
+              <div className="min-w-0 break-words rounded-2xl border-0 bg-muted p-4 shadow-pillow-inset">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   AI Clinical Summary
                 </h3>
@@ -763,7 +726,25 @@ export default function DoctorPortal() {
               </div>
             </div>
           )}
-          </div>
+          {record && (
+            <section aria-label="Clinical history" className="mt-4 space-y-3 break-words text-xs">
+              <h3 className="font-semibold">Clinical history</h3>
+              {[...record.surveys].reverse().map((survey, index) => (
+                <details key={survey.survey_id ?? `${survey.recorded_at}-${index}`} className="rounded-2xl border border-border p-3">
+                  <summary>Survey · {survey.recorded_at ?? "Unknown time"} · {survey.call_id ?? "No call association"}</summary>
+                  <SurveyDetails survey={survey} />
+                </details>
+              ))}
+              {[...record.gait_sessions].reverse().map((gait, index) => (
+                <p key={gait.session_id ?? `${gait.recorded_at}-${index}`}>
+                  Gait · {gait.recorded_at ?? "Unknown time"} · {gait.label} · {gait.source} ·
+                  Call {gait.call_id ?? "Not recorded"} · Attempt {gait.attempt_id ?? "Not recorded"} · Session {gait.session_id ?? "Legacy"} ·
+                  Fall risk {gait.metrics.fall_risk_score.toFixed(2)}
+                </p>
+              ))}
+            </section>
+          )}
+        </div>
         </div>
       </div>
     </main>

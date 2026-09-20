@@ -1,19 +1,17 @@
+import type { Metadata } from "next";
 import PatientScreening from "../../components/PatientScreening";
+
+export const metadata: Metadata = {
+  referrer: "no-referrer",
+  robots: { index: false, follow: false },
+};
 
 export default async function Page({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ token?: string | string[] }>;
 }) {
-  const [{ id }, { token }] = await Promise.all([params, searchParams]);
-  const magicToken = Array.isArray(token) ? token[0] : token;
+  const { id } = await params;
 
-  return (
-    <PatientScreening
-      patientId={decodeURIComponent(id)}
-      token={magicToken || null}
-    />
-  );
+  return <PatientScreening patientId={decodeURIComponent(id)} />;
 }

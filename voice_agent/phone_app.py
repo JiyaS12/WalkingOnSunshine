@@ -12,15 +12,17 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from websockets.exceptions import WebSocketException
@@ -31,6 +33,11 @@ from app.answer_interpreter import (
     build_answer_interpreter,
 )
 from app.operator_auth import OperatorAuth
+from app.integrated_service import IntegratedService, message_status
+from app.integrated_session import IntegratedSession
+from app.integration_contract import CallStart, PhoneSnapshot, SMSRetry
+from app.main_backend import BackendError, MainBackend
+from app.phone_receipts import ReceiptStore
 from app.patient_repository import InMemoryPatientRepository, PatientNotFoundError
 from app.persistence import InMemoryPersistence
 from app.survey_engine import SafeSurveyEngine
@@ -41,6 +48,7 @@ from app.telephony.deepgram_stt import DeepgramTranscriber
 from app.telephony.deepgram_tts import frames, synthesize_mulaw_async
 from app.telephony.sms import send_sms_async
 from app.telephony.stream_tickets import StreamTickets
+from app.telephony.integrated_provider import TwilioProvider
 
 ROOT = Path(__file__).resolve().parent
 VOICE_PATH = "/twilio/voice"
@@ -87,6 +95,7 @@ class MediaStreamBridge:
         transcriber_factory=None,
         interpreter: AnswerInterpreter | None = None,
         sms_sender: Callable[[str, str], Awaitable[None]] | None = None,
+        integrated_service: IntegratedService | None = None,
     ):
         self.websocket = websocket
         self.settings = settings
@@ -95,9 +104,10 @@ class MediaStreamBridge:
         self.tickets = tickets
         self.interpreter = interpreter
         self.sms_sender = sms_sender
+        self.integrated_service = integrated_service
         self.transcriber_factory = transcriber_factory or DeepgramTranscriber
         self.stream_sid: str | None = None
-        self.session: PhoneCallSession | None = None
+        self.session: PhoneCallSession | IntegratedSession | None = None
         self.transcriber: DeepgramTranscriber | None = None
         self.bot_speaking = False
         self.hangup_mark: str | None = None
@@ -140,6 +150,8 @@ class MediaStreamBridge:
         except Exception:
             logger.exception("Media stream failed")
         finally:
+            if isinstance(self.session, IntegratedSession):
+                await self.session.disconnect()
             self._cancel_silence_timer()
             for task in self._tasks:
                 task.cancel()
@@ -170,24 +182,35 @@ class MediaStreamBridge:
             patient_code,
             start.get("mediaFormat"),
         )
-        try:
-            engine = SafeSurveyEngine(self.repository, patient_code, interpreter=self.interpreter)
-        except PatientNotFoundError:
-            logger.error("Unknown patient code on call %s", session_id)
-            await self._close()
-            return
-
-        record = self.persistence.calls.get(session_id)
-        to_number = record.to_number if record else None
-        self.session = PhoneCallSession(
-            engine,
-            speak=self._speak,
-            session_id=session_id,
-            persistence=self.persistence,
-            to_number=to_number,
-            sms_sender=self.sms_sender,
-            speech_lead_seconds=PLAYBACK_LEAD_SECONDS,
-        )
+        if self.integrated_service is not None:
+            try:
+                call_id = parameters.get("callId", "")
+                receipt = self.integrated_service.receipt(call_id)
+                if receipt.snapshot.phone_session_id != session_id:
+                    raise HTTPException(409, "Stream scope mismatch.")
+                call = await self.integrated_service.begin_stream(call_id, start.get("callSid", ""))
+            except (BackendError, HTTPException):
+                await self._close()
+                return
+            self.session = IntegratedSession(
+                self.integrated_service, call, self._speak, self.interpreter,
+                end_playback=self._end_after_playback,
+                max_call_seconds=self.settings.max_call_seconds,
+            )
+        else:
+            try:
+                engine = SafeSurveyEngine(self.repository, patient_code, interpreter=self.interpreter)
+            except PatientNotFoundError:
+                logger.error("Unknown patient code on call %s", session_id)
+                await self._close()
+                return
+            record = self.persistence.calls.get(session_id)
+            to_number = record.to_number if record else None
+            self.session = PhoneCallSession(
+                engine, speak=self._speak, session_id=session_id,
+                persistence=self.persistence, to_number=to_number, sms_sender=self.sms_sender,
+                speech_lead_seconds=PLAYBACK_LEAD_SECONDS,
+            )
         self.transcriber = self.transcriber_factory(
             api_key=self.settings.deepgram_api_key or "",
             model=self.settings.stt_model,
@@ -322,7 +345,16 @@ class MediaStreamBridge:
         playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
         self._playback = playback
         # Waiting this way keeps a barge-in cancellation local to the playback.
-        await asyncio.wait({playback})
+        try:
+            await asyncio.wait({playback})
+        except asyncio.CancelledError:
+            playback.cancel()
+            if not self._closed:
+                try:
+                    await self._stop_playback()
+                except (RuntimeError, WebSocketDisconnect):
+                    pass
+            raise
         if playback.cancelled() or playback.exception() is None:
             return
         # No mark will ever arrive for a prompt that failed to play, so the call
@@ -394,6 +426,8 @@ class MediaStreamBridge:
         self._start_silence_timer()
 
     async def _synthesize(self, text: str) -> bytes:
+        if self.settings.deepgram_api_key is None:
+            raise TelephonyConfigurationError("DEEPGRAM_API_KEY is not configured.")
         return await synthesize_mulaw_async(
             text, self.settings.deepgram_api_key, self.settings.tts_model
         )
@@ -484,10 +518,13 @@ def create_app(
     settings: TelephonySettings | None = None,
     auth: OperatorAuth | None = None,
     dialing_timeout: float = DIALING_TIMEOUT_SECONDS,
+    integrated_service: IntegratedService | None = None,
 ) -> FastAPI:
     load_dotenv(ROOT / ".env")
     resolved = settings or load_settings()
     operator = auth or OperatorAuth.from_env()
+    if integrated_service is not None or settings is None:
+        return create_integrated_app(resolved, operator, integrated_service)
     app = FastAPI(title="VoiceAIThing phone survey")
     repository = InMemoryPatientRepository()
     persistence = InMemoryPersistence()
@@ -670,6 +707,142 @@ def create_app(
     return app
 
 
+def create_integrated_app(
+    settings: TelephonySettings, operator: OperatorAuth, service: IntegratedService | None = None,
+) -> FastAPI:
+    if service is None and operator.token is not None:
+        try:
+            backend = MainBackend.from_env()
+            provider = TwilioProvider(settings)
+            if settings.public_base_url is None:
+                raise TelephonyConfigurationError("PUBLIC_BASE_URL is not configured.")
+            service = IntegratedService(
+                backend, provider,
+                ReceiptStore(Path(os.environ.get(
+                    "PHONE_RECEIPTS_PATH",
+                    str(Path.home() / ".local/share/walking-on-sunshine/phone_receipts.sqlite3"),
+                ))),
+                operator.token, settings.public_base_url,
+            )
+        except (ValueError, TelephonyConfigurationError):
+            service = None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if service is not None:
+            await service.recover()
+        yield
+
+    app = FastAPI(title="Integrated phone survey", lifespan=lifespan)
+    tickets = StreamTickets()
+    interpreter = build_answer_interpreter()
+    app.state.integration = service
+    app.state.settings = settings
+    app.state.stream_tickets = tickets
+
+    def configured() -> IntegratedService:
+        if service is None:
+            raise HTTPException(503, "Integrated phone service is not configured.")
+        return service
+
+    @app.exception_handler(BackendError)
+    async def backend_error(request: Request, error: BackendError) -> JSONResponse:
+        return JSONResponse(
+            {"detail": "Main backend reconciliation required."},
+            status_code=409 if error.status == 409 else 503,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.middleware("http")
+    async def no_store(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/api/config")
+    async def config() -> dict[str, object]:
+        return {"mode": "integrated", "ready": service is not None and operator.configured}
+
+    @app.post("/api/calls", dependencies=[Depends(operator)])
+    async def start(payload: CallStart) -> PhoneSnapshot:
+        return await configured().start(payload)
+
+    @app.get("/api/calls/{call_id}", dependencies=[Depends(operator)])
+    async def read(call_id: str) -> PhoneSnapshot:
+        return await configured().read(call_id)
+
+    @app.post("/api/calls/{call_id}/sms-retries", dependencies=[Depends(operator)])
+    async def retry(call_id: str, payload: SMSRetry) -> PhoneSnapshot:
+        return await configured().retry_sms(call_id, payload)
+
+    @app.post("/api/calls/{call_id}/survey-retries", dependencies=[Depends(operator)])
+    async def retry_submission(call_id: str) -> PhoneSnapshot:
+        return await configured().retry_submission(call_id)
+
+    async def signed_form(request: Request) -> dict[str, str]:
+        form = await request.form()
+        if not twilio.validate_form_signature(
+            settings.twilio_auth_token or "",
+            (settings.public_base_url or "").rstrip("/") + request.url.path
+            + ("?" + request.url.query if request.url.query else ""),
+            form, request.headers.get("X-Twilio-Signature", ""),
+        ):
+            raise HTTPException(403, "Invalid Twilio signature.")
+        fields = {key: str(value) for key, value in form.items()}
+        if fields.get("AccountSid") != settings.twilio_account_sid:
+            raise HTTPException(403, "Twilio account mismatch.")
+        return fields
+
+    @app.post(VOICE_PATH)
+    async def voice(request: Request, call_id: str) -> Response:
+        fields = await signed_form(request)
+        current = configured()
+        sid = fields.get("CallSid", "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
+            raise HTTPException(422, "Invalid call SID.")
+        receipt = current.receipt(call_id)
+        if receipt.stream_started or receipt.snapshot.call_status in {"completed", "failed", "stopped"}:
+            return Response(twilio.hangup_twiml("This call has ended."), media_type="application/xml")
+        snapshot = await current.carrier(call_id, sid, "in-progress")
+        session_id = snapshot.phone_session_id
+        assert session_id is not None
+        return Response(twilio.media_stream_twiml(settings.websocket_url(MEDIA_PATH), {
+            "callId": call_id, "sessionId": session_id, "streamToken": tickets.issue(session_id),
+        }), media_type="application/xml")
+
+    @app.post(STATUS_PATH)
+    async def status(request: Request, call_id: str) -> Response:
+        fields = await signed_form(request)
+        sequence = fields.get("SequenceNumber", "")
+        sid = fields.get("CallSid", "")
+        if not re.fullmatch(r"\d{1,9}", sequence) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
+            raise HTTPException(422, "Missing callback scope or sequence.")
+        await configured().carrier(call_id, sid, fields.get("CallStatus", ""), int(sequence))
+        return Response(status_code=204)
+
+    @app.post("/twilio/sms-status")
+    async def sms_status(request: Request, call_id: str, attempt: int) -> Response:
+        fields = await signed_form(request)
+        status = message_status(fields.get("MessageStatus", ""))
+        sid = fields.get("MessageSid", "")
+        if status is None or not 0 <= attempt <= 5 or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
+            raise HTTPException(422, "Invalid message callback.")
+        await configured().sms_event(call_id, attempt, sid, status)
+        return Response(status_code=204)
+
+    @app.websocket(MEDIA_PATH)
+    async def media(websocket: WebSocket) -> None:
+        if service is None:
+            await websocket.close(code=1008)
+            return
+        await MediaStreamBridge(
+            websocket, settings, InMemoryPatientRepository(), InMemoryPersistence(), tickets,
+            interpreter=interpreter, integrated_service=service,
+        ).run()
+
+    return app
+
+
 def _signature_ok(settings: TelephonySettings, request: Request, form: dict[str, Any]) -> bool:
     # Without the auth token there is nothing to verify against, so nothing
     # reaching these public routes can be trusted; fail closed.
@@ -690,4 +863,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s %(message)s")
 
-    uvicorn.run(create_app(), host="0.0.0.0", port=8000)
+    uvicorn.run(create_app(), host="0.0.0.0", port=8001, access_log=False)
