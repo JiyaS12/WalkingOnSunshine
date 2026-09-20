@@ -18,7 +18,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx
 
@@ -97,8 +97,11 @@ def validate_patient_link(link: object, patient_code: str) -> str:
         or parsed.password is not None
         or (parsed.scheme != "https" and hostname not in LOCAL_HOSTS)
         or parsed.path != f"/patient/{quote(patient_code, safe='')}"
-        or "token=" not in parsed.query
+        or parsed.fragment
     ):
+        raise GaitLinkUnavailable(problem)
+    tokens = parse_qs(parsed.query, keep_blank_values=True).get("token", [])
+    if len(tokens) != 1 or not tokens[0]:
         raise GaitLinkUnavailable(problem)
     return link
 

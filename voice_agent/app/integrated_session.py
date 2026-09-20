@@ -16,8 +16,10 @@ from .telephony.call_session import _TRAILING_FILLER, _spoken, link_reply_intent
 
 Speaker = Callable[[str], Awaitable[None]]
 
-# Page states that mean the patient has the link open, even if they never said so.
-_PAGE_OPEN_STATUSES = {"calibrating", "ready", "capturing", "captured"}
+# Page states that mean the patient has the link open, even if they never said so;
+# _CAMERA_STATUSES additionally mean they are already past the Live Camera setup.
+_CAMERA_STATUSES = {"calibrating", "ready", "capturing", "captured"}
+_PAGE_OPEN_STATUSES = _CAMERA_STATUSES | {"page_ready"}
 MAX_LINK_REMINDERS = 2
 
 
@@ -206,11 +208,17 @@ class IntegratedSession:
                     if view.status == "stopped":
                         await self.finish("stopped", policy.INTEGRATED_PAGE_STOPPED, "stopped")
                         return
+                    was_open = self.link_open
                     if view.status in _PAGE_OPEN_STATUSES or view.last_event == "permission_denied":
-                        self.link_open = self._page_active = True
+                        self.link_open = True
+                    if view.status in _CAMERA_STATUSES or view.last_event == "permission_denied":
+                        self._page_active = True
                     if key != seen:
                         seen = key
-                        if view.last_event == "permission_denied":
+                        if view.status == "page_ready" and not was_open:
+                            self._page_active = True
+                            await self._say(policy.INTEGRATED_PAGE_OPENED)
+                        elif view.last_event == "permission_denied":
                             await self._say(policy.INTEGRATED_PERMISSION_DENIED)
                         elif view.last_event == "recoverable_error":
                             await self._say(policy.INTEGRATED_PAGE_ERROR)

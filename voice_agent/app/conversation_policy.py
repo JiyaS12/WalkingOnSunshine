@@ -260,6 +260,11 @@ INTEGRATED_GAIT_INTRO = (
     "Let me save your answers and text you a secure link to the camera page."
 )
 INTEGRATED_SAVING = "One moment while I save your answers and send the text."
+INTEGRATED_PAGE_OPENED = (
+    "I can see the link is open on your end, great. Tap the “Live Camera” mode, then prop your "
+    "phone against something steady where your whole body is in view, and step back a few paces. "
+    "The page will let me know once the camera is set."
+)
 INTEGRATED_PAGE_SEEN = (
     "Great, I can see the page is up on your end. Keep following along with it, and I’ll guide "
     "you as it goes."
@@ -274,8 +279,8 @@ INTEGRATED_SMS_FAILED = (
     "Thank you for your answers today. Take care, and goodbye."
 )
 INTEGRATED_LINK_SENT = (
-    "Your answers are saved, and the text is on its way. Open the link on your phone, "
-    "and tell me when you have it up."
+    "Your answers are saved, and I’ve asked for the text to go out to you. It can take a minute "
+    "to arrive. When it does, open the link on your phone and tell me when you have it up."
 )
 INTEGRATED_LINK_REMINDER = "No rush at all. Just say ‘ready’ once you have the link open."
 INTEGRATED_LINK_MISSING = (

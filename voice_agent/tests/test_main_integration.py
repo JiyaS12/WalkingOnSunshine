@@ -374,7 +374,7 @@ def test_409_submission_conflict_produces_no_link_or_retry(harness):
         assert harness.provider.messages == 0
         assert len(harness.submissions) == 1
         assert "wasn’t able to save your answers" in harness.spoken[-1]
-        assert not any("text is on its way" in text for text in harness.spoken)
+        assert policy.INTEGRATED_LINK_SENT not in harness.spoken
     asyncio.run(scenario())
 
 
@@ -465,6 +465,28 @@ def test_page_activity_counts_as_link_open_and_ready_reply_does_not_repeat_setup
         assert policy.INTEGRATED_LINK_REMINDER not in harness.spoken
         await say(session, "ready")
         assert harness.spoken[-1] == policy.INTEGRATED_PAGE_SEEN
+        await say(session, "I did not get the text")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_page_ready_event_opens_link_and_gives_camera_setup_once(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 2, "page_ready")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_OPENED
+        await session.handle_silence()
+        assert policy.INTEGRATED_LINK_REMINDER not in harness.spoken
+        await say(session, "ready")
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_SEEN
+        assert policy.INTEGRATED_CAMERA_SETUP not in harness.spoken
+        assert harness.spoken.count(policy.INTEGRATED_PAGE_OPENED) == 1
+        assert not any("One. Two. Three." in text for text in harness.spoken)
         await say(session, "I did not get the text")
         assert harness.spoken[-1] == policy.INTEGRATED_WAITING
         await session.disconnect()
