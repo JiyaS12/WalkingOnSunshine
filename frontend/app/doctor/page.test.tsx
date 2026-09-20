@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DoctorPortal from "./page";
 import {
   ApiError,
+  fetchDatabaseSnapshot,
   fetchPatient,
   fetchPatients,
   generateSynthesis,
@@ -34,6 +35,7 @@ vi.mock("../lib/api", async () => {
   return {
     ...actual,
     fetchPatient: vi.fn(),
+    fetchDatabaseSnapshot: vi.fn(),
     fetchPatients: vi.fn(),
     generateSynthesis: vi.fn(),
     getClinicianSession: vi.fn(),
@@ -212,6 +214,24 @@ describe("doctor route authentication", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(signOutClinician).toHaveBeenCalled());
     expect(await screen.findByRole("heading", { name: "Clinician sign-in" })).toBeInTheDocument();
+  });
+
+  it("opens the protected database tab and removes its records on sign-out", async () => {
+    vi.mocked(getClinicianSession).mockResolvedValue(activeSession);
+    vi.mocked(fetchDatabaseSnapshot).mockResolvedValue({
+      source: "supabase", read_only: true, read_at: new Date().toISOString(),
+      totals: { patients: 1, calls: 0, surveys: 0, walking: 0 },
+      total: 1, offset: 0, limit: 25,
+      patients: [{ patient_id: "db-demo", name: "Database Demo Patient", calls: [], surveys: [], gait_sessions: [] }],
+    });
+    render(<DoctorPortal />);
+    fireEvent.click(await screen.findByRole("button", { name: "Database" }));
+    expect(await screen.findByRole("heading", { name: "Database Demo Patient" })).toBeInTheDocument();
+    expect(fetchDatabaseSnapshot).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("heading", { name: "Clinician sign-in" })).toBeInTheDocument();
+    expect(screen.queryByText("Database Demo Patient")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Database" })).not.toBeInTheDocument();
   });
 
   it("ignores an in-flight patient list that completes after sign-out", async () => {

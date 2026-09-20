@@ -21,6 +21,7 @@ import SkeletonReplay from "../components/SkeletonReplay";
 import TrendGraph, { TrendSession } from "../components/TrendGraph";
 import ClinicianCalls from "../components/ClinicianCalls";
 import SurveyDetails from "../components/SurveyDetails";
+import ClinicianDatabase from "../components/ClinicianDatabase";
 import {
   ApiError,
   ClinicianSession,
@@ -65,6 +66,7 @@ function safeReturnPath(): string | null {
 
 export default function DoctorPortal() {
   const [authState, setAuthState] = useState<AuthState>("checking");
+  const [portalView, setPortalView] = useState<"clinical" | "database">("clinical");
   const [session, setSession] = useState<ClinicianSession | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -472,6 +474,11 @@ export default function DoctorPortal() {
         </div>
       </header>
 
+      <nav aria-label="Clinician portal sections" className="mb-6 flex gap-2">
+        <button type="button" aria-pressed={portalView === "clinical"} onClick={() => setPortalView("clinical")} className={`rounded-full px-5 py-2 text-sm ${portalView === "clinical" ? "bg-pastel-sage font-semibold" : "bg-card"}`}>Clinical dashboard</button>
+        <button type="button" aria-pressed={portalView === "database"} onClick={() => setPortalView("database")} className={`rounded-full px-5 py-2 text-sm ${portalView === "database" ? "bg-pastel-sage font-semibold" : "bg-card"}`}>Database</button>
+      </nav>
+      {portalView === "database" ? <ClinicianDatabase onAuthFailure={handleAuthFailure} /> : (
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
           <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
@@ -747,6 +754,7 @@ export default function DoctorPortal() {
         </div>
         </div>
       </div>
+      )}
     </main>
   );
 }

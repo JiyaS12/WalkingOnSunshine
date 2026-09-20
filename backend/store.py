@@ -227,6 +227,21 @@ def list_patients(q: str | None = None) -> list[dict]:
     return rows
 
 
+def database_records() -> tuple[str, dict]:
+    """Server-only snapshot for the clinician database reader, never a patient API.
+
+    Read Supabase afresh without replacing the live call engine's revision cache.
+    No writes, seeding, or JSON fallback are performed in Supabase mode.
+    """
+    if _uses_supabase():
+        try:
+            return "supabase", SupabasePatientStore.from_env().load()
+        except (OSError, ValueError) as exc:
+            raise StoreUnavailable("database view is unavailable") from exc
+    with _lock:
+        return "json", deepcopy(_load())
+
+
 def get_patient(pid: str) -> dict:
     with _lock:
         patients = _load()

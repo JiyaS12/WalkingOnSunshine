@@ -51,6 +51,13 @@ or place calls.
 
 ## Where to see results
 
+- **Doctor portal → Database**: sign in at `/doctor` and select **Database**.
+  No separate Supabase login is needed. Search by patient name, ID, phone number
+  or call ID; select a patient to inspect calls, survey answers and saved walking
+  measurements. Walking results are joined to both call ID and attempt ID.
+  The tab refreshes every 10 seconds while visible and has a manual Refresh button.
+  Its badge identifies Supabase or explicitly configured local JSON storage.
+  **Record JSON** is a sanitized projection, not a raw database export.
 - **walking_patient_records**: one authoritative JSON aggregate per patient,
   with revision and updated time. Calls, surveys and gait sessions are inside
   `record`. The phone is `record.calls[...]._destination_phone`.
@@ -65,6 +72,11 @@ Both database objects are server/service-role only. Row-level security is
 enabled; anonymous and ordinary authenticated database roles cannot read them.
 Patient API access remains signed and patient-scoped. Private phone destinations
 are stripped from normal API responses and are never placed in link URLs.
+The dedicated read-only `/api/clinician/database` endpoint exposes destination
+phone numbers only after clinician authentication. It omits link tokens, provider
+snapshots, fingerprints and frame arrays. Responses are marked `no-store` and the
+UI clears loaded records on authentication failure or sign-out. There are no SQL,
+edit or delete controls, and this feature requires no additional migration.
 
 ## Failure behavior and limits
 
@@ -78,6 +90,10 @@ request before retrying.
 Run one backend worker: reads use a process-local cache. After manual database
 edits, restart the backend to reload it. This is a prototype persistence layer,
 not a claim of HIPAA compliance or readiness for real clinical data.
+The Database tab is an exception to cached reads: it takes a fresh, read-only
+Supabase snapshot without replacing the active-call cache. Search and pagination
+currently happen after loading aggregates on the server; large deployments need
+database-side querying rather than this demo-scale viewer.
 
 ## Offline verification
 

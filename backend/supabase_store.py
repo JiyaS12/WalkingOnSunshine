@@ -1,7 +1,8 @@
 """Server-only, atomic persistence for the integrated patient records.
 
 Uses a separate table from the optional standalone voice-demo schema. No
-client receives the service key, private phone destinations or raw link tokens.
+client receives the service key or raw link tokens. Private phone destinations
+are exposed only through the dedicated authenticated clinician database view.
 """
 
 from copy import deepcopy
