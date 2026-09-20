@@ -15,6 +15,7 @@ def project_record(record: dict) -> dict:
     calls = []
     for call in record.get("calls", []):
         item = pick(call, "call_id patient_id attempt_id condition_category call_status survey_status survey_id sms_status sms_attempt error_code created_at updated_at needs_human_review")
+        item["survey_skipped"] = store.survey_skipped(record, call)
         # Deliberately available only in this clinician-authenticated projection.
         item["destination_phone"] = call.get("_destination_phone")
         if any(survey.get("call_id") == call["call_id"] and any((survey.get("condition_survey") or {}).get(key) for key in ("needs_human_review", "skipped", "unanswered_questions")) for survey in record.get("surveys", [])):

@@ -17,12 +17,14 @@ def database(monkeypatch):
         "demo-1": {
             "patient_id": "demo-1", "name": "Synthetic patient", "secret": "DO-NOT-EXPOSE",
             "calls": [{"patient_id": "demo-1", "call_id": "call-1", "attempt_id": "attempt-1",
-                       "call_status": "completed", "_destination_phone": "+15555550123",
+                       "call_status": "completed", "survey_status": "stored", "survey_id": "survey-1",
+                       "_destination_phone": "+15555550123",
                        "_fingerprint": "DO-NOT-EXPOSE", "_phone_snapshot": {"token": "DO-NOT-EXPOSE"},
                        "walking": {"status": "saved", "events": [{"event_id": "event-1", "event": "page_ready", "token": "DO-NOT-EXPOSE"}]}}],
-            "surveys": [{"patient_id": "demo-1", "call_id": "call-1", "pain_scale": 0,
+            "surveys": [{"patient_id": "demo-1", "call_id": "call-1", "survey_id": "survey-1", "pain_scale": 0,
                          "_fingerprint": "DO-NOT-EXPOSE", "condition_survey": {
-                             "instrument": "hoos_jr", "answers": [{"question_id": "hoos_stairs", "normalized_value": "none", "confirmed": True, "token": "DO-NOT-EXPOSE"}]}}],
+                             "instrument": "hoos_jr", "skipped": ["hoos_rising"],
+                             "answers": [{"question_id": "hoos_stairs", "normalized_value": "none", "confirmed": True, "token": "DO-NOT-EXPOSE"}]}}],
             "gait_sessions": [{"session_id": "walk-1", "call_id": "call-1", "attempt_id": "attempt-1",
                                "metrics": {"fall_risk_score": 0, "stride_length_m": None, "secret": "DO-NOT-EXPOSE"},
                                "frames": [{"example": [1, 2, 3]}], "frames_ref": "DO-NOT-EXPOSE"}],
@@ -66,6 +68,8 @@ def test_database_projection_is_read_only_bounded_and_excludes_internal_secrets(
     assert body["totals"] == {"patients": 2, "calls": 1, "surveys": 1, "walking": 1}
     patient = body["patients"][0]
     assert patient["calls"][0]["destination_phone"] == "+15555550123"
+    assert patient["calls"][0]["survey_skipped"] == ["hoos_rising"]
+    assert patient["surveys"][0]["condition_survey"]["skipped"] == ["hoos_rising"]
     assert patient["gait_sessions"][0]["stored_frame_count"] == 1
     assert patient["gait_sessions"][0]["metrics"]["fall_risk_score"] == 0
     assert patient["gait_sessions"][0]["metrics"]["stride_length_m"] is None

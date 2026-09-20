@@ -77,6 +77,7 @@ export interface CallRecord {
   call_status: CallStatus;
   survey_status: SurveyStatus;
   survey_id: string | null;
+  survey_skipped?: string[];
   needs_human_review?: boolean;
   sms_status: SMSStatus;
   sms_attempt: number;

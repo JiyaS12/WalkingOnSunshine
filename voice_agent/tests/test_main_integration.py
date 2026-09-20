@@ -265,6 +265,25 @@ def test_unclear_question_is_skipped_and_the_partial_survey_is_stored(harness):
     asyncio.run(scenario())
 
 
+def test_skipping_the_last_question_still_tells_the_caller_before_asking_consent(harness):
+    async def scenario():
+        session = await harness.session()
+        for _ in range(5):
+            await say(session, "mild")
+        for _ in range(3):
+            await say(session, "banana")
+        assert not session.finished
+        assert session.stage == "consent"
+        assert harness.spoken[-2].startswith(policy.SKIP_QUESTION)
+        assert harness.spoken[-2].count(policy.SKIP_QUESTION) == 1
+        assert harness.spoken[-1] == policy.INTEGRATED_GAIT_INTRO
+        await say(session, "yes")
+        await harness.walk_requested.wait()
+        assert harness.submissions[0]["condition_survey"]["skipped"] == ["hoos_sitting"]
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
 def test_declining_the_text_still_stores_the_answers_and_never_texts(harness):
     async def scenario():
         session = await harness.session()
