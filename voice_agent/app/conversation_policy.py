@@ -258,7 +258,7 @@ INTEGRATED_GAIT_INTRO = (
 )
 INTEGRATED_SAVING = "One moment while I save your answers and send the text."
 INTEGRATED_PAGE_OPENED = (
-    "I can see the link is open on your end, great. Tap the “Live Camera” mode, then prop your "
+    "I can see the link is open on your end, great. Tap “Use camera”, then prop your "
     "phone against something steady where your whole body is in view, and step back a few paces. "
     "The page will let me know once the camera is set."
 )
@@ -285,7 +285,7 @@ INTEGRATED_LINK_MISSING = (
     "once it shows up, or say ‘stop’ if you would rather leave it for today."
 )
 INTEGRATED_CAMERA_SETUP = (
-    "Great. Tap the “Live Camera” mode, then prop your phone against something steady "
+    "Great. Tap “Use camera”, then prop your phone against something steady "
     "where your whole body is in view, and step back a few paces. The page will let me know "
     "once the camera is set."
 )

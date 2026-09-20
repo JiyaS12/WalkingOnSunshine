@@ -464,7 +464,7 @@ def test_warm_gait_handoff_waits_for_ready_before_camera_setup(harness):
         assert "short video of you walking" in intro
         assert "text you a secure link" in intro
         assert harness.spoken[-1] == policy.INTEGRATED_LINK_SENT
-        assert not any("Live Camera" in text for text in harness.spoken)
+        assert not any("Use camera" in text for text in harness.spoken)
         # Quiet while they look for the text gets a gentle nudge, never an escalation.
         for _ in range(4):
             await session.handle_silence()
@@ -475,7 +475,7 @@ def test_warm_gait_handoff_waits_for_ready_before_camera_setup(harness):
         assert not session.link_open
         await say(session, "okay, I have it open")
         assert session.link_open
-        assert "Live Camera" in harness.spoken[-1]
+        assert "Use camera" in harness.spoken[-1]
         assert not any("One. Two. Three." in text for text in harness.spoken)
         await say(session, "what do I do now")
         assert harness.spoken[-1] == policy.INTEGRATED_WAITING
@@ -489,7 +489,7 @@ def test_countdown_only_after_page_reports_calibration_ready(harness):
         await answer_survey(session)
         await harness.walk_requested.wait()
         await say(session, "ready")
-        assert "Live Camera" in harness.spoken[-1]
+        assert "Use camera" in harness.spoken[-1]
         harness.walks = [
             harness.view("ready", 3, "calibration_completed"),
             harness.view("capturing", 4, "capture_started"),
