@@ -327,9 +327,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     );
   }
 
-  const latestSurvey = patient?.surveys?.length
-    ? patient.surveys[patient.surveys.length - 1]
-    : null;
   const hasSessions = (patient?.gait_sessions?.length ?? 0) > 0;
 
   return (
@@ -358,40 +355,6 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           </Link>
         </div>
       </header>
-
-      <div className="mb-6 overflow-hidden rounded-[1.75rem] bg-card shadow-pillow">
-        <div className="rounded-t-[1.75rem] bg-pastel-green px-6 py-3">
-          <h2 className="text-sm font-medium text-foreground">
-            Survey details
-          </h2>
-        </div>
-        <div className="px-6 py-4">
-        {latestSurvey ? (
-          <div className="flex flex-wrap items-center gap-3 text-xs text-foreground">
-            <span className="rounded-full border-0 bg-pastel-peach px-2 py-0.5 text-foreground">
-              pain {latestSurvey.pain_scale}/10
-            </span>
-            <span>
-              falls (6 mo): {latestSurvey.fall_history.falls_last_6_months}
-              {latestSurvey.fall_history.injured ? " · injured" : ""}
-            </span>
-            <span>dizziness: {latestSurvey.dizziness ? "yes" : "no"}</span>
-            <span className="flex flex-wrap gap-1">
-              {latestSurvey.primary_complaints.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-full border-0 bg-pastel-lavender/60 px-2 py-0.5 text-[10px] text-foreground"
-                >
-                  {c}
-                </span>
-              ))}
-            </span>
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No survey on file yet.</p>
-        )}
-        </div>
-      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <WebcamFeed onMetrics={handleMetrics} onInputReset={handleInputReset} />
