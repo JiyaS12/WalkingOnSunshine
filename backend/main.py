@@ -880,8 +880,8 @@ def patient_synthesis(pid: str) -> dict:
             status_code=422,
             detail="patient needs at least one survey and one gait session",
         )
-    if record.get("active_call_id"):
-        call = store.get_call(pid, record["active_call_id"])
+    call = store.walk_linked_call(record)
+    if call:
         surveys = [
             survey for survey in record["surveys"]
             if survey.get("call_id") == call["call_id"]

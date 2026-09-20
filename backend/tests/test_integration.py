@@ -991,6 +991,70 @@ def test_patient_correlation_is_enforced_inside_atomic_store_mutation(rig):
     assert store.get_patient(PID) == before
 
 
+def test_call_ended_without_stored_survey_releases_standalone_walk(rig):
+    client, phone, _ = rig
+    call = start(client)
+    walking = f"/api/patient-access/{PID}/walking"
+    assert client.get(walking, headers=patient_headers()).json()["walking"]["call_id"] == call["call_id"]
+    assert (
+        callback(client, phone, call_status="completed", survey_status="needs_review").status_code
+        == 200
+    )
+    assert client.get(walking, headers=patient_headers()).json()["walking"] is None
+    assert (
+        client.post(
+            f"/api/patient-access/{PID}/walking/events",
+            json=event(call),
+            headers=patient_headers(),
+        ).status_code
+        == 409
+    )
+    payload = session(call)
+    del payload["call_id"]
+    del payload["attempt_id"]
+    saved = client.post(
+        f"/api/patient-access/{PID}/sessions", json=payload, headers=patient_headers()
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["gait_sessions"][-1].get("call_id") is None
+    assert store.get_call(PID, call["call_id"])["walking"]["status"] == "waiting"
+
+
+def test_live_call_awaiting_survey_still_gates_standalone_walk(rig):
+    client, phone, _ = rig
+    call = start(client)
+    assert callback(client, phone, call_status="in_progress", survey_status="in_progress").status_code == 200
+    assert (
+        client.get(f"/api/patient-access/{PID}/walking", headers=patient_headers()).json()["walking"]["call_id"]
+        == call["call_id"]
+    )
+    payload = session(call)
+    del payload["call_id"]
+    del payload["attempt_id"]
+    assert (
+        client.post(f"/api/patient-access/{PID}/sessions", json=payload, headers=patient_headers()).status_code
+        == 409
+    )
+
+
+def test_ended_call_with_survey_ingesting_still_gates_standalone_walk(rig):
+    client, phone, _ = rig
+    call = start(client)
+    assert callback(client, phone, call_status="in_progress", survey_status="in_progress").status_code == 200
+    assert callback(client, phone, call_status="completed", survey_status="in_progress").status_code == 200
+    walking = f"/api/patient-access/{PID}/walking"
+    assert client.get(walking, headers=patient_headers()).json()["walking"]["call_id"] == call["call_id"]
+    payload = session(call)
+    del payload["call_id"]
+    del payload["attempt_id"]
+    assert (
+        client.post(f"/api/patient-access/{PID}/sessions", json=payload, headers=patient_headers()).status_code
+        == 409
+    )
+    submit(client, call)
+    assert client.get(walking, headers=patient_headers()).json()["walking"]["survey_status"] == "stored"
+
+
 def test_durable_call_dedupe_survives_store_reload(rig):
     client, phone, path = rig
     call = start(client)
