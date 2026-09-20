@@ -248,13 +248,24 @@ INTEGRATED_INTRO = (
     "It only takes a few minutes, and there are no wrong answers. "
     "Just answer in your own words, and you can ask me to repeat, pause, or stop at any time."
 )
+INTEGRATED_CONSENT_QUESTION = (
+    "Is it okay if I text you that link now? Please say yes or no."
+)
 INTEGRATED_GAIT_INTRO = (
-    "Thank you for those answers. There is one more thing your care team would like, "
-    "and then we are done."
+    "Thank you for those answers. Your care team would also like a short video of you walking, "
+    "which shows how steady you are on your feet. To do that, I’d like to send a one-time text "
+    "message to this phone number with a secure link to the camera page. Message and data rates "
+    "may apply; this is a single message and you will not receive marketing texts."
     f"{PARAGRAPH}"
-    "They would like a short video of you walking. It shows them how steady you are on "
-    "your feet, which is hard to tell from answers alone, and it takes about a minute. "
-    "Let me save your answers and text you a secure link to the camera page."
+    f"{INTEGRATED_CONSENT_QUESTION}"
+)
+INTEGRATED_CONSENT_UNCLEAR = (
+    "Sorry, I didn’t catch that. " + INTEGRATED_CONSENT_QUESTION
+)
+INTEGRATED_CONSENT_GIVEN = "Thank you. Saving your answers and sending the text now."
+INTEGRATED_CONSENT_DECLINED = (
+    "No problem. Your answers are saved, and your care team will follow up with you separately. "
+    "Thank you for your time today. Take care, and goodbye."
 )
 INTEGRATED_SAVING = "One moment while I save your answers and send the text."
 INTEGRATED_PAGE_OPENED = (
@@ -271,9 +282,10 @@ INTEGRATED_SUBMIT_FAILED = (
     "Your care team will follow up with you separately. Thank you for your time. Take care, and goodbye."
 )
 INTEGRATED_SMS_FAILED = (
-    "Your answers are saved, but the text did not go through on my end, so we will leave the "
-    "walking check for another time. Your care team will send you the link separately. "
-    "Thank you for your answers today. Take care, and goodbye."
+    "Your answers are saved, but the text does not look like it went through on my end. "
+    "Your care team can pass you the same link another way. If you get it, open it on your "
+    "phone and tell me when you have it up, or say ‘stop’ if you would rather leave the "
+    "walking check for another time."
 )
 INTEGRATED_LINK_SENT = (
     "Your answers are saved, and I’ve asked for the text to go out to you. It can take a minute "
@@ -355,9 +367,10 @@ def sms_body(link: str) -> str:
     """The text the patient gets, with the gait-checker link in it."""
 
     return (
-        "Your care team's walking check-in: "
-        f"{link} "
-        "Open this on your phone and follow along with the call."
+        "Sana: Your care team's walking check-in. Open this secure link on your phone "
+        f"and follow along with the call: {link} "
+        "This link expires soon. Msg & data rates may apply. "
+        "Reply STOP to opt out, HELP for help."
     )
 
 
@@ -377,7 +390,11 @@ def question_text(question, index: int, total: int) -> str:
 def opening_text(question, total: int) -> str:
     """The greeting, a beat, then the first question with its scale."""
 
-    return f"{INTRO}{PARAGRAPH}{question_text(question, 0, total)} {options_text(question)}"
+    return f"{INTRO}{PARAGRAPH}{first_question_text(question, total)}"
+
+
+def first_question_text(question, total: int) -> str:
+    return f"{question_text(question, 0, total)} {options_text(question)}"
 
 
 def options_text(question) -> str:

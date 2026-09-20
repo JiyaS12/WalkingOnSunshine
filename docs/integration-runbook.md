@@ -54,6 +54,15 @@ outside the explicit local HTTP override. Set `PATIENT_LINK_TTL_SECONDS`
 according to the intended session duration (default 900, accepted 60–604800).
 Expired links fail closed; changing the signing secret invalidates all links.
 
+When the dashboard is served through a tunnel (ngrok, Cloudflare) in `next dev`,
+put the **exact** tunnel hostname in `frontend/.env.local`
+`ALLOWED_DEV_ORIGINS=<host>.trycloudflare.com` and restart `npm run dev`.
+A `*.` wildcard is not enough for the `/_next/hmr` websocket, and while that
+socket is blocked the page stays on "Checking clinician session…" without
+hydrating. Set `API_PROXY_TARGET=http://127.0.0.1:8000` and leave
+`NEXT_PUBLIC_API_URL` empty so the browser calls `/api/*` on the dashboard's own
+origin and the clinician cookie is first-party.
+
 Run in separate terminals from the repository root:
 
 ```bash

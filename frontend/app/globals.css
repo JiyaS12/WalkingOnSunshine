@@ -8,6 +8,25 @@
   }
 }
 
+@layer components {
+  .legal h2 {
+    @apply mt-8 text-xl font-semibold;
+  }
+  .legal p,
+  .legal li {
+    @apply mt-3 text-sm leading-relaxed text-muted-foreground;
+  }
+  .legal ul {
+    @apply list-disc pl-6;
+  }
+  .legal li {
+    @apply mt-1.5;
+  }
+  .legal strong {
+    @apply font-semibold text-foreground;
+  }
+}
+
 @layer base {
   .theme {
     --font-heading: var(--font-sans);

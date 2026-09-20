@@ -1,11 +1,12 @@
 """Combined survey and event-driven walking guidance, independent of audio transport."""
 
 import asyncio
+import copy
+import re
 from collections.abc import Awaitable, Callable
 
 from . import conversation_policy as policy
 from .answer_interpreter import AnswerInterpreter, clean_utterance, control_intent
-from .generic_intake import GenericIntake, build_intake_interpreter
 from .integrated_service import IntegratedService
 from .integration_contract import CallStatus, PhoneError, RegisteredCall
 from .main_backend import BackendError
@@ -21,19 +22,74 @@ Speaker = Callable[[str], Awaitable[None]]
 _CAMERA_STATUSES = {"calibrating", "ready", "capturing", "captured"}
 _PAGE_OPEN_STATUSES = _CAMERA_STATUSES | {"page_ready"}
 MAX_LINK_REMINDERS = 2
+MAX_CONSENT_RETRIES = 2
+_CONSENT_YES = re.compile(
+    r"\b(?:yes|yeah|yep|yup|sure|okay|ok|of course|go ahead|please do|that's fine|that is fine|"
+    r"sounds good|fine|absolutely|definitely|send it|text me|you can)\b"
+)
+_CONSENT_NO = re.compile(
+    r"\b(?:no|nope|nah|not|don't|do not|rather not|no thanks|no thank you|never|skip|later|stop)\b"
+)
+# "can't wait (to get the text)" / "won't hesitate (to open it)" are eagerness
+# and "can't you text me?" is a request, not inability.
+_INABILITY = (
+    r"\b(?:can't|cannot|can not|won't|will not|unable to|not able to)\b"
+    r"(?!\s+(?:wait|hesitate|you)\b)(?: be able to)?"
+)
+# An inability whose object, within the same clause, is the text or link
+# refuses ("you can't text me", "sure, but I can't access the link", "won't be
+# able to view the message"). Punctuation or a connective ("I can't talk,
+# please text me") ends the clause, so a separate request is not swallowed.
+_CLAUSE_WORD = r"\s+(?!(?:please|yes|but|and|so|then)\b)\w+"
+_CONSENT_CANNOT_TEXT = re.compile(
+    _INABILITY + r"(?:" + _CLAUSE_WORD + r"){0,4}?\s+(?:text|texts|texting|message|messages|link|links)\b"
+    r"|" + _INABILITY + r"\s+(?:send|open|get|receive|read|see|view|access|click|use)\s+(?:it|that)\b"
+)
+# A bare inability with no agreement anywhere ("I won't be able to") is a no.
+_CONSENT_CANNOT = re.compile(_INABILITY)
+_CURLY_APOSTROPHES = str.maketrans("\u2019\u2018\u02bc", "'''")
+# "no problem" / "not a problem" are agreement, not refusal.
+_CONSENT_NOT_REFUSAL = re.compile(r"\b(?:no|not a|not really a) (?:problem|worries|issue)\b")
+
+
+def consent_intent(transcript: str) -> str:
+    """Read a reply to the SMS consent question as ``"yes"``, ``"no"`` or ``"unclear"``.
+
+    Any refusal wins over agreement ("yes but not now" is a no); agreement only
+    counts when nothing in the reply refuses, so the text never goes out on a
+    misheard or hedged answer.
+    """
+    text = _CONSENT_NOT_REFUSAL.sub(" yes ", transcript.lower().translate(_CURLY_APOSTROPHES))
+    if _CONSENT_NO.search(text) or _CONSENT_CANNOT_TEXT.search(text):
+        return "no"
+    if _CONSENT_YES.search(text):
+        return "yes"
+    if _CONSENT_CANNOT.search(text):
+        return "no"
+    return "unclear"
+
+
+# The phone call asks only the condition questions; the generic intake fields
+# stay in the submission contract as explicit nulls so main never infers them.
+EMPTY_INTAKE: dict[str, object] = {
+    "pain_scale": None,
+    "fall_history": {"falls_last_6_months": None, "injured": None, "last_fall_description": None},
+    "dizziness": None,
+    "dizziness_notes": None,
+    "primary_complaints": None,
+}
 
 
 class IntegratedSession:
     def __init__(
         self, service: IntegratedService, call: RegisteredCall, speak: Speaker,
         interpreter: AnswerInterpreter | None = None, end_playback: Callable[[], Awaitable[None]] | None = None,
-        poll_seconds: float = 1, wait_seconds: float = 180, max_call_seconds: float = 600,
+        poll_seconds: float = 1, wait_seconds: float = 300, max_call_seconds: float = 600,
     ):
         patient = PatientRecord(call.patient_id, call.patient_id, ConditionCategory(call.condition_category))
         self.engine = SafeSurveyEngine(
             InMemoryPatientRepository({patient.patient_code: patient}), patient.patient_code, interpreter,
         )
-        self.generic = GenericIntake(build_intake_interpreter())
         self.service = service
         self.call = call
         self.session_id = service.receipt(call.call_id).snapshot.phone_session_id or call.call_id
@@ -44,14 +100,18 @@ class IntegratedSession:
         self.max_call_seconds = max_call_seconds
         self.finished = False
         self.paused = False
-        self.stage = "generic"
+        self.stage = "condition"
         self.link_open = False
+        # Backend-confirmed page activity; a spoken "ready" alone never sets this.
+        self._page_seen = False
+        self._sms_failure_told = False
         self._page_active = False
         self._buffer: list[str] = []
         self._confidence: float | None = None
         self._last_prompt = ""
         self._silences = 0
         self._link_reminders = 0
+        self._consent_retries = 0
         self._background: asyncio.Task[None] | None = None
         self._deadline: asyncio.Task[None] | None = None
         self._speech_lock = asyncio.Lock()
@@ -75,7 +135,7 @@ class IntegratedSession:
 
     async def begin(self) -> None:
         self._deadline = asyncio.create_task(self._expire())
-        await self._say(policy.INTEGRATED_INTRO + policy.PARAGRAPH + self.generic.prompt())
+        await self._say(policy.INTEGRATED_INTRO + policy.PARAGRAPH + _spoken(self.engine.start(greet=False)))
 
     async def _expire(self) -> None:
         await asyncio.sleep(self.max_call_seconds)
@@ -105,33 +165,37 @@ class IntegratedSession:
         if command in {"repeat", "resume"}:
             await self._say(self._current_prompt())
             return False
-        if self.stage == "generic":
-            prompt = await asyncio.to_thread(self.generic.handle, text)
-            if self.generic.state in {"stopped", "needs_review"}:
-                await self.finish("stopped" if self.generic.state == "stopped" else "completed", prompt, "needs_review")
-                return True
-            if self.generic.complete:
-                self.stage = "condition"
-                prompt = _spoken(self.engine.start())
-            await self._say(prompt)
-        elif self.stage == "condition":
+        if self.stage == "condition":
             prompt, _ = await asyncio.to_thread(self.engine.handle_response, text, confidence)
             if self.engine.session.state in {"stopped", "escalated"}:
                 await self.finish("stopped" if self.engine.session.state == "stopped" else "completed", _spoken(prompt), "needs_review")
                 return True
             if self.engine.session.state == "complete":
                 self.submission = self._payload()
-                self.stage = "submitting"
+                self.stage = "consent"
                 await self._say(policy.INTEGRATED_GAIT_INTRO)
-                self._background = asyncio.create_task(self._submit_and_wait())
             else:
                 await self._say(_spoken(prompt))
+        elif self.stage == "consent":
+            intent = consent_intent(text)
+            if intent == "yes":
+                self.stage = "submitting"
+                await self._say(policy.INTEGRATED_CONSENT_GIVEN)
+                self._background = asyncio.create_task(self._submit_and_wait())
+            elif intent == "no" or self._consent_retries >= MAX_CONSENT_RETRIES:
+                await self._decline_link()
+            else:
+                self._consent_retries += 1
+                await self._say(policy.INTEGRATED_CONSENT_UNCLEAR)
         elif self.stage == "submitting":
             await self._say(policy.INTEGRATED_SAVING)
         else:
             intent = link_reply_intent(text)
             if intent == "missing" and not self.link_open:
-                await self._say(policy.INTEGRATED_LINK_MISSING)
+                await self._say(
+                    policy.INTEGRATED_SMS_FAILED if self._sms_failure_told
+                    else policy.INTEGRATED_LINK_MISSING
+                )
             elif intent == "ready" or clean_utterance(text) == "retry":
                 self.link_open = True
                 if self._page_active:
@@ -143,24 +207,26 @@ class IntegratedSession:
         return self.finished
 
     def _current_prompt(self) -> str:
-        if self.stage == "generic":
-            return self.generic.prompt()
         if self.stage == "condition":
-            return _spoken(self.engine.start())
+            return _spoken(self.engine.start(greet=False))
+        if self.stage == "consent":
+            return policy.INTEGRATED_CONSENT_QUESTION
         if self.stage == "submitting":
             return policy.INTEGRATED_SAVING
         if not self.link_open:
+            if self._sms_failure_told:
+                return policy.INTEGRATED_SMS_FAILED
             return policy.INTEGRATED_LINK_SENT
         return policy.INTEGRATED_WAITING
 
     def _payload(self) -> dict[str, object]:
         answers = self.engine.session.answers
-        if not self.generic.complete or self.engine.session.state != "complete" or not all(a.confirmed for a in answers):
+        if self.engine.session.state != "complete" or not all(a.confirmed for a in answers):
             raise ValueError("Incomplete confirmed survey.")
         return {
             "patient_id": self.call.patient_id, "call_id": self.call.call_id,
             "submission_kind": "integrated",
-            **self.generic.payload(),
+            **copy.deepcopy(EMPTY_INTAKE),
             "condition_survey": {
                 "instrument": "hoos_jr" if self.call.condition_category == "orthopedic" else "stroke_mobility",
                 "version": "1", "condition_category": self.call.condition_category,
@@ -172,6 +238,17 @@ class IntegratedSession:
             },
         }
 
+    async def _decline_link(self) -> None:
+        """No spoken yes: store the confirmed answers, never text, and close."""
+        assert self.submission is not None
+        self.stage = "submitting"
+        try:
+            await self.service.submit(self.call.call_id, self.submission, send_link=False)
+        except BackendError:
+            await self.finish("completed", policy.INTEGRATED_SUBMIT_FAILED, "provider_unavailable")
+            return
+        await self.finish("completed", policy.INTEGRATED_CONSENT_DECLINED)
+
     async def _submit_and_wait(self) -> None:
         assert self.submission is not None
         try:
@@ -181,11 +258,12 @@ class IntegratedSession:
             return
         if self.finished:
             return
-        if snapshot.sms_status == "failed":
-            await self.finish("completed", policy.INTEGRATED_SMS_FAILED, snapshot.error_code)
-            return
         self.stage = "walking"
-        await self._say(policy.INTEGRATED_LINK_SENT)
+        if snapshot.sms_status == "failed":
+            self._sms_failure_told = True
+            await self._say(policy.INTEGRATED_SMS_FAILED)
+        else:
+            await self._say(policy.INTEGRATED_LINK_SENT)
         await self._poll_walk()
 
     async def _poll_walk(self) -> None:
@@ -215,6 +293,7 @@ class IntegratedSession:
                     was_open = self.link_open
                     if view.status in _PAGE_OPEN_STATUSES or view.last_event == "permission_denied":
                         self.link_open = True
+                        self._page_seen = True
                     if view.status in _CAMERA_STATUSES or view.last_event == "permission_denied":
                         self._page_active = True
                     if key != seen:
@@ -232,6 +311,13 @@ class IntegratedSession:
                             await self._say(policy.INTEGRATED_CAPTURING)
                         elif view.status == "captured":
                             await self._say(policy.INTEGRATED_CAPTURED)
+                if not self._page_seen and not self._sms_failure_told:
+                    snapshot = self.service.receipt(self.call.call_id).snapshot
+                    if snapshot.sms_status == "failed":
+                        # The carrier bounced it, but the clinician can still
+                        # hand over the link, so keep the call open for the page.
+                        self._sms_failure_told = True
+                        await self._say(policy.INTEGRATED_SMS_FAILED)
             await asyncio.sleep(self.poll_seconds)
         if not self.finished:
             await self.finish("completed", policy.INTEGRATED_TIMED_OUT)
@@ -248,7 +334,10 @@ class IntegratedSession:
             return self.finished
         self._silences += 1
         if self._silences >= (12 if self.paused else 3):
-            await self.finish("completed", policy.INTEGRATED_NO_RESPONSE, "needs_review")
+            if self.stage == "consent":
+                await self._decline_link()
+            else:
+                await self.finish("completed", policy.INTEGRATED_NO_RESPONSE, "needs_review")
         elif not self.paused:
             await self._say(self._current_prompt())
         return self.finished

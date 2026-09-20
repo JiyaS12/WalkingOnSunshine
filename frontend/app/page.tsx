@@ -52,6 +52,10 @@ export default function Home() {
           </div>
         </div>
       </section>
+      <footer className="mx-auto mt-8 flex max-w-3xl justify-center gap-4 text-xs text-muted-foreground">
+        <Link href="/privacy" className="underline-offset-2 hover:underline">Privacy Policy</Link>
+        <Link href="/terms" className="underline-offset-2 hover:underline">Terms &amp; Conditions</Link>
+      </footer>
     </main>
   );
 }

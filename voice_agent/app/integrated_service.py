@@ -52,6 +52,8 @@ class IntegratedService:
         self.public_base_url = validate_origin(public_base_url)
         self.numbers: dict[str, str] = {}
         self.submissions: dict[str, str] = {}
+        # Calls whose patient declined the walking-link text; the survey is still stored.
+        self.link_declined: set[str] = set()
         self._locks: dict[str, asyncio.Lock] = {}
         self._publish_locks: dict[str, asyncio.Lock] = {}
         self._ingest_locks: dict[str, asyncio.Lock] = {}
@@ -230,7 +232,9 @@ class IntegratedService:
             snapshot = value.snapshot
             if snapshot.call_status not in TERMINAL_CALL:
                 snapshot.call_status = status
-                snapshot.error_code = error
+                # A call that outlives its bounced text keeps the carrier code.
+                if error is not None or snapshot.sms_status != "failed":
+                    snapshot.error_code = error
             if snapshot.survey_status not in TERMINAL_SURVEY:
                 if status == "stopped":
                     snapshot.survey_status = "stopped"
@@ -238,12 +242,14 @@ class IntegratedService:
                     snapshot.survey_status = "needs_review"
         return await self.update(call_id, finish)
 
-    async def submit(self, call_id: str, payload: dict[str, object]) -> PhoneSnapshot:
+    async def submit(self, call_id: str, payload: dict[str, object], *, send_link: bool = True) -> PhoneSnapshot:
         async with self._ingest_locks.setdefault(call_id, asyncio.Lock()):
             frozen = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
             if call_id in self.submissions and self.submissions[call_id] != frozen:
                 raise HTTPException(409, "Confirmed submission cannot be changed.")
             self.submissions[call_id] = frozen
+            if not send_link:
+                self.link_declined.add(call_id)
             result = await self.backend.submit(payload)
             snapshot = self.receipt(call_id).snapshot
             validate_patient_link(result.patient_url, snapshot.patient_id)
@@ -251,6 +257,8 @@ class IntegratedService:
             def stored(value: Receipt) -> None:
                 value.snapshot.survey_status = "stored"
             await self.update(call_id, stored)
+            if call_id in self.link_declined:
+                return self.receipt(call_id).snapshot
             return await self.send_sms(call_id, 0, result.patient_url)
 
     async def retry_submission(self, call_id: str) -> PhoneSnapshot:

@@ -141,13 +141,13 @@ def poll(phone: httpx.Client, call_id: str, predicate):
     pytest.fail("Phone state did not converge")
 
 
-@pytest.mark.parametrize(("condition", "sms_outcome", "unknown"), [
-    ("orthopedic", "sent", False),
-    ("stroke", "sent", True),
-    ("orthopedic", "rejected", False),
-    ("stroke", "unknown", False),
+@pytest.mark.parametrize(("condition", "sms_outcome"), [
+    ("orthopedic", "sent"),
+    ("stroke", "sent"),
+    ("orthopedic", "rejected"),
+    ("stroke", "unknown"),
 ])
-def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
+def test_real_main_phone_handshake(services, condition, sms_outcome):
     main, phone, store_path = services
     pid = "RGN-9001"
     calls_path = f"/api/patients/{pid}/calls"
@@ -171,11 +171,9 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
         "Authorization": "Bearer invalid",
     }).status_code == 401
     ok(phone.post(f"/fixture/calls/{call_id}/begin"))
-    answers = ["unknown"] * 3 if unknown else ["7", "2", "yes"]
-    for answer in answers:
-        ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": answer}))
     for _ in range(6):
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "mild"}))
+    ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "yes"}))
     state = poll(phone, call_id, lambda row: row["snapshot"]["sms_status"] in {
         "sent", "failed", "unknown",
     })
@@ -185,11 +183,9 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
         "sent": "sent", "rejected": "failed", "unknown": "unknown",
     }[sms_outcome]
     payload = state["submission"]
-    assert payload["pain_scale"] == (None if unknown else 7)
-    assert payload["fall_history"]["falls_last_6_months"] == (None if unknown else 2)
-    assert payload["fall_history"]["injured"] is None
-    assert payload["fall_history"]["last_fall_description"] is None
-    assert payload["dizziness"] == (None if unknown else True)
+    assert payload["pain_scale"] is None
+    assert all(value is None for value in payload["fall_history"].values())
+    assert payload["dizziness"] is None
     assert payload["dizziness_notes"] is None
     assert payload["primary_complaints"] is None
     instrument = "hoos_jr" if condition == "orthopedic" else "stroke_mobility"
@@ -270,17 +266,16 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
     finished = poll(phone, call_id, lambda row: (
         row["finished"] and row["snapshot"]["call_status"] == "completed"
     ))
-    if sms_outcome == "rejected":
-        assert not any("walking test is saved" in text for text in finished["speech"])
-    else:
-        assert any("walking test is saved" in text for text in finished["speech"])
+    assert any("walking test is saved" in text for text in finished["speech"])
+    bounced = [text for text in finished["speech"] if "does not look like it went through" in text]
+    assert len(bounced) == (1 if sms_outcome == "rejected" else 0)
     record = ok(main.get(f"/api/patients/{pid}"))
     assert len(record["surveys"]) == len(record["gait_sessions"]) == len(record["calls"]) == 1
     assert record["surveys"][0]["call_id"] == record["gait_sessions"][0]["call_id"] == call_id
     assert record["gait_sessions"][0]["attempt_id"] == attempt_id
     synthesis = ok(main.post(f"/api/patients/{pid}/synthesis"))
     assert synthesis["source"] == "template"
-    assert ("undetermined" if unknown else "pain 7/10") in synthesis["summary"]
+    assert "undetermined" in synthesis["summary"]
     durable = json.loads(store_path.read_text())[pid]
     assert durable["gait_sessions"][0]["session_id"] == saved["session_id"]
     assert durable["calls"][0]["walking"]["status"] == "saved"
