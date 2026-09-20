@@ -566,3 +566,122 @@ def test_stream_tickets_are_single_use_and_expire():
     token = tickets.issue("sess-2")
     assert tickets.redeem("sess-2", token) is True
     assert tickets.redeem("sess-2", token) is False
+
+
+def test_place_call_reports_whether_twilio_will_send_status_callbacks(monkeypatch):
+    def refuse_callbacks(account_sid, auth_token, fields, timeout):
+        if any(name == "StatusCallback" for name, _ in fields):
+            raise twilio.TwilioError("(400): trial accounts have limited parameter access")
+        return {"sid": "CA1", "status": "queued", "to": "+14155550123"}
+
+    def accept_everything(account_sid, auth_token, fields, timeout):
+        return {"sid": "CA2", "status": "queued", "to": "+14155550123"}
+
+    kwargs = dict(
+        account_sid="AC1",
+        auth_token="token",
+        to_number="+14155550123",
+        from_number="+14155550100",
+        answer_url="https://tunnel.example.com/twilio/voice",
+        status_callback_url="https://tunnel.example.com/twilio/status",
+    )
+    monkeypatch.setattr(twilio, "_post_call", refuse_callbacks)
+    assert twilio.place_call(**kwargs).status_callback is False
+    monkeypatch.setattr(twilio, "_post_call", accept_everything)
+    assert twilio.place_call(**kwargs).status_callback is True
+
+
+@pytest.mark.parametrize(
+    ("said", "intent"),
+    [
+        ("okay I've got it open", "ready"),
+        ("ready", "ready"),
+        ("yes it's up", "ready"),
+        ("I never got the text", "missing"),
+        ("no, nothing came through yet", "missing"),
+        ("it hasn't arrived", "missing"),
+        ("no I didn't get it, okay", "missing"),
+        ("stop", "stop"),
+        ("can we do this another time", "stop"),
+        ("what was the question", "unclear"),
+        ("hello", "unclear"),
+    ],
+)
+def test_link_replies_are_read_for_intent_not_just_noise(said, intent):
+    assert call_session.link_reply_intent(said) == intent
+
+
+def _session_waiting_on_the_link(monkeypatch):
+    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
+    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
+    texts: list[str] = []
+
+    async def sms_sender(to_number: str, body: str) -> None:
+        texts.append(body)
+
+    engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    session = PhoneCallSession(
+        engine,
+        speak,
+        session_id="sess-link",
+        to_number="+14155550123",
+        sms_sender=sms_sender,
+        walk_seconds=0.0,
+    )
+
+    async def answer_everything() -> None:
+        await session.begin()
+        for _ in range(len(session.engine.session.questions)):
+            session.add_transcript("none")
+            await session.flush_utterance()
+
+    asyncio.run(answer_everything())
+    assert session.handoff is not None and session.handoff.sms_sent is True
+    assert not session.finished
+    return session, spoken
+
+
+async def _say(session: PhoneCallSession, text: str) -> bool:
+    session.add_transcript(text)
+    return await session.flush_utterance()
+
+
+def test_link_walkthrough_waits_for_a_real_yes(monkeypatch):
+    session, spoken = _session_waiting_on_the_link(monkeypatch)
+
+    assert asyncio.run(_say(session, "what was that?")) is False
+    assert "say ‘ready’" in spoken[-1]
+    assert not any("Live Camera" in line for line in spoken)
+
+    assert asyncio.run(_say(session, "okay, got it open")) is True
+    assert any("Live Camera" in line for line in spoken)
+    assert session.finished
+    assert session.persistence.calls["sess-link"].final_status == "complete"
+
+
+def test_a_caller_who_never_gets_the_text_is_not_walked_through_a_camera(monkeypatch):
+    session, spoken = _session_waiting_on_the_link(monkeypatch)
+
+    assert asyncio.run(_say(session, "I never got the text")) is False
+    assert "take a minute to arrive" in spoken[-1]
+    assert asyncio.run(_say(session, "still nothing")) is True
+    assert "has not reached you" in spoken[-1]
+    assert not any("Live Camera" in line for line in spoken)
+    assert session.finished
+    assert session.handoff is not None
+    assert any("never arrived" in note for note in session.handoff.notes)
+    assert session.persistence.calls["sess-link"].final_status == "complete"
+
+
+def test_stop_while_waiting_on_the_link_ends_the_call_politely(monkeypatch):
+    session, spoken = _session_waiting_on_the_link(monkeypatch)
+
+    assert asyncio.run(_say(session, "stop")) is True
+    assert "leave it there" in spoken[-1]
+    assert not any("Live Camera" in line for line in spoken)
+    assert session.finished

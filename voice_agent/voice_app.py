@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import logging
+import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -33,9 +34,19 @@ from app.persistence import CompositePersistence, build_persistence
 
 ROOT = Path(__file__).resolve().parent
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+# Desktop sessions live only as long as a browser is driving them.
+MAX_SESSIONS = 64
+SESSION_IDLE_SECONDS = 30 * 60
+TERMINAL_STATES = {"complete", "escalated", "stopped"}
 
 
-def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
+def create_app(
+    persistence=None,
+    auth: OperatorAuth | None = None,
+    max_sessions: int = MAX_SESSIONS,
+    session_idle_seconds: float = SESSION_IDLE_SECONDS,
+    clock=time.monotonic,
+) -> FastAPI:
     load_dotenv(ROOT / ".env")
     operator = auth or OperatorAuth.from_env()
     interpreter = build_answer_interpreter()
@@ -46,7 +57,12 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
     session_locks: dict[str, RLock] = {}
     # Only the current application-produced prompt can be synthesized. The
     # browser cannot submit arbitrary text or change the survey's spoken wording.
-    speech_turns: dict[str, dict] = {}
+    # Ordered by last activity so idle and surplus sessions can be dropped;
+    # a finished session keeps only this entry so its closing line can replay.
+    speech_turns: OrderedDict[str, dict] = OrderedDict()
+    last_seen: dict[str, float] = {}
+    app.state.session_ids = lambda: list(speech_turns)
+    app.state.live_session_ids = lambda: list(sessions)
     # Spoken text is fixed survey content plus validated non-clinical bridges.
     # Reuse completed prompts across
     # sessions; never store a partial/interrupted stream as a complete recording.
@@ -83,10 +99,34 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
 
     app.state.prewarm_speech = prewarm_speech
 
-    def speech_turn(session_id: str, prompt: str) -> dict[str, str]:
+    def forget(session_id: str) -> None:
+        sessions.pop(session_id, None)
+        session_locks.pop(session_id, None)
+        speech_turns.pop(session_id, None)
+        last_seen.pop(session_id, None)
+
+    def release_engine(session_id: str) -> None:
+        """A terminal survey needs no engine or lock, only its last prompt."""
+        sessions.pop(session_id, None)
+        session_locks.pop(session_id, None)
+
+    def expire_sessions() -> None:
+        now = clock()
+        for session_id in list(speech_turns):
+            if now - last_seen.get(session_id, now) >= session_idle_seconds:
+                forget(session_id)
+        # Called before a new session is added, so leave room for it.
+        while len(speech_turns) >= max_sessions:
+            forget(next(iter(speech_turns)))
+
+    def speech_turn(session_id: str, prompt: str, engine: SafeSurveyEngine) -> dict[str, str]:
         prompt_id = str(uuid4())
         with lock:
             speech_turns[session_id] = {"prompt_id": prompt_id, "text": prompt}
+            speech_turns.move_to_end(session_id)
+            last_seen[session_id] = clock()
+            if engine.session.state in TERMINAL_STATES:
+                release_engine(session_id)
         return {"prompt": prompt, "prompt_id": prompt_id}
 
     def persist(action, *args) -> None:
@@ -121,12 +161,13 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
         session_id = str(uuid4())
         prompt = engine.start()
         with lock:
+            expire_sessions()
             sessions[session_id] = engine
             session_locks[session_id] = RLock()
         persist(store.persist_session_start, session_id, engine.patient, prompt)
         return {
             "session_id": session_id,
-            **speech_turn(session_id, prompt),
+            **speech_turn(session_id, prompt, engine),
             **engine.snapshot(),
         }
 
@@ -134,7 +175,10 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
     async def handle_audio(session_id: str, audio: UploadFile = File(...)) -> dict[str, object]:
         with lock:
             engine = sessions.get(session_id)
-        if engine is None:
+            session_lock = session_locks.get(session_id)
+            if engine is not None:
+                last_seen[session_id] = clock()
+        if engine is None or session_lock is None:
             raise HTTPException(status_code=404, detail="Session not found.")
         if not os.getenv("DEEPGRAM_API_KEY"):
             raise HTTPException(status_code=503, detail="Set DEEPGRAM_API_KEY in .env first.")
@@ -145,13 +189,13 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
         def process_recording():
             # Serialize turns within a session while allowing other patients and
             # speech streams to continue during provider calls.
-            with session_locks[session_id]:
+            with session_lock:
                 transcript = transcribe_with_deepgram(content, audio.content_type or "audio/webm")
                 prompt, answer = engine.handle_response(transcript)
                 persist(store.persist_turn, session_id, transcript, prompt, answer, engine.snapshot())
                 return {
                     "transcript": transcript,
-                    **speech_turn(session_id, prompt),
+                    **speech_turn(session_id, prompt, engine),
                     "answer": answer.normalized_value if answer else None,
                     **engine.snapshot(),
                 }
@@ -161,11 +205,13 @@ def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    @app.get("/api/sessions/{session_id}/speech")
-    @app.post("/api/sessions/{session_id}/speech")
+    @app.get("/api/sessions/{session_id}/speech", dependencies=[Depends(operator)])
+    @app.post("/api/sessions/{session_id}/speech", dependencies=[Depends(operator)])
     def speak_prompt(session_id: str, prompt_id: str) -> Response:
         with lock:
             turn = speech_turns.get(session_id)
+            if turn is not None:
+                last_seen[session_id] = clock()
             if turn is None:
                 raise HTTPException(status_code=404, detail="Session not found. Start a new survey.")
             if turn["prompt_id"] != prompt_id:

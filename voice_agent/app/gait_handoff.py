@@ -51,17 +51,29 @@ def _configured_base_url(env: Mapping[str, str]) -> str:
     raw = (env.get(BASE_URL_ENV) or "").strip().rstrip("/")
     if not raw:
         raise GaitLinkUnavailable(f"{BASE_URL_ENV} is not set")
-    parsed = urlsplit(raw)
+    problem = f"{BASE_URL_ENV} must be a bare HTTPS origin such as https://example.org (HTTP only locally)"
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise GaitLinkUnavailable(problem) from exc
+    hostname = parsed.hostname
     if (
         parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
+        or not hostname
         or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
         or parsed.query
         or parsed.fragment
-        or (parsed.scheme != "https" and parsed.hostname not in LOCAL_HOSTS)
+        or any(char.isspace() for char in raw)
+        or (parsed.scheme != "https" and hostname not in LOCAL_HOSTS)
     ):
-        raise GaitLinkUnavailable(f"{BASE_URL_ENV} must be an HTTPS origin (HTTP only locally)")
-    return raw
+        raise GaitLinkUnavailable(problem)
+    origin = f"{parsed.scheme}://{hostname}"
+    if ":" in hostname:
+        origin = f"{parsed.scheme}://[{hostname}]"
+    return origin if port is None else f"{origin}:{port}"
 
 
 def _configured_secret(env: Mapping[str, str]) -> bytes:

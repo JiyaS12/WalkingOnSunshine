@@ -14,6 +14,7 @@ const listenButton = document.querySelector("#listen-toggle");
 const status = document.querySelector("#status");
 const startButton = document.querySelector("#start");
 const player = document.querySelector("#voice");
+let playerUrl = null;
 
 function updateControls() {
   startButton.disabled = busy || (!!sessionId && !finished);
@@ -112,12 +113,20 @@ async function speak(data) {
   enableMicrophone(false);
   stopPlayback();
   status.textContent = "Preparing the helper’s voice...";
-  // Decode as bytes arrive; do not wait for a complete MP3 Blob.
-  player.src = `/api/sessions/${sessionId}/speech?prompt_id=${encodeURIComponent(data.prompt_id)}`;
-  player.preload = "auto";
-  player.hidden = false;
-  player.load();
   try {
+    // The audio element cannot send the operator token, so fetch the speech
+    // ourselves and hand the player a local object URL.
+    const response = await fetch(
+      `/api/sessions/${sessionId}/speech?prompt_id=${encodeURIComponent(data.prompt_id)}`,
+      { headers: operatorHeaders() },
+    );
+    if (!response.ok) throw new Error("The voice could not be fetched.");
+    if (playerUrl) URL.revokeObjectURL(playerUrl);
+    playerUrl = URL.createObjectURL(await response.blob());
+    player.src = playerUrl;
+    player.preload = "auto";
+    player.hidden = false;
+    player.load();
     await player.play();
     status.textContent = "The helper is speaking. You can answer when the voice finishes.";
   } catch {

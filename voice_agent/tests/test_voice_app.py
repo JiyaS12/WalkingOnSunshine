@@ -237,3 +237,56 @@ def test_voice_turns_persist_patient_id_transcript_and_survey_results(monkeypatc
     assert "patient: mild" in row["transcript"]
     assert row["survey_results"][0]["question_key"] == "hoos_stairs"
     assert row["survey_results"][0]["confirmed_value"] == "mild"
+
+
+def fake_mp3(text):
+    yield b"mp3"
+
+
+def test_speech_route_needs_the_operator_token_too(monkeypatch):
+    monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
+    monkeypatch.setattr(voice_app, "stream_speech_with_deepgram", fake_mp3)
+    with TestClient(create_app()) as client:
+        started = client.post("/api/sessions", headers=AUTH).json()
+        speech_url = f"/api/sessions/{started['session_id']}/speech?prompt_id={started['prompt_id']}"
+        assert client.get(speech_url).status_code == 401
+        assert client.get(speech_url, headers={"Authorization": "Bearer wrong-token-0123456789"}).status_code == 401
+        assert client.post(speech_url).status_code == 401
+        assert client.get(speech_url, headers=AUTH).status_code == 200
+
+
+def test_finished_sessions_release_their_engine_but_keep_the_closing_line(monkeypatch):
+    monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
+    monkeypatch.setattr(voice_app, "stream_speech_with_deepgram", fake_mp3)
+    monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: "stop")
+    with TestClient(create_app(), headers=AUTH) as client:
+        started = client.post("/api/sessions").json()
+        session_id = started["session_id"]
+        assert session_id in client.app.state.live_session_ids()
+        ended = client.post(f"/api/sessions/{session_id}/audio", files={"audio": ("a.webm", b"audio", "audio/webm")}).json()
+        assert ended["state"] == "stopped"
+        assert session_id not in client.app.state.live_session_ids()
+        # The browser still gets to play (and replay) the goodbye it was just handed.
+        goodbye = client.get(f"/api/sessions/{session_id}/speech?prompt_id={ended['prompt_id']}")
+        assert goodbye.status_code == 200
+        assert client.post(f"/api/sessions/{session_id}/audio", files={"audio": ("a.webm", b"audio", "audio/webm")}).status_code == 404
+
+
+def test_abandoned_sessions_expire_and_the_table_stays_bounded(monkeypatch):
+    monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
+    monkeypatch.setattr(voice_app, "stream_speech_with_deepgram", fake_mp3)
+    now = [0.0]
+    app = create_app(max_sessions=2, session_idle_seconds=60, clock=lambda: now[0])
+    with TestClient(app, headers=AUTH) as client:
+        first = client.post("/api/sessions").json()["session_id"]
+        now[0] = 61
+        second = client.post("/api/sessions").json()["session_id"]
+        assert app.state.session_ids() == [second]
+        assert first not in app.state.live_session_ids()
+        assert client.get(f"/api/sessions/{first}/speech?prompt_id=x").status_code == 404
+
+        third = client.post("/api/sessions").json()["session_id"]
+        fourth = client.post("/api/sessions").json()["session_id"]
+        assert app.state.session_ids() == [third, fourth]
+        assert set(app.state.live_session_ids()) == {third, fourth}

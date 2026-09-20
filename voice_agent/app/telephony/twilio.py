@@ -24,6 +24,9 @@ class PlacedCall:
     call_sid: str
     status: str
     to_number: str
+    # False when the account refused ``StatusCallback``: Twilio will not tell
+    # us about busy/no-answer, so the caller must time the call out itself.
+    status_callback: bool = True
 
 
 def require_e164(number: str) -> str:
@@ -133,6 +136,7 @@ def place_call(
     for index, fields in enumerate(attempts):
         try:
             payload = _post_call(account_sid, auth_token, fields, timeout)
+            accepted = fields
             break
         except TwilioError as exc:
             last_attempt = index == len(attempts) - 1
@@ -142,6 +146,7 @@ def place_call(
         call_sid=str(payload.get("sid", "")),
         status=str(payload.get("status", "unknown")),
         to_number=str(payload.get("to", to_number)),
+        status_callback=bool(status_fields) and accepted is attempts[0],
     )
 
 

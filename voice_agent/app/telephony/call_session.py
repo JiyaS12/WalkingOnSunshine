@@ -20,6 +20,20 @@ WALK_SECONDS = 15.0
 # phone bridge fires one every SILENCE_TIMEOUT_SECONDS, so this is minutes, not
 # the handful of reprompts an unanswered question gets.
 MAX_PAUSED_SILENCES = 12
+# How many times a caller may report the text has not arrived before we close.
+MAX_LINK_MISSING = 2
+
+_STOP_WORDS = re.compile(
+    r"\b(stop|hang up|goodbye|bye|no thanks|not now|later|another time|rather not|can'?t do)\b"
+)
+_MISSING_WORDS = re.compile(
+    r"\b(didn'?t|did not|haven'?t|have not|never|nothing|no text|no message|not yet|"
+    r"not (?:got|gotten|received|come|arrived|here)|isn'?t here|hasn'?t (?:come|arrived))\b"
+)
+_READY_WORDS = re.compile(
+    r"\b(ready|got it|open(?:ed)?|it'?s up|have it|see it|i'?m (?:set|on|there|in)|"
+    r"okay|ok|yes|yeah|yep|sure|go ahead|all set|loaded|done)\b"
+)
 
 Speaker = Callable[[str], Awaitable[None]]
 SmsSender = Callable[[str, str], Awaitable[None]]
@@ -63,6 +77,7 @@ class PhoneCallSession:
         self._last_prompt = ""
         self._silent_reprompts = 0
         self._paused_silences = 0
+        self._link_missing = 0
         self._awaiting_link = False
 
     @property
@@ -107,7 +122,7 @@ class PhoneCallSession:
         self._paused_silences = 0
         self.persistence.append_transcript(self.session_id, f"patient: {transcript}")
         if self._awaiting_link:
-            return await self._walk_the_caller_through_it()
+            return await self._handle_link_reply(transcript)
         # Interpretation may call a language model, which must not block the
         # event loop that keeps call audio flowing in both directions.
         prompt, answer = await asyncio.to_thread(self.engine.handle_response, transcript)
@@ -205,8 +220,36 @@ class PhoneCallSession:
         return False
 
     async def _complete_without_walkthrough(self) -> bool:
+        self._awaiting_link = False
         self.persistence.complete_call(self.session_id, self.engine.session.state)
         return True
+
+    async def _handle_link_reply(self, transcript: str) -> bool:
+        """Only an explicit "I have it" starts the camera steps.
+
+        The text having been accepted by the carrier says nothing about it
+        arriving, so "I never got it" is answered with patience and then an
+        honest closing, "stop" is honoured, and anything unclear gets the
+        reminder rather than a countdown the caller cannot follow.
+        """
+
+        intent = link_reply_intent(transcript)
+        if intent == "stop":
+            await self._say(self.voice.link_declined().text)
+            return await self._complete_without_walkthrough()
+        if intent == "missing":
+            self._link_missing += 1
+            if self._link_missing >= MAX_LINK_MISSING:
+                if self.handoff is not None:
+                    self.handoff.notes.append("Caller reported the gait link never arrived.")
+                await self._say(self.voice.link_not_received().text)
+                return await self._complete_without_walkthrough()
+            await self._say(self.voice.link_missing().text)
+            return False
+        if intent == "ready":
+            return await self._walk_the_caller_through_it()
+        await self._say(self.voice.link_reminder().text)
+        return False
 
     async def _walk_the_caller_through_it(self) -> bool:
         """Camera setup, then the timed walk, once the caller says they are set."""
@@ -223,6 +266,23 @@ class PhoneCallSession:
         self._last_prompt = text
         self.persistence.append_transcript(self.session_id, f"assistant: {text}")
         await self.speak(text)
+
+
+def link_reply_intent(transcript: str) -> str:
+    """Classify what a caller said while we wait for them to open the text.
+
+    Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. Stop and
+    missing are checked first so "no, I didn't get it" is not read as a yes.
+    """
+
+    text = transcript.lower()
+    if _STOP_WORDS.search(text):
+        return "stop"
+    if _MISSING_WORDS.search(text):
+        return "missing"
+    if _READY_WORDS.search(text):
+        return "ready"
+    return "unclear"
 
 
 def _spoken(prompt: str) -> str:

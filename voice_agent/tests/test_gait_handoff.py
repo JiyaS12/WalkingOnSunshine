@@ -61,3 +61,39 @@ def test_unconfigured_handoff_is_marked_unavailable_without_a_link(monkeypatch):
     assert handoff.link is None
     assert handoff.status == "unavailable"
     assert handoff.sms_sent is False
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://user:secret@walk.example.org",
+        "https://user@walk.example.org",
+        "https://walk.example.org/patient",
+        "https://walk.example.org/?next=x",
+        "https://walk.example.org/#frag",
+        "https://walk.example.org:notaport",
+        "https://walk.example.org:99999",
+        "https://walk .example.org",
+        "https://walk.example.org https://evil.example",
+        "ftp://walk.example.org",
+        "http://walk.example.org",
+    ],
+)
+def test_base_url_must_be_a_bare_origin(base_url):
+    with pytest.raises(GaitLinkUnavailable):
+        signed_patient_link("RGN-0417", "orthopedic", {**ENV, "GAIT_CHECKER_BASE_URL": base_url})
+
+
+@pytest.mark.parametrize(
+    ("base_url", "origin"),
+    [
+        ("https://walk.example.org", "https://walk.example.org"),
+        ("  https://walk.example.org/  ", "https://walk.example.org"),
+        ("https://Walk.Example.org:8443", "https://walk.example.org:8443"),
+        ("http://localhost:5173", "http://localhost:5173"),
+        ("http://[::1]:5173", "http://[::1]:5173"),
+    ],
+)
+def test_valid_origins_are_normalised_before_use(base_url, origin):
+    link = signed_patient_link("RGN-0417", "orthopedic", {**ENV, "GAIT_CHECKER_BASE_URL": base_url})
+    assert link.startswith(f"{origin}/patient/RGN-0417?token=")

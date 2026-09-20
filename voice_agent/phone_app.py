@@ -56,6 +56,9 @@ PARAGRAPH_PAUSE_SECONDS = 0.8
 ECHO_GRACE_SECONDS = 0.5
 MULAW_SILENCE = b"\xff" * 160
 CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
+# Twilio rings for at most 60s by default; a call still "dialing" well after
+# that was never answered and no status callback is coming to say so.
+DIALING_TIMEOUT_SECONDS = 90.0
 
 logger = logging.getLogger("phone_app")
 
@@ -96,6 +99,7 @@ class MediaStreamBridge:
         self._silence_task: asyncio.Task[None] | None = None
         self._mark_counter = 0
         self._last_mark: str | None = None
+        self._active_mark: str | None = None
         self._closed = False
         self._inbound_frames = 0
         self._turn_lock = asyncio.Lock()
@@ -217,6 +221,12 @@ class MediaStreamBridge:
         if name == self.hangup_mark:
             await self._close()
             return
+        if name != self._active_mark:
+            # Twilio still reports marks for audio we cleared after a barge-in;
+            # by then a newer prompt may be playing and this one says nothing.
+            logger.info("Stream %s ignoring stale mark %s", self.stream_sid, name)
+            return
+        self._active_mark = None
         self.bot_speaking = False
         self._interruptible = False
         if self.session is not None:
@@ -291,6 +301,7 @@ class MediaStreamBridge:
         self._interruptible = False
         self._mark_counter += 1
         self._last_mark = f"prompt-{self._mark_counter}"
+        self._active_mark = self._last_mark
         playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
         self._playback = playback
         # Waiting this way keeps a barge-in cancellation local to the playback.
@@ -356,6 +367,7 @@ class MediaStreamBridge:
 
         self.bot_speaking = False
         self._interruptible = False
+        self._active_mark = None
         playback, self._playback = self._playback, None
         if playback is not None:
             playback.cancel()
@@ -449,7 +461,9 @@ def speech_chunks(text: str, limit: int = SPEECH_CHUNK_CHARS) -> list[str]:
 
 
 def create_app(
-    settings: TelephonySettings | None = None, auth: OperatorAuth | None = None
+    settings: TelephonySettings | None = None,
+    auth: OperatorAuth | None = None,
+    dialing_timeout: float = DIALING_TIMEOUT_SECONDS,
 ) -> FastAPI:
     load_dotenv(ROOT / ".env")
     resolved = settings or load_settings()
@@ -460,6 +474,7 @@ def create_app(
     interpreter = build_answer_interpreter()
     sessions_by_call_sid: dict[str, str] = {}
     tickets = StreamTickets()
+    watchdogs: set[asyncio.Task[None]] = set()
 
     async def sms_sender(to_number: str, body: str) -> None:
         await send_sms_async(
@@ -522,12 +537,30 @@ def create_app(
         record.to_number = call.to_number
         record.carrier_status = call.status
         sessions_by_call_sid[call.call_sid] = session_id
+        if not call.status_callback:
+            logger.warning(
+                "Call %s placed without a status callback; timing it out locally", call.call_sid
+            )
+        watchdogs.add(asyncio.create_task(_time_out_dialing(session_id)))
         return {
             "call_sid": call.call_sid,
             "status": call.status,
             "to_number": call.to_number,
             "session_id": session_id,
         }
+
+    async def _time_out_dialing(session_id: str) -> None:
+        try:
+            await asyncio.sleep(dialing_timeout)
+        finally:
+            current = asyncio.current_task()
+            if current is not None:
+                watchdogs.discard(current)
+        record = persistence.calls.get(session_id)
+        if record is not None and record.status == "dialing" and record.final_status is None:
+            logger.info("Call %s never connected; marking it unanswered", record.call_sid)
+            record.status = "completed"
+            record.final_status = "no-answer"
 
     @app.get("/api/calls/{session_id}", dependencies=[Depends(operator)])
     def call_record(session_id: str) -> dict[str, object]:

@@ -192,6 +192,19 @@ LINK_SENT = (
     "you have it up."
 )
 LINK_REMINDER = "No rush at all. Just say ‘ready’ once you have the link open."
+LINK_MISSING = (
+    "No problem, it can take a minute to arrive. Tell me once it shows up, or say ‘stop’ "
+    "if you would rather leave it for today."
+)
+LINK_NOT_RECEIVED = (
+    "I’m sorry the text has not reached you. We will leave the walking check for another "
+    "time, and your care team will send the link separately. Thank you for your answers "
+    "today. Take care, and goodbye."
+)
+LINK_DECLINED = (
+    "Of course, we can leave it there. Thank you for your answers today. Take care, and "
+    "goodbye."
+)
 LINK_FAILED = (
     "I’m sorry, the text did not go through on my end, so we will leave the walking check "
     "for another time. Your care team will send you the link separately. Thank you for your "

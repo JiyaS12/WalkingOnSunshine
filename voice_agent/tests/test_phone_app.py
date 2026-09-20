@@ -540,3 +540,92 @@ def test_a_speech_failure_ends_the_call_instead_of_muting_it(client, monkeypatch
     record = client.app.state.persistence.calls["sess-9"]
     assert (record.status, record.final_status) == ("completed", "failed")
     assert bridge.bot_speaking is False
+
+
+def test_a_late_mark_for_a_cleared_prompt_does_not_end_the_next_one(client):
+    """After a barge-in Twilio still reports the old prompt; that says nothing now."""
+
+    websocket = StubWebSocket([])
+    bridge = phone_app.MediaStreamBridge(
+        websocket,
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        client.app.state.stream_tickets,
+        transcriber_factory=ScriptedTranscriber,
+    )
+    bridge.stream_sid = "MZ1"
+    engine = phone_app.SafeSurveyEngine(phone_app.InMemoryPatientRepository(), "RGN-0417")
+
+    async def speak(text: str) -> None:
+        return None
+
+    bridge.session = phone_app.PhoneCallSession(engine, speak, session_id="sess-mark")
+
+    async def scenario() -> None:
+        # prompt-1 was cut short by the caller, prompt-2 is playing now.
+        bridge.bot_speaking = True
+        bridge._active_mark = "prompt-1"
+        await bridge._stop_playback()
+        bridge.bot_speaking = True
+        bridge._active_mark = "prompt-2"
+        bridge.session.add_transcript("mild")
+
+        await bridge._on_mark({"event": "mark", "mark": {"name": "prompt-1"}})
+        assert bridge.bot_speaking is True
+        assert bridge.session.pending_transcript == "mild"
+
+        await bridge._on_mark({"event": "mark", "mark": {"name": "prompt-2"}})
+        assert bridge.bot_speaking is False
+        bridge._cancel_silence_timer()
+
+    asyncio.run(scenario())
+    assert any(message["event"] == "clear" for message in websocket.sent)
+
+
+def test_a_call_nobody_answers_ends_even_without_a_status_callback(monkeypatch):
+    async def fake_tts(text: str, api_key: str, model: str) -> bytes:
+        return b"\xff" * 320
+
+    async def trial_place_call(**kwargs):
+        return phone_app.twilio.PlacedCall(
+            call_sid="CA7", status="queued", to_number=kwargs["to_number"], status_callback=False
+        )
+
+    monkeypatch.setattr(phone_app, "synthesize_mulaw_async", fake_tts)
+    monkeypatch.setattr(phone_app.twilio, "place_call_async", trial_place_call)
+    app = phone_app.create_app(load_settings(ENV), auth=OperatorAuth(TOKEN), dialing_timeout=0.05)
+    with TestClient(app, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        session_id = client.post(
+            "/api/calls", json={"to_number": "+14155550123", "patient_code": "RGN-0417"}
+        ).json()["session_id"]
+        assert client.get(f"/api/calls/{session_id}").json()["status"] == "dialing"
+        deadline = time.time() + 5
+        while client.get(f"/api/calls/{session_id}").json()["status"] == "dialing":
+            assert time.time() < deadline, "the unanswered call never timed out"
+            time.sleep(0.02)
+        record = client.get(f"/api/calls/{session_id}").json()
+
+    assert record["status"] == "completed"
+    assert record["final_status"] == "no-answer"
+
+
+def test_the_dialing_watchdog_leaves_an_answered_call_alone(monkeypatch):
+    async def trial_place_call(**kwargs):
+        return phone_app.twilio.PlacedCall(
+            call_sid="CA8", status="queued", to_number=kwargs["to_number"], status_callback=False
+        )
+
+    monkeypatch.setattr(phone_app.twilio, "place_call_async", trial_place_call)
+    monkeypatch.setattr(phone_app, "_signature_ok", lambda *args, **kwargs: True)
+    app = phone_app.create_app(load_settings(ENV), auth=OperatorAuth(TOKEN), dialing_timeout=0.05)
+    with TestClient(app, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        session_id = client.post(
+            "/api/calls", json={"to_number": "+14155550123", "patient_code": "RGN-0417"}
+        ).json()["session_id"]
+        client.post("/twilio/status", data={"CallSid": "CA8", "CallStatus": "in-progress"})
+        time.sleep(0.2)
+        record = client.get(f"/api/calls/{session_id}").json()
+
+    assert record["status"] == "in_progress"
+    assert record["final_status"] is None
