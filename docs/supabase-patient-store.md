@@ -80,6 +80,30 @@ edit or delete controls, and this feature requires no additional migration.
 
 ## Failure behavior and limits
 
+### Unclear survey responses
+
+After three failed clarifications on one question, the helper leaves that item
+unanswered and moves to the next question. Repeated silence on an active survey
+question has the same effect. A rejected or unconfirmed proposal never becomes
+a confirmed answer. Explicit stop requests and the overall call time limit still
+end the call; a requested pause is not treated as an unanswered question.
+
+When the survey is submitted, `condition_survey.answers` contains only
+patient-authorized values. `unanswered_questions` records the question ID,
+reason and retry count without a normalized answer. `needs_human_review` is
+stored on the survey section and its call. The backend requires every question
+to be accounted for exactly once, as confirmed or unanswered, and derives the
+review flag if any item is unanswered. The survey transcript preserves recognized
+patient speech and helper prompts separately from structured answers.
+
+The doctor portal and Database tab show **Needs human review**, unanswered items,
+and an expandable transcript. Transcript text may contain recognition errors;
+it is evidence for clinician judgment, not an automatically confirmed response.
+Incomplete surveys receive no total score. The storage status remains `stored`
+so the existing consent-gated walking link can still proceed. These fields live
+in the existing Supabase JSON record; no SQL migration is required. Older calls
+without saved transcripts cannot be reconstructed by this change.
+
 Every write uses a transactional database function with expected revisions.
 Stale writes fail instead of overwriting a newer walk; a failed batch rolls
 back. Supabase outages or missing schema cause a visible failure, never a

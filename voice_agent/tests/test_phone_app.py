@@ -5,6 +5,7 @@ import base64
 import json
 import re
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -678,6 +679,36 @@ def test_a_speech_failure_ends_the_call_instead_of_muting_it(client, monkeypatch
     record = client.app.state.persistence.calls["sess-9"]
     assert (record.status, record.final_status) == ("completed", "failed")
     assert bridge.bot_speaking is False
+
+
+@pytest.mark.parametrize("pending_transcript", ["unclear", ""])
+def test_silence_timer_can_play_the_next_question_without_cancelling_itself(client, pending_transcript):
+    websocket = StubWebSocket([])
+    bridge = phone_app.MediaStreamBridge(
+        websocket, client.app.state.settings, phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence, client.app.state.stream_tickets,
+        transcriber_factory=ScriptedTranscriber,
+    )
+    bridge.stream_sid = "MZ-timer"
+    async def turn():
+        await bridge._speak("I will leave this answer blank. Next question.")
+        return False
+    bridge.session = SimpleNamespace(
+        pending_transcript=pending_transcript, finished=False,
+        flush_utterance=turn, handle_silence=turn,
+    )
+    async def scenario():
+        bridge._start_silence_timer(0)
+        timer = bridge._silence_task
+        try:
+            await asyncio.wait_for(asyncio.shield(timer), timeout=2)
+            assert not timer.cancelled()
+            assert bridge.bot_speaking
+            assert any(message["event"] == "mark" for message in websocket.sent)
+            assert not any(message["event"] == "clear" for message in websocket.sent)
+        finally:
+            bridge._cancel_silence_timer()
+    asyncio.run(scenario())
 
 
 def test_a_late_mark_for_a_cleared_prompt_does_not_end_the_next_one(client):

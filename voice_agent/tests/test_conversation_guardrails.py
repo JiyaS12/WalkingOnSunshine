@@ -216,6 +216,7 @@ def test_clarification_budget_cannot_be_reset_by_new_candidates_or_rejections():
     assert engine.session.answers == []
     assert engine.session.skipped == ["hoos_stairs"]
     assert engine.session.current_index == 1
+    assert engine.session.unanswered_questions[0]["clarification_attempts"] == 3
     assert engine.session.clarification_attempts == 0
     # A stale "yes" for the skipped question cannot resurrect it as an answer.
     engine.handle_response("yes")
@@ -246,7 +247,7 @@ def test_skipping_the_last_question_ends_the_survey():
     for _ in range(2):
         engine.handle_response("unclear")
     prompt, _ = engine.handle_response("unclear")
-    assert prompt == f"{speech.SKIP_QUESTION} {speech.COMPLETE}"
+    assert prompt == f"{speech.SKIP_QUESTION} {speech.COMPLETE_WITH_REVIEW}"
     assert engine.session.state == "complete"
     assert engine.session.skipped == ["hoos_sitting"]
     assert len(engine.session.answers) == 5

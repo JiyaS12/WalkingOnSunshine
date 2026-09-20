@@ -89,23 +89,59 @@ class ConfirmedAnswer(ContractModel):
         return utc_timestamp(value)
 
 
+class UnansweredQuestion(ContractModel):
+    question_id: Identifier
+    reason: Literal["clarification_limit", "no_response"]
+    clarification_attempts: int = Field(default=0, ge=0, le=10, strict=True)
+
+
+class SurveyTranscriptTurn(ContractModel):
+    speaker: Literal["assistant", "patient", "system"]
+    text: str = Field(min_length=1, max_length=24000)
+    question_id: Identifier | None = None
+    recorded_at: datetime
+
+    @field_validator("recorded_at")
+    @classmethod
+    def normalize_time(cls, value: datetime) -> datetime:
+        normalized = utc_timestamp(value)
+        assert normalized is not None
+        return normalized
+
+
 class ConditionSurvey(ContractModel):
     instrument: Literal["hoos_jr", "stroke_mobility"]
     version: Literal["1"]
     condition_category: ConditionCategory
     answers: list[ConfirmedAnswer] = Field(max_length=6)
     skipped: list[Identifier] = Field(default_factory=list, max_length=6)
+    unanswered_questions: list[UnansweredQuestion] = Field(default_factory=list, max_length=6)
+    needs_human_review: bool = Field(default=False, strict=True)
+    transcript: list[SurveyTranscriptTurn] = Field(default_factory=list, max_length=2000)
 
     @model_validator(mode="after")
     def complete_instrument(self) -> Self:
         expected = QUESTION_IDS[self.instrument]
         if INSTRUMENT_CONDITIONS[self.instrument] != self.condition_category:
             raise ValueError("instrument does not match condition_category")
-        covered = [answer.question_id for answer in self.answers] + list(self.skipped)
+        # Accept the earlier GitHub wire format while keeping one canonical
+        # set of missing questions. Never count these as confirmed answers.
+        if self.skipped and not self.unanswered_questions:
+            self.unanswered_questions = [UnansweredQuestion(question_id=q, reason="clarification_limit", clarification_attempts=3) for q in self.skipped]
+        missing_ids = [item.question_id for item in self.unanswered_questions]
+        if self.skipped and sorted(self.skipped) != sorted(missing_ids):
+            raise ValueError("skipped and unanswered_questions must agree")
+        covered = [answer.question_id for answer in self.answers] + [item.question_id for item in self.unanswered_questions]
         if sorted(covered) != sorted(expected):
-            raise ValueError("each known instrument question must appear exactly once")
-        self.skipped.sort(key=expected.index)
+            raise ValueError("each question must appear exactly once as confirmed or explicitly unanswered")
+        if any(turn.question_id is not None and turn.question_id not in expected for turn in self.transcript):
+            raise ValueError("transcript question does not belong to the instrument")
+        # Never permit a sender to hide missing answers by clearing its flag.
+        if self.unanswered_questions:
+            self.needs_human_review = True
         self.answers.sort(key=lambda answer: expected.index(answer.question_id))
+        self.unanswered_questions.sort(key=lambda item: expected.index(item.question_id))
+        self.skipped = [item.question_id for item in self.unanswered_questions]
         return self
 
 

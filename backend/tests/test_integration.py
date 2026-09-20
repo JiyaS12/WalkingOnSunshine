@@ -409,8 +409,9 @@ def test_skipped_questions_are_stored_without_a_value(rig):
     assert call_record["survey_skipped"] == ["hoos_stairs"]
     assert [a["question_id"] for a in stored["answers"]] == list(QUESTION_IDS["hoos_jr"][1:])
     summary = agent._template_synthesis(result.json()["patient"])
-    assert "Prototype raw item sum 5/20 over 5 of 6 items" in summary
-    assert "Unanswered after repeated clarification: hoos_stairs" in summary
+    assert "No total score" in summary
+    assert stored["needs_human_review"] is True
+    assert "Unanswered: hoos_stairs" in summary
 
     # A question can be either answered or skipped, never both or neither.
     for answers, skipped in (
@@ -529,6 +530,48 @@ def test_invalid_instruments_never_persist(rig, mutation):
         client.post("/api/submit-survey", json=body, headers=SERVICE).status_code == 422
     )
     assert len(store.get_patient(PID)["surveys"]) == count
+
+
+@pytest.mark.parametrize("missing_count", [1, 6])
+def test_partial_survey_stores_review_metadata_transcript_and_no_total(rig, missing_count):
+    client, _, _ = rig
+    call = start(client)
+    body = intake(call)
+    section = body["condition_survey"]
+    missing = section["answers"][:missing_count]
+    section["answers"] = section["answers"][missing_count:]
+    section["unanswered_questions"] = [{"question_id": item["question_id"], "reason": "clarification_limit", "clarification_attempts": 3} for item in missing]
+    section["needs_human_review"] = False  # Server must derive the flag regardless.
+    section["transcript"] = [{"speaker": "patient", "text": "I could not explain this clearly", "question_id": missing[0]["question_id"], "recorded_at": "2026-09-20T00:00:00Z"}]
+    response = client.post("/api/submit-survey", json=body, headers=SERVICE)
+    assert response.status_code == 200, response.text
+    saved = store.get_patient(PID)
+    actual = saved["surveys"][-1]["condition_survey"]
+    assert actual["needs_human_review"]
+    assert len(actual["answers"]) == 6 - missing_count
+    assert len(actual["unanswered_questions"]) == missing_count
+    assert all("normalized_value" not in item for item in actual["unanswered_questions"])
+    assert store.get_call(PID, call["call_id"])["needs_human_review"]
+    summary = agent._condition_summary(saved)
+    assert "human review" in summary and "No total score" in summary
+    assert "/24" not in summary
+    view = client.get("/api/clinician/database", params={"q": PID}).json()["patients"][0]
+    assert view["surveys"][-1]["condition_survey"]["transcript"] == actual["transcript"]
+    count = len(saved["surveys"])
+    assert client.post("/api/submit-survey", json=body, headers=SERVICE).status_code == 200
+    assert len(store.get_patient(PID)["surveys"]) == count
+    # An unresolved item cannot also carry a guessed value or overlap an answer.
+    section["unanswered_questions"][0]["normalized_value"] = "extreme"
+    assert client.post("/api/submit-survey", json=body, headers=SERVICE).status_code == 422
+
+
+def test_review_partition_rejects_duplicate_and_unknown_question_ids(rig):
+    client, _, _ = rig
+    call = start(client)
+    for question_id in ("hoos_stairs", "invented"):
+        body = intake(call)
+        body["condition_survey"]["unanswered_questions"] = [{"question_id": question_id, "reason": "no_response"}]
+        assert client.post("/api/submit-survey", json=body, headers=SERVICE).status_code == 422
 
 
 def test_survey_normalized_retry_and_conflict(rig):

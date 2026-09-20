@@ -31,7 +31,7 @@ and scoring only from confirmed values.
   separate confirmation for AI-inferred or relatively adjusted proposals.
 - Keep stored questions verbatim. Only short, validated non-clinical bridges
   may be model-written; the engine owns all option-bearing speech and state.
-- Stop after a bounded number of clarification retries and escalate for human review
+- After bounded clarification retries, leave the question unanswered, flag human review, and continue; explicit stop requests and overall call limits still end the call.
 - Keep external integrations behind failure-tolerant wrappers
 - Separate demo behavior from production behavior
 

@@ -221,11 +221,8 @@ class PhoneCallSession:
             await self._say(self.voice.link_reminder().text)
             return False
         if self._silent_reprompts > self.max_silent_reprompts:
-            self.engine.session.state = "escalated"
-            self.engine.session.needs_human_review = True
-            await self._say(
-                "I did not hear a response, so I will have a clinician follow up with you. Goodbye."
-            )
+            self._silent_reprompts = 0
+            await self._say(self.engine.skip_unresolved("no_response"))
             return await self._finish_if_done()
         await self._say(f"Sorry, I did not catch that. {self._last_prompt}")
         return False
@@ -242,8 +239,14 @@ class PhoneCallSession:
             return await self._send_gait_handoff()
         if not self.finished:
             return False
-        self.persistence.complete_call(self.session_id, self.engine.session.state)
+        self._record_completion()
         return True
+
+    def _record_completion(self) -> None:
+        outcome = self.engine.session.state
+        if outcome == "complete" and self.engine.session.needs_human_review:
+            outcome = "needs_review"
+        self.persistence.complete_call(self.session_id, outcome)
 
     async def _send_gait_handoff(self) -> bool:
         """Explain the walking video, text the link, then wait on the line for the
@@ -282,7 +285,7 @@ class PhoneCallSession:
 
     async def _complete_without_walkthrough(self) -> bool:
         self._awaiting_link = False
-        self.persistence.complete_call(self.session_id, self.engine.session.state)
+        self._record_completion()
         return True
 
     async def _handle_link_reply(self, transcript: str) -> bool:
@@ -320,7 +323,7 @@ class PhoneCallSession:
         await self._say(self.voice.walkthrough_countdown().text)
         await asyncio.sleep(self.walk_seconds + self.speech_lead_seconds)
         await self._say(self.voice.walkthrough_closing().text)
-        self.persistence.complete_call(self.session_id, self.engine.session.state)
+        self._record_completion()
         return True
 
     async def _say(self, text: str) -> None:

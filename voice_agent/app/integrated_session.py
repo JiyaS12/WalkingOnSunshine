@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import re
+from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
 
 from . import conversation_policy as policy
@@ -116,6 +117,15 @@ class IntegratedSession:
         self._deadline: asyncio.Task[None] | None = None
         self._speech_lock = asyncio.Lock()
         self.submission: dict[str, object] | None = None
+        self.survey_transcript: list[dict[str, object]] = []
+
+    def _record_survey_turn(self, speaker: str, text: str) -> None:
+        question = self.engine.session.current_question
+        self.survey_transcript.append({
+            "speaker": speaker, "text": text,
+            "question_id": question.id if question else None,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     @property
     def pending_transcript(self) -> str:
@@ -148,6 +158,8 @@ class IntegratedSession:
         self.discard_pending()
         if self.finished or not text:
             return self.finished
+        if self.stage == "condition":
+            self._record_survey_turn("patient", text)
         self._silences = 0
         command = control_intent(text)
         if command == "stop" or (self.stage in {"submitting", "walking"} and link_reply_intent(text) == "stop"):
@@ -172,12 +184,7 @@ class IntegratedSession:
                 await self.finish("stopped" if self.engine.session.state == "stopped" else "completed", _spoken(prompt), "needs_review")
                 return True
             if self.engine.session.state == "complete":
-                self.submission = self._payload()
-                self.stage = "consent"
-                intro = policy.INTEGRATED_GAIT_INTRO
-                if prompt.startswith(policy.SKIP_QUESTION):
-                    intro = f"{policy.SKIP_QUESTION} {intro}"
-                await self._say(intro)
+                await self._survey_finished(prompt)
             else:
                 await self._say(_spoken(prompt))
         elif self.stage == "consent":
@@ -210,6 +217,13 @@ class IntegratedSession:
                 await self._say(self._current_prompt())
         return self.finished
 
+    async def _survey_finished(self, prompt: str) -> None:
+        if self.engine.session.needs_human_review:
+            await self._say(_spoken(prompt))
+        self.submission = self._payload()
+        self.stage = "consent"
+        await self._say(policy.INTEGRATED_GAIT_INTRO)
+
     def _current_prompt(self) -> str:
         if self.stage == "condition":
             return _spoken(self.engine.start(greet=False))
@@ -234,6 +248,9 @@ class IntegratedSession:
             "condition_survey": {
                 "instrument": "hoos_jr" if self.call.condition_category == "orthopedic" else "stroke_mobility",
                 "version": "1", "condition_category": self.call.condition_category,
+                "needs_human_review": self.engine.session.needs_human_review,
+                "unanswered_questions": copy.deepcopy(self.engine.session.unanswered_questions),
+                "transcript": copy.deepcopy(self.survey_transcript),
                 "answers": [{
                     "question_id": a.question_id, "normalized_value": a.normalized_value,
                     "confirmed": a.confirmed, "acceptance_method": a.acceptance_method,
@@ -341,6 +358,14 @@ class IntegratedSession:
         if self._silences >= (12 if self.paused else 3):
             if self.stage == "consent":
                 await self._decline_link()
+            elif self.stage == "condition" and not self.paused:
+                self._record_survey_turn("system", "No speech recognized after three silence prompts.")
+                prompt = self.engine.skip_unresolved("no_response")
+                self._silences = 0
+                if self.engine.session.is_complete:
+                    await self._survey_finished(prompt)
+                else:
+                    await self._say(_spoken(prompt))
             else:
                 await self.finish("completed", policy.INTEGRATED_NO_RESPONSE, "needs_review")
         elif not self.paused:
@@ -373,4 +398,6 @@ class IntegratedSession:
             if (self.finished or self.paused) and not closing and not force:
                 return
             self._last_prompt = text
+            if self.stage == "condition":
+                self._record_survey_turn("assistant", text)
             await self.speak(text)

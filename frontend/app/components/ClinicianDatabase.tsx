@@ -469,6 +469,9 @@ export default function ClinicianDatabase({
                           <span className="block font-semibold">
                             {row.name || row.patient_id}
                           </span>
+                          {row.surveys.some((survey) => survey.condition_survey?.needs_human_review) && (
+                            <span className="mt-1 block rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-950">Needs human review</span>
+                          )}
                           <span className="font-mono text-xs text-muted-foreground">
                             {row.patient_id}
                           </span>

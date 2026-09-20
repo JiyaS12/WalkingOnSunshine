@@ -14,10 +14,12 @@ def project_record(record: dict) -> dict:
     result = pick(record, "patient_id name age cohort condition_category condition_source active_call_id")
     calls = []
     for call in record.get("calls", []):
-        item = pick(call, "call_id patient_id attempt_id condition_category call_status survey_status survey_id sms_status sms_attempt error_code created_at updated_at")
+        item = pick(call, "call_id patient_id attempt_id condition_category call_status survey_status survey_id sms_status sms_attempt error_code created_at updated_at needs_human_review")
         item["survey_skipped"] = store.survey_skipped(record, call)
         # Deliberately available only in this clinician-authenticated projection.
         item["destination_phone"] = call.get("_destination_phone")
+        if any(survey.get("call_id") == call["call_id"] and any((survey.get("condition_survey") or {}).get(key) for key in ("needs_human_review", "skipped", "unanswered_questions")) for survey in record.get("surveys", [])):
+            item["needs_human_review"] = True
         walking = call.get("walking") or {}
         item["walking"] = pick(walking, "status last_sequence last_event session_id")
         item["walking"]["events"] = [
@@ -34,7 +36,16 @@ def project_record(record: dict) -> dict:
         condition = survey.get("condition_survey")
         item["condition_survey"] = None
         if condition:
-            item["condition_survey"] = pick(condition, "instrument version condition_category skipped")
+            item["condition_survey"] = pick(condition, "instrument version condition_category needs_human_review skipped")
+            item["condition_survey"]["needs_human_review"] = bool(condition.get("needs_human_review") or condition.get("unanswered_questions") or condition.get("skipped"))
+            item["condition_survey"]["unanswered_questions"] = [
+                pick(question, "question_id reason clarification_attempts")
+                for question in condition.get("unanswered_questions", [])
+            ]
+            item["condition_survey"]["transcript"] = [
+                pick(turn, "speaker text question_id recorded_at")
+                for turn in condition.get("transcript", [])
+            ]
             item["condition_survey"]["answers"] = [
                 pick(answer, "question_id normalized_value confirmed acceptance_method confirmed_at confidence clarification_attempts")
                 for answer in condition.get("answers", [])

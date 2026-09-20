@@ -90,8 +90,15 @@ def _public_record(record: dict) -> dict:
     result.setdefault("calls", [])
     for survey in result.get("surveys", []):
         survey.pop("_fingerprint", None)
+        condition = survey.get("condition_survey") or {}
+        if condition.get("skipped") or condition.get("unanswered_questions"):
+            condition["needs_human_review"] = True
     if "calls" in result:
         result["calls"] = [_public_call(record, call) for call in result["calls"]]
+        review_calls = {survey.get("call_id") for survey in result.get("surveys", []) if (survey.get("condition_survey") or {}).get("needs_human_review")}
+        for call in result["calls"]:
+            if call["call_id"] in review_calls:
+                call["needs_human_review"] = True
     return result
 
 
@@ -300,6 +307,9 @@ def _append_survey_locked(patients: dict, survey: dict) -> dict:
         if call["survey_status"] in {"stopped", "needs_review"}:
             raise Conflict("survey is already terminal")
         call["survey_status"] = "stored"
+        # Storage success is separate from clinical completeness; walking may
+        # continue, but missing survey answers always remain visible for review.
+        call["needs_human_review"] = bool(survey["condition_survey"].get("unanswered_questions") or survey["condition_survey"].get("needs_human_review"))
         call["survey_id"] = survey["survey_id"]
         _touch(call)
     _commit(patients, pid, new_record)

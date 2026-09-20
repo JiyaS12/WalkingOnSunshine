@@ -162,7 +162,8 @@ class DatabaseConversationStore:
             self._upsert_response(session_id, answer, patient_text)
         engine_state = str(snapshot.get("state") or "")
         if engine_state in TERMINAL_STATUS:
-            self._complete(session_id, TERMINAL_STATUS[engine_state], engine_state)
+            outcome = "needs_review" if snapshot.get("needs_human_review") else TERMINAL_STATUS[engine_state]
+            self._complete(session_id, outcome, engine_state)
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
         params = {
@@ -286,7 +287,7 @@ class DatabaseConversationStore:
     def _complete(self, session_id: str, status: str, engine_state: str) -> None:
         state = self._sessions[session_id]
         instance_payload: dict[str, Any] = {"status": status}
-        call_payload: dict[str, Any] = {"status": "completed" if status == "completed" else "failed"}
+        call_payload: dict[str, Any] = {"status": "completed" if engine_state == "complete" else "failed"}
         if status in {"completed", "needs_review"}:
             ended = utc_now()
             if status == "completed":
@@ -294,13 +295,13 @@ class DatabaseConversationStore:
             call_payload["ended_at"] = ended
         self.rest.patch("survey_instances", {"id": f"eq.{state['survey_instance_id']}"}, instance_payload)
         self.rest.patch("call_sessions", {"id": f"eq.{state['call_session_id']}"}, call_payload)
-        if engine_state == "escalated":
+        if engine_state == "escalated" or status == "needs_review":
             self.rest.post("review_flags", {
                 "survey_instance_id": state["survey_instance_id"],
                 "call_session_id": state["call_session_id"],
-                "flag_type": "user_requested_human",
+                "flag_type": "ambiguous_response",
                 "severity": "medium",
-                "reason": "Survey engine escalated for human review after repeated clarification failures.",
+                "reason": "Survey requires human review; unresolved answers were not confirmed.",
             })
         action = {
             "complete": "survey_completed",
