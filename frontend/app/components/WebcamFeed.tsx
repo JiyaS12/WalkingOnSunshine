@@ -146,6 +146,9 @@ interface Props {
     frames?: JointFrame[]
   ) => void;
   onProcessingChange?: (busy: boolean) => void;
+  // fires when the input mode changes: whatever the previous mode measured
+  // no longer describes the active input, so the parent must drop it
+  onInputReset?: () => void;
 }
 
 type Mode = "live" | "upload";
@@ -153,6 +156,7 @@ type Mode = "live" | "upload";
 export default function WebcamFeed({
   onMetrics,
   onProcessingChange,
+  onInputReset,
 }: Props) {
   const [mode, setMode] = useState<Mode>("live");
   const [error, setError] = useState<string | null>(null);
@@ -204,6 +208,8 @@ export default function WebcamFeed({
   onMetricsRef.current = onMetrics;
   const onProcessingChangeRef = useRef(onProcessingChange);
   onProcessingChangeRef.current = onProcessingChange;
+  const onInputResetRef = useRef(onInputReset);
+  onInputResetRef.current = onInputReset;
   const setBusy = useCallback((v: boolean) => {
     setUploading(v);
     onProcessingChangeRef.current?.(v);
@@ -783,6 +789,8 @@ export default function WebcamFeed({
 
   useEffect(() => {
     stopAll();
+    // a retry must not leave the previous attempt's banner on screen
+    setError(null);
     setCameraBlocked(null);
     if (mode === "live") {
       void startLive();
@@ -791,6 +799,10 @@ export default function WebcamFeed({
     }
     return stopAll;
   }, [mode, retryNonce, startLive, stopAll]);
+
+  useEffect(() => {
+    onInputResetRef.current?.();
+  }, [mode]);
 
   const statusDot =
     trackingStatus === "tracking"

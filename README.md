@@ -3,15 +3,21 @@
 AI-assisted gait analysis for clinical mobility monitoring. A
 Python/FastAPI backend processes MediaPipe-style joint telemetry
 (meters, y vertical with larger y = higher) into clinical gait metrics
-(stride length, stance asymmetry, velocity degradation, cadence, knee
-flexion ROM, peak ankle speed, and a leg-length-normalized
-weighted-logistic fall risk score), stores patient records (surveys +
-gait sessions), and optionally generates LLM clinical summaries.
+(stride length, left/right asymmetry — the mean of stance and knee-ROM
+asymmetry — velocity degradation, cadence, knee flexion ROM, peak ankle
+speed, and a leg-length-normalized weighted-logistic fall risk score),
+stores patient records (surveys + gait sessions), and optionally
+generates LLM clinical summaries.
 
 Fall risk is normalized by estimated leg length (stride ratio ≈ 1.4–1.6× leg
 length and knee flexion ROM ≈ 50–65° for healthy gait score < 0.15); standing
 still is never flagged. With `leg_length_m` supplied by the frontend's
 60-frame calibration, live camera metrics use the user's own proportions.
+
+Landmarks that drop out mid-clip are linearly interpolated rather than
+discarded, so one missing frame cannot zero out a genuine high-risk score;
+`dropped_frame_pct` reports how much of a session was repaired, and a clip
+missing more than half its frames is rejected outright.
 
 ## Architecture
 
