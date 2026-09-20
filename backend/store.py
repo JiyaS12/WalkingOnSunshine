@@ -106,19 +106,30 @@ def _load() -> dict:
         loaded = json.loads(_cache_path.read_text())
         if not isinstance(loaded, dict) or not all(isinstance(record, dict) for record in loaded.values()):
             raise StoreUnavailable("invalid patient store")
-        _patients = loaded
     except FileNotFoundError:
-        _patients = {
-            p["patient_id"]: p for p in json.loads(SEED_PATH.read_text())
-        }
+        _patients = _read_seeds()
         try:
             _persist()
         except Exception:
             _patients = None
             raise
+        return _patients
     except (OSError, ValueError) as exc:
         raise StoreUnavailable("patient store could not be loaded") from exc
+    # Seed patients added after the cache was written are merged in memory on
+    # every load (the next mutation's _persist writes them through); existing
+    # records are never overwritten, and a missing seed file never blocks
+    # serving a valid cache.
+    try:
+        seeds = _read_seeds()
+    except Exception:
+        seeds = {}
+    _patients = {**{pid: p for pid, p in seeds.items() if pid not in loaded}, **loaded}
     return _patients
+
+
+def _read_seeds() -> dict[str, dict]:
+    return {p["patient_id"]: p for p in json.loads(SEED_PATH.read_text())}
 
 
 def _sort_by_recorded_at(items: list[dict]) -> None:

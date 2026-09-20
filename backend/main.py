@@ -533,6 +533,57 @@ def submit_survey(
         ) from exc
 
 
+class PatientLinkRequest(BaseModel):
+    patient_id: str = Field(
+        min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+    call_id: str | None = Field(default=None, max_length=64)
+
+
+def _issue_patient_link(pid: str, response: Response) -> dict:
+    """Sign a fresh magic link for an existing patient; never creates records."""
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        store.get_patient(pid)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="patient record not found"
+        ) from exc
+    try:
+        link = patient_access.create_patient_link(pid)
+    except patient_access.PatientAccessConfigurationError as exc:
+        raise HTTPException(
+            status_code=503, detail="patient access is not configured"
+        ) from exc
+    return {
+        "patient_id": pid,
+        "patient_url": link.url,
+        "patient_access_expires_at": link.expires_at.isoformat(),
+    }
+
+
+@app.post("/api/voice/patient-link", dependencies=[Depends(_check_survey_token)])
+def voice_patient_link(body: PatientLinkRequest, response: Response) -> dict:
+    """Issue the signed patient magic link for the voice agent to text.
+
+    The voice agent never holds the signing secret; it exchanges the shared
+    ingest token for the exact URL the patient page expects. Unknown patients
+    are rejected rather than created so the phone call can close honestly.
+    """
+
+    return _issue_patient_link(body.patient_id, response)
+
+
+@app.post(
+    "/api/patients/{pid}/link", dependencies=[Depends(require_clinician)]
+)
+def clinician_patient_link(pid: str, response: Response) -> dict:
+    """Let a signed-in clinician copy the same magic link the call texts."""
+
+    return _issue_patient_link(pid, response)
+
+
 @app.get("/api/patients", dependencies=[Depends(require_clinician)])
 def list_patients(q: str | None = None) -> list[dict]:
     return store.list_patients(q)

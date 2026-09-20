@@ -88,6 +88,37 @@ its confirmed payload and durably reserves SMS before dispatch; repeating
 ingestion never implies another SMS. Responses
 that contain the link or patient-scoped data include `Cache-Control: no-store`.
 
+## 1a. Re-issue a link for an existing patient (voice agent)
+
+The phone survey runs in a separate process that must not hold the signing
+secret. After the last answer it asks for the link with the same ingest token:
+
+```http
+POST /api/voice/patient-link HTTP/1.1
+Content-Type: application/json
+X-Survey-Token: <configured-ingest-token>
+
+{ "patient_id": "RGN-0417", "call_id": "CAxxxxxxxx" }
+```
+
+```json
+{
+  "patient_id": "RGN-0417",
+  "patient_url": "https://patient.example/patient/RGN-0417?token=<signed-token>",
+  "patient_access_expires_at": "2026-09-19T17:15:00+00:00"
+}
+```
+
+`404` when the patient record does not exist (the endpoint never creates
+records), `401` for a missing or wrong ingest token, `503` when signing is not
+configured. The caller texts `patient_url` verbatim and otherwise treats it like
+the `submit-survey` link above.
+
+A signed-in clinician can mint the same link from the doctor portal ("Copy
+patient link") via `POST /api/patients/{pid}/link`, authenticated by the
+clinician session cookie instead of the ingest token; the response shape and
+error codes are identical.
+
 ## 1b. Optional patient-session exchange
 
 The backend also supports exchanging a signed link for a short-lived HttpOnly

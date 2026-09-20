@@ -32,7 +32,7 @@ def test_guidance_describes_auto_capture_and_explicit_live_save(harness):
         session = await harness.session()
         await answer_survey(session)
         await session._background
-        assert any("Live capture starts automatically" in text for text in harness.spoken)
+        assert any("live capture starts automatically" in text for text in harness.spoken)
         assert any("choose Save this walk" in text for text in harness.spoken)
         assert not any("start capture on the page" in text for text in harness.spoken)
         assert "walking test is saved" in harness.spoken[-1]

@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from starlette.datastructures import FormData
 
 import phone_app
+from app import conversation_policy as policy
 from app.generic_intake import GenericIntake, parse_value
 from app.integrated_service import IntegratedService
 from app.integrated_session import IntegratedSession
@@ -372,7 +373,8 @@ def test_409_submission_conflict_produces_no_link_or_retry(harness):
         assert session.finished
         assert harness.provider.messages == 0
         assert len(harness.submissions) == 1
-        assert "could not confirm saving" in harness.spoken[-1]
+        assert "wasn’t able to save your answers" in harness.spoken[-1]
+        assert policy.INTEGRATED_LINK_SENT not in harness.spoken
     asyncio.run(scenario())
 
 
@@ -391,10 +393,117 @@ def test_readiness_capture_errors_and_save_require_backend_events(harness):
         await answer_survey(session)
         await session._background
         assert session.finished
-        assert any("permission was denied" in text for text in harness.spoken)
-        assert any("reports a problem" in text for text in harness.spoken)
+        assert any("couldn’t get to your camera" in text for text in harness.spoken)
+        assert any("ran into a problem" in text for text in harness.spoken)
         assert any("confirms calibration is ready" in text for text in harness.spoken)
         assert "backend confirms your walking test is saved" in harness.spoken[-1]
+        assert "help your care team follow your recovery" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def test_warm_gait_handoff_waits_for_ready_before_camera_setup(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        intro = next(text for text in harness.spoken if "Thank you for those answers" in text)
+        assert "short video of you walking" in intro
+        assert "text you a secure link" in intro
+        assert harness.spoken[-1] == policy.INTEGRATED_LINK_SENT
+        assert not any("Live Camera" in text for text in harness.spoken)
+        # Quiet while they look for the text gets a gentle nudge, never an escalation.
+        for _ in range(4):
+            await session.handle_silence()
+        assert harness.spoken.count(policy.INTEGRATED_LINK_REMINDER) == 2
+        assert not session.finished
+        await say(session, "I never got the text")
+        assert "can take a minute to arrive" in harness.spoken[-1]
+        assert not session.link_open
+        await say(session, "okay, I have it open")
+        assert session.link_open
+        assert "Live Camera" in harness.spoken[-1]
+        assert not any("One. Two. Three." in text for text in harness.spoken)
+        await say(session, "what do I do now")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_countdown_only_after_page_reports_calibration_ready(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await say(session, "ready")
+        assert "Live Camera" in harness.spoken[-1]
+        harness.walks = [
+            harness.view("ready", 3, "calibration_completed"),
+            harness.view("capturing", 4, "capture_started"),
+            harness.view("captured", 5, "capture_completed"),
+            harness.view("saved", 6, session_id="gait-session"),
+        ]
+        await session._background
+        spoken = harness.spoken
+        ready = next(i for i, text in enumerate(spoken) if "One. Two. Three." in text)
+        assert "fifteen seconds" in spoken[ready]
+        assert spoken.index(policy.INTEGRATED_CAMERA_SETUP) < ready
+        assert any("camera is recording" in text for text in spoken[ready:])
+        assert any("your walk was recorded" in text for text in spoken[ready:])
+        assert spoken[-1] == policy.INTEGRATED_SAVED
+    asyncio.run(scenario())
+
+
+def test_page_activity_counts_as_link_open_and_ready_reply_does_not_repeat_setup(harness):
+    async def scenario():
+        harness.walks = [harness.view("calibrating", 2, "calibration_started")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        await session.handle_silence()
+        assert policy.INTEGRATED_LINK_REMINDER not in harness.spoken
+        await say(session, "ready")
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_SEEN
+        await say(session, "I did not get the text")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_page_ready_event_opens_link_and_gives_camera_setup_once(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 2, "page_ready")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_OPENED
+        await session.handle_silence()
+        assert policy.INTEGRATED_LINK_REMINDER not in harness.spoken
+        await say(session, "ready")
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_SEEN
+        assert policy.INTEGRATED_CAMERA_SETUP not in harness.spoken
+        assert harness.spoken.count(policy.INTEGRATED_PAGE_OPENED) == 1
+        assert not any("One. Two. Three." in text for text in harness.spoken)
+        await say(session, "I did not get the text")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_camera_error_on_freshly_opened_page_is_not_hidden(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 3, "permission_denied")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        assert harness.spoken[-1] == policy.INTEGRATED_PERMISSION_DENIED
+        assert policy.INTEGRATED_PAGE_OPENED not in harness.spoken
+        await session.disconnect()
     asyncio.run(scenario())
 
 

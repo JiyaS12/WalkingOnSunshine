@@ -71,8 +71,15 @@ def test_config_reports_ready(client):
         "public_base_url": "https://tunnel.example.com",
         "llm_configured": False,
         "operator_token_configured": True,
+        "gait_link_configured": False,
         "ready": True,
     }
+
+
+def test_config_reports_the_gait_link_once_backend_is_set(client, monkeypatch):
+    monkeypatch.setenv("GAIT_BACKEND_URL", "http://localhost:8000")
+    monkeypatch.setenv("GAIT_BACKEND_TOKEN", "voice-service-token-1234")
+    assert client.get("/api/config").json()["gait_link_configured"] is True
 
 
 def test_operator_routes_require_the_token(client, monkeypatch):
