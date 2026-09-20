@@ -96,6 +96,7 @@ class PhoneCallSession:
         sms_sender: SmsSender | None = None,
         walk_seconds: float = WALK_SECONDS,
         max_paused_silences: int = MAX_PAUSED_SILENCES,
+        speech_lead_seconds: float = 0.0,
     ):
         self.engine = engine
         self.speak = speak
@@ -108,6 +109,8 @@ class PhoneCallSession:
         self.sms_sender = sms_sender
         self.walk_seconds = walk_seconds
         self.max_paused_silences = max_paused_silences
+        # How far ``speak`` may return ahead of the caller actually hearing it.
+        self.speech_lead_seconds = speech_lead_seconds
         self.handoff: GaitHandoff | None = None
         self._buffer: list[str] = []
         self._last_prompt = ""
@@ -302,7 +305,7 @@ class PhoneCallSession:
         self._awaiting_link = False
         await self._say(self.voice.walkthrough_guidance().text)
         await self._say(self.voice.walkthrough_countdown().text)
-        await asyncio.sleep(self.walk_seconds)
+        await asyncio.sleep(self.walk_seconds + self.speech_lead_seconds)
         await self._say(self.voice.walkthrough_closing().text)
         self.persistence.complete_call(self.session_id, self.engine.session.state)
         return True

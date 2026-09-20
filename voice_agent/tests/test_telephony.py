@@ -738,3 +738,25 @@ def test_trailing_off_spots_an_unfinished_thought(said, expected):
     session, _ = build_session()
     session.add_transcript(said)
     assert session.trailing_off() is expected
+
+
+def test_the_walk_timer_waits_out_the_buffered_countdown(monkeypatch):
+    """"Go ahead" is still in the phone's buffer when speak() returns."""
+
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr("app.telephony.call_session.asyncio.sleep", fake_sleep)
+    engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
+
+    async def speak(text: str) -> None:
+        return None
+
+    session = PhoneCallSession(
+        engine, speak, session_id="sess-walk", walk_seconds=15.0, speech_lead_seconds=2.0
+    )
+    session.persistence.start_call("sess-walk", "RGN-0417", "orthopedic")
+    asyncio.run(session._walk_the_caller_through_it())
+    assert slept == [17.0]

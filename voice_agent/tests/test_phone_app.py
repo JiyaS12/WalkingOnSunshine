@@ -709,3 +709,11 @@ def test_twilio_webhooks_fail_closed_without_signature_checking(monkeypatch):
         status = client.post("/twilio/status", data={"CallSid": "CA1", "CallStatus": "busy"})
     assert voice.status_code == 403
     assert status.status_code == 403
+
+
+def test_an_oversized_websocket_message_closes_the_stream(client):
+    with client.websocket_connect("/twilio/media") as websocket:
+        websocket.send_text(json.dumps({"event": "media", "media": {"payload": "A" * 100_000}}))
+        with pytest.raises(Exception):
+            websocket.receive_text()
+    assert client.app.state.persistence.calls == {}

@@ -58,6 +58,9 @@ GREETING_DELAY_SECONDS = 1.5
 PARAGRAPH_PAUSE_SECONDS = 0.8
 ECHO_GRACE_SECONDS = 0.5
 MULAW_SILENCE = b"\xff" * 160
+# Twilio media frames are 20ms of base64 mu-law plus framing; nothing legitimate
+# comes close to this.
+MAX_MESSAGE_CHARS = 16_384
 CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 # Twilio rings for at most 60s by default; a call still "dialing" well after
 # that was never answered and no status callback is coming to say so.
@@ -117,7 +120,11 @@ class MediaStreamBridge:
         await self.websocket.accept()
         try:
             while not self._closed:
-                message = json.loads(await self.websocket.receive_text())
+                raw = await self.websocket.receive_text()
+                if len(raw) > MAX_MESSAGE_CHARS:
+                    logger.warning("Stream %s sent an oversized message; closing", self.stream_sid)
+                    break
+                message = json.loads(raw)
                 event = message.get("event")
                 if event == "start":
                     await self._on_start(message)
@@ -179,6 +186,7 @@ class MediaStreamBridge:
             persistence=self.persistence,
             to_number=to_number,
             sms_sender=self.sms_sender,
+            speech_lead_seconds=PLAYBACK_LEAD_SECONDS,
         )
         self.transcriber = self.transcriber_factory(
             api_key=self.settings.deepgram_api_key or "",
