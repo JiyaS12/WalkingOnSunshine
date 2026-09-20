@@ -123,10 +123,7 @@ def extract_frames(
             min_tracking_confidence=0.5,
         ) as pose:
             while True:
-                try:
-                    ok, image = cap.read()
-                except cv2.error:
-                    break
+                ok, image = cap.read()
                 if not ok:
                     break
                 idx = read
