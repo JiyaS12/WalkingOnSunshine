@@ -91,6 +91,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   const [summaryCount, setSummaryCount] = useState(0);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoError, setDemoError] = useState<string | null>(null);
   const patientGenRef = useRef(0);
 
   const loadPatient = useCallback(async () => {
@@ -219,19 +221,32 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             We couldn&apos;t find this patient link.
           </p>
           <button
+            disabled={demoBusy}
             onClick={() => {
+              setDemoBusy(true);
+              setDemoError(null);
               void ensureDemoPatient(patientId)
                 .then(() => {
                   setNotFound(false);
                   setLoading(true);
                   void loadPatient();
                 })
-                .catch(() => undefined);
+                .catch((err) =>
+                  setDemoError(
+                    err instanceof ApiError
+                      ? err.message
+                      : "Could not reach the backend"
+                  )
+                )
+                .finally(() => setDemoBusy(false));
             }}
-            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10"
+            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10 disabled:opacity-50"
           >
-            Create demo profile for {patientId}
+            {demoBusy ? "Creating…" : `Create demo profile for ${patientId}`}
           </button>
+          {demoError && (
+            <p className="mt-2 text-xs text-rose-300">{demoError}</p>
+          )}
           <Link
             href="/"
             className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"

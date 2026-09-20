@@ -108,6 +108,47 @@ def get_patient(pid: str) -> dict:
         return json.loads(json.dumps(patients[pid]))  # deep copy
 
 
+class CreationDisabled(Exception):
+    """Raised when a new patient record would be created but creation is disabled."""
+
+
+def _append_survey_locked(patients: dict, survey: dict) -> dict:
+    """Mutate `patients` to append `survey`; caller must hold `_lock`.
+
+    Builds on a deep copy and persists; on persist failure the original
+    record is restored (or deleted if newly created) and the error
+    propagates.
+    """
+    pid = survey["patient_id"]
+    old_record = patients.get(pid)
+    created = old_record is None
+    if created:
+        new_record = {
+            "patient_id": pid,
+            "name": survey.get("patient_name") or pid,
+            "age": None,
+            "cohort": None,
+            "surveys": [],
+            "gait_sessions": [],
+        }
+    else:
+        new_record = json.loads(json.dumps(old_record))  # deep copy
+        if survey.get("patient_name"):
+            new_record["name"] = survey["patient_name"]
+    new_record["surveys"].append(survey)
+    _sort_by_recorded_at(new_record["surveys"])
+    patients[pid] = new_record
+    try:
+        _persist()
+    except Exception:
+        if created:
+            del patients[pid]
+        else:
+            patients[pid] = old_record
+        raise
+    return new_record
+
+
 def upsert_survey(survey: dict) -> dict:
     pid = survey["patient_id"]
     for field in _TEXT_FIELDS:
@@ -117,33 +158,30 @@ def upsert_survey(survey: dict) -> dict:
         survey["recorded_at"] = datetime.now(timezone.utc).isoformat()
     with _lock:
         patients = _load()
-        old_record = patients.get(pid)
-        created = old_record is None
-        if created:
-            new_record = {
-                "patient_id": pid,
-                "name": survey.get("patient_name") or pid,
-                "age": None,
-                "cohort": None,
-                "surveys": [],
-                "gait_sessions": [],
-            }
-        else:
-            new_record = json.loads(json.dumps(old_record))  # deep copy
-            if survey.get("patient_name"):
-                new_record["name"] = survey["patient_name"]
-        new_record["surveys"].append(survey)
-        _sort_by_recorded_at(new_record["surveys"])
-        patients[pid] = new_record
-        try:
-            _persist()
-        except Exception:
-            if created:
-                del patients[pid]
-            else:
-                patients[pid] = old_record
-            raise
-        return new_record
+        return _append_survey_locked(patients, survey)
+
+
+def ensure_patient(
+    pid: str, survey: dict, allow_create: bool = True
+) -> tuple[dict, bool]:
+    """Return (record, created). Under a single lock acquisition, returns the
+    existing record without mutating if `pid` exists; otherwise appends
+    `survey` exactly as `upsert_survey` would for a new patient.
+    """
+    survey = dict(survey)
+    survey["patient_id"] = pid
+    for field in _TEXT_FIELDS:
+        if isinstance(survey.get(field), str):
+            survey[field] = survey[field].strip()[:_MAX_TEXT]
+    if survey.get("recorded_at") is None:
+        survey["recorded_at"] = datetime.now(timezone.utc).isoformat()
+    with _lock:
+        patients = _load()
+        if pid in patients:
+            return json.loads(json.dumps(patients[pid])), False
+        if not allow_create:
+            raise CreationDisabled(pid)
+        return _append_survey_locked(patients, survey), True
 
 
 def add_session(pid: str, session: dict) -> dict:
