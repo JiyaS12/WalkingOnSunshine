@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VoiceAIThing phone survey</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Phone survey</h1>
+        <p id="config" class="config">Checking configuration&hellip;</p>
+      </header>
+
+      <section class="card">
+        <form id="dialer">
+          <label>
+            Patient phone number
+            <input id="to" type="tel" placeholder="+14155550123" required />
+            <small>E.164 format, including the country code.</small>
+          </label>
+          <label>
+            Operator token
+            <input id="token" type="password" autocomplete="current-password" required />
+            <small>The <code>OPERATOR_TOKEN</code> from the server's <code>.env</code>; kept only in this tab.</small>
+          </label>
+          <label>
+            Patient code
+            <select id="patient">
+              <option value="RGN-0417">RGN-0417 &mdash; orthopedic (HOOS JR)</option>
+              <option value="RGN-0500">RGN-0500 &mdash; stroke</option>
+            </select>
+          </label>
+          <button id="call" type="submit">Call patient</button>
+        </form>
+        <p id="error" class="error" hidden></p>
+      </section>
+
+      <section id="live" class="card" hidden>
+        <div class="call-head">
+          <span id="badge" class="badge">idle</span>
+          <dl class="meta">
+            <div><dt>Calling</dt><dd id="meta-to">&mdash;</dd></div>
+            <div><dt>Patient</dt><dd id="meta-patient">&mdash;</dd></div>
+            <div><dt>Call SID</dt><dd id="meta-sid">&mdash;</dd></div>
+          </dl>
+        </div>
+        <p id="status" class="status"></p>
+
+        <h2>Conversation</h2>
+        <ol id="transcript" class="transcript">
+          <li class="empty">Waiting for the patient to answer&hellip;</li>
+        </ol>
+
+        <h2>Confirmed answers <span id="answer-count" class="count">0</span></h2>
+        <table class="answers">
+          <thead>
+            <tr><th>Question</th><th>Answer</th></tr>
+          </thead>
+          <tbody id="answers">
+            <tr class="empty"><td colspan="2">No answers confirmed yet.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
