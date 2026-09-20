@@ -47,6 +47,7 @@ from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, TelephonySettings, load_settings
 from app.telephony.deepgram_stt import DeepgramTranscriber
 from app.telephony.deepgram_tts import frames, synthesize_mulaw_async
+from app.telephony.prompt_cache import SpeechCache, fixed_prompts
 from app.telephony.sms import send_sms_async
 from app.telephony.stream_tickets import StreamTickets
 from app.telephony.integrated_provider import TwilioProvider
@@ -78,6 +79,32 @@ DIALING_TIMEOUT_SECONDS = 90.0
 logger = logging.getLogger("phone_app")
 
 
+def prompt_cache_enabled(env: dict[str, str] | None = None) -> bool:
+    """Whether fixed prompts are pre-synthesized at startup (``PROMPT_CACHE=0`` disables)."""
+
+    source = env if env is not None else os.environ
+    return (source.get("PROMPT_CACHE") or "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def warm_prompt_cache(cache: SpeechCache, settings: TelephonySettings) -> asyncio.Task[int] | None:
+    """Start filling ``cache`` in the background; the server never waits on it."""
+
+    if not settings.deepgram_api_key or not prompt_cache_enabled():
+        return None
+
+    async def warm() -> int:
+        try:
+            return await cache.warm(
+                fixed_prompts(), settings.deepgram_api_key or "", settings.tts_model,
+                lambda text: [chunk for chunk, _ in speech_plan(text)],
+            )
+        except Exception:
+            logger.exception("Prompt cache warm-up failed; prompts will be synthesized live")
+            return 0
+
+    return asyncio.create_task(warm())
+
+
 def gait_link_configured() -> bool:
     try:
         gait_handoff.configured_backend_origin(os.environ)
@@ -106,8 +133,10 @@ class MediaStreamBridge:
         interpreter: AnswerInterpreter | None = None,
         sms_sender: Callable[[str, str], Awaitable[None]] | None = None,
         integrated_service: IntegratedService | None = None,
+        speech_cache: SpeechCache | None = None,
     ):
         self.websocket = websocket
+        self.speech_cache = speech_cache
         self.settings = settings
         self.repository = repository
         self.persistence = persistence
@@ -334,7 +363,7 @@ class MediaStreamBridge:
                     await self._stop_playback()
             elif event.kind == "transcript" and event.is_final:
                 self._cancel_silence_timer()
-                self.session.add_transcript(event.text)
+                self.session.add_transcript(event.text, event.confidence)
             elif event.kind == "utterance_end":
                 if self.session.trailing_off():
                     # Caller is still thinking; the watchdog flushes if not.
@@ -438,9 +467,17 @@ class MediaStreamBridge:
     async def _synthesize(self, text: str) -> bytes:
         if self.settings.deepgram_api_key is None:
             raise TelephonyConfigurationError("DEEPGRAM_API_KEY is not configured.")
-        return await synthesize_mulaw_async(
+        cache = self.speech_cache
+        if cache is not None:
+            cached = cache.get(self.settings.tts_model, text)
+            if cached is not None:
+                return cached
+        audio = await synthesize_mulaw_async(
             text, self.settings.deepgram_api_key, self.settings.tts_model
         )
+        if cache is not None:
+            cache.put(self.settings.tts_model, text, audio)
+        return audio
 
     async def _end_after_playback(self) -> None:
         self.hangup_mark = self._last_mark
@@ -535,7 +572,16 @@ def create_app(
     operator = auth or OperatorAuth.from_env()
     if integrated_service is not None or settings is None:
         return create_integrated_app(resolved, operator, integrated_service)
-    app = FastAPI(title="VoiceAIThing phone survey")
+    speech_cache = SpeechCache()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        warming = warm_prompt_cache(speech_cache, resolved)
+        yield
+        if warming is not None:
+            warming.cancel()
+
+    app = FastAPI(title="VoiceAIThing phone survey", lifespan=lifespan)
     repository = InMemoryPatientRepository()
     persistence = InMemoryPersistence()
     interpreter = build_answer_interpreter()
@@ -554,6 +600,7 @@ def create_app(
     app.state.settings = resolved
     app.state.persistence = persistence
     app.state.stream_tickets = tickets
+    app.state.speech_cache = speech_cache
 
     @app.get("/api/config")
     def config() -> dict[str, object]:
@@ -708,6 +755,7 @@ def create_app(
             tickets,
             interpreter=interpreter,
             sms_sender=sms_sender,
+            speech_cache=speech_cache,
         ).run()
 
     @app.get("/")
@@ -738,11 +786,16 @@ def create_integrated_app(
         except (ValueError, TelephonyConfigurationError):
             service = None
 
+    speech_cache = SpeechCache()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if service is not None:
             await service.recover()
+        warming = warm_prompt_cache(speech_cache, settings)
         yield
+        if warming is not None:
+            warming.cancel()
 
     app = FastAPI(title="Integrated phone survey", lifespan=lifespan)
     tickets = StreamTickets()
@@ -750,6 +803,7 @@ def create_integrated_app(
     app.state.integration = service
     app.state.settings = settings
     app.state.stream_tickets = tickets
+    app.state.speech_cache = speech_cache
 
     def configured() -> IntegratedService:
         if service is None:
@@ -848,7 +902,7 @@ def create_integrated_app(
             return
         await MediaStreamBridge(
             websocket, settings, InMemoryPatientRepository(), InMemoryPersistence(), tickets,
-            interpreter=interpreter, integrated_service=service,
+            interpreter=interpreter, integrated_service=service, speech_cache=speech_cache,
         ).run()
 
     return app

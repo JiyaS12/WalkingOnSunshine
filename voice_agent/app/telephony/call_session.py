@@ -75,6 +75,14 @@ Speaker = Callable[[str], Awaitable[None]]
 SmsSender = Callable[[str, str], Awaitable[None]]
 
 
+def lowest_confidence(current: float | None, new: float | None) -> float | None:
+    """The weakest recognizer confidence across the pieces of one utterance."""
+
+    if new is None:
+        return current
+    return new if current is None else min(current, new)
+
+
 class PhoneCallSession:
     """Drives one phone survey: spoken prompts out, recognized speech in.
 
@@ -113,6 +121,7 @@ class PhoneCallSession:
         self.speech_lead_seconds = speech_lead_seconds
         self.handoff: GaitHandoff | None = None
         self._buffer: list[str] = []
+        self._confidence: float | None = None
         self._last_prompt = ""
         self._silent_reprompts = 0
         self._paused_silences = 0
@@ -140,10 +149,11 @@ class PhoneCallSession:
         first_prompt = await asyncio.to_thread(self.engine.start)
         await self._say(_spoken(first_prompt))
 
-    def add_transcript(self, text: str) -> None:
+    def add_transcript(self, text: str, confidence: float | None = None) -> None:
         cleaned = text.strip()
         if cleaned:
             self._buffer.append(cleaned)
+            self._confidence = lowest_confidence(self._confidence, confidence)
 
     def trailing_off(self) -> bool:
         """Whether the caller paused mid-thought ("I'd say, like...")."""
@@ -154,12 +164,14 @@ class PhoneCallSession:
         """Forget speech recognized while we were still talking over the line."""
 
         self._buffer.clear()
+        self._confidence = None
 
     async def flush_utterance(self) -> bool:
         """Answer whatever the caller just said. Returns True when the call is over."""
 
         transcript = self.pending_transcript
-        self._buffer.clear()
+        confidence = self._confidence
+        self.discard_pending()
         if not transcript:
             return self.finished
         self._silent_reprompts = 0
@@ -169,7 +181,7 @@ class PhoneCallSession:
             return await self._handle_link_reply(transcript)
         # Interpretation may call a language model, which must not block the
         # event loop that keeps call audio flowing in both directions.
-        prompt, answer = await asyncio.to_thread(self.engine.handle_response, transcript)
+        prompt, answer = await asyncio.to_thread(self.engine.handle_response, transcript, confidence)
         if answer is not None and answer.confirmed:
             self.persistence.record_answer(
                 self.session_id,
