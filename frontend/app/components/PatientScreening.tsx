@@ -485,20 +485,20 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         </p>
       )}
       {reading?.source === "live" && (
-        <div className="flex items-center gap-2 rounded-2xl bg-muted p-3 shadow-pillow-inset">
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-muted p-3 shadow-pillow-inset">
           {reading.saved ? (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-foreground" />
           ) : (
             <Save className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
-          <span className="flex-1 text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 text-xs text-muted-foreground">
             {reading.saved ? "This walk is saved" : "Save this walk to your record"}
           </span>
           <button
             type="button"
             onClick={() => void saveSession(reading)}
             disabled={isSaving || reading.saved || !reading.metrics.gait_detected || Boolean(walkClosed) || Boolean(walkWaiting)}
-            className="rounded-full bg-pastel-sage px-3 py-1 text-xs font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep disabled:opacity-50"
+            className="min-h-11 w-full rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep disabled:opacity-50 sm:min-h-0 sm:w-auto sm:px-3 sm:py-1 sm:text-xs"
           >
             {isSaving ? "Saving…" : reading.saved ? "Saved" : "Save this walk"}
           </button>
@@ -507,7 +507,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
       {currentSaveMessage && (
         <div
           role={currentSaveMessage.kind === "error" ? "alert" : "status"}
-          className={`flex items-center justify-between gap-3 rounded-2xl px-3 py-2 text-xs text-foreground ${
+          className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl px-3 py-2 text-xs text-foreground ${
             currentSaveMessage.kind === "error" ? "bg-pastel-peach/70" : "bg-pastel-green"
           }`}
         >
@@ -517,7 +517,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               type="button"
               disabled={savingReadingId === currentSaveMessage.retry.id}
               onClick={() => void saveSession(currentSaveMessage.retry!)}
-              className="flex shrink-0 items-center gap-1 rounded-full bg-card px-2 py-1 font-medium shadow-pillow-sm disabled:opacity-50"
+              className="flex min-h-11 shrink-0 items-center gap-1 rounded-full bg-card px-3 py-1 font-medium shadow-pillow-sm disabled:opacity-50 sm:min-h-0 sm:px-2"
             >
               <RefreshCw className="h-3 w-3" />
               Retry save
@@ -534,25 +534,25 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   );
 
   return (
-    <main className="min-h-screen p-6 text-foreground">
-      <header className="mx-auto mb-8 flex max-w-3xl flex-wrap items-center justify-between gap-4">
+    <main className="min-h-screen p-3 text-foreground sm:p-6">
+      <header className="mx-auto mb-4 flex max-w-3xl flex-wrap items-center justify-between gap-3 sm:mb-8 sm:gap-4">
         <div className="flex items-center gap-3">
-          <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
+          <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-10 w-10 drop-shadow-sm sm:h-11 sm:w-11" />
           <div>
-            <h1 className="text-2xl font-bold">Sana</h1>
+            <h1 className="text-xl font-bold sm:text-2xl">Sana</h1>
             <p className="text-xs text-muted-foreground">Your secure walking assessment</p>
           </div>
         </div>
-        <span className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground">
-          <User className="h-3.5 w-3.5 text-muted-foreground" />
-          {patient.name ?? "Patient"}
+        <span className="flex max-w-full items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground">
+          <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{patient.name ?? "Patient"}</span>
         </span>
       </header>
 
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <div className="rounded-3xl bg-pastel-sage/60 p-5 shadow-pillow-sm">
-        <h2 className="text-xl font-medium text-foreground">Complete one walking test</h2>
-        <p className="mt-2 text-base leading-relaxed text-muted-foreground">
+      <div className="mx-auto flex max-w-3xl flex-col gap-4 sm:gap-6">
+      <div className="rounded-3xl bg-pastel-sage/60 p-4 shadow-pillow-sm sm:p-5">
+        <h2 className="text-lg font-medium text-foreground sm:text-xl">Complete one walking test</h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
           Keep your whole body in view and wait until the camera is ready. Walk across the screen only if it feels safe, then choose Save this walk.
           You can also upload a walking video. We’ll let you know when your walk has been saved.
         </p>
@@ -560,17 +560,19 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         {walking?.stopping && walking.view?.status !== "stopped" && <p className="mt-2 text-xs">Stop requested. Waiting for server confirmation.</p>}
         {walkWaiting && <p className="mt-2 text-xs">Your survey must finish before this walking assessment can begin.</p>}
         {walking?.warning && <p role="status" className="mt-2 text-xs text-foreground">{walking.warning}</p>}
-        {walking?.changed ? (
-          <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => setRetryNonce((value) => value + 1)}>Load current assessment</button>
-        ) : walking?.warning && (
-          <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => { void reporterRef.current?.verifyScope(); void reporterRef.current?.flush(); }}>Retry progress sync</button>
-        )}
-        {walking?.view && !walkClosed && !walkWaiting && (
-          <button className="ml-2 mt-2 rounded border px-3 py-1 text-xs" disabled={savingReadingId !== null}
-            onClick={() => {
-              if (window.confirm("Stop this assessment? It cannot be restarted without a new assessment from your care team.")) void reporterRef.current?.stop();
-            }}>Stop assessment</button>
-        )}
+        <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
+          {walking?.changed ? (
+            <button className="min-h-11 rounded-full border border-border bg-card px-4 text-sm text-foreground shadow-pillow-sm sm:min-h-0 sm:px-3 sm:py-1 sm:text-xs" onClick={() => setRetryNonce((value) => value + 1)}>Load current assessment</button>
+          ) : walking?.warning && (
+            <button className="min-h-11 rounded-full border border-border bg-card px-4 text-sm text-foreground shadow-pillow-sm sm:min-h-0 sm:px-3 sm:py-1 sm:text-xs" onClick={() => { void reporterRef.current?.verifyScope(); void reporterRef.current?.flush(); }}>Retry progress sync</button>
+          )}
+          {walking?.view && !walkClosed && !walkWaiting && (
+            <button className="min-h-11 rounded-full border border-border bg-card px-4 text-sm text-foreground shadow-pillow-sm disabled:opacity-50 sm:min-h-0 sm:px-3 sm:py-1 sm:text-xs" disabled={savingReadingId !== null}
+              onClick={() => {
+                if (window.confirm("Stop this assessment? It cannot be restarted without a new assessment from your care team.")) void reporterRef.current?.stop();
+              }}>Stop assessment</button>
+          )}
+        </div>
       </div>
 
       <section>
