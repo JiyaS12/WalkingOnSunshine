@@ -45,7 +45,9 @@ _CLAUSE_BREAK = re.compile(
 )
 # A clause about what happened earlier is background, not the caller's state.
 _HISTORICAL = re.compile(
-    r"\b(?:at first|before|earlier|initially|originally|the first time|was|wasn'?t|were|had)\b"
+    r"\b(?:at first|before|earlier|initially|originally|the first time|"
+    r"(?:was|wasn'?t|were|weren'?t|had|hadn'?t) (?:able to |it |the link |the page )?"
+    r"(?:open(?:ed|ing)?|up|loaded|loading|working|ready))\b"
 )
 # The text is in hand but nothing says it is open yet.
 _ARRIVED_WORDS = re.compile(
@@ -324,10 +326,10 @@ def link_reply_intent(transcript: str) -> str:
             intent = "missing"
         elif _NOT_READY.search(clause):
             intent = "negated"
-        elif _ARRIVED_WORDS.search(clause):
-            intent = "arrived"
         elif _READY_WORDS.search(clause):
             intent = "ready"
+        elif _ARRIVED_WORDS.search(clause):
+            intent = "arrived"
         elif _FILLER_CLAUSE.fullmatch(clause):
             intent = "agreed"
         else:
