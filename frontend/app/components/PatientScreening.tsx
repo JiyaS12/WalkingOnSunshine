@@ -358,7 +358,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           <WebcamFeed
             onMetrics={handleMetrics}
             onInputReset={handleInputReset}
-            beforeStats={
+            footer={
               (metrics && !metrics.gait_detected) ||
               (metricsSource === "live" && metrics) ||
               saveNote ? (

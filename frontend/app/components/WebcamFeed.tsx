@@ -23,15 +23,8 @@ import {
   JointFrame,
   VideoAnalysis,
 } from "../lib/api";
-import {
-  computeLiveGait,
-  legLengthFrom,
-  LiveGaitMetrics,
-} from "../lib/gait";
-import type {
-  NormalizedLandmark,
-  PoseResults,
-} from "../types/mediapipe";
+import { legLengthFrom } from "../lib/gait";
+import type { PoseResults } from "../types/mediapipe";
 
 // MediaPipe pose landmark indices -> backend joint names
 const LANDMARK_JOINTS: Record<number, keyof JointFrame> = {
@@ -175,8 +168,7 @@ interface Props {
   // fires when the input mode changes: whatever the previous mode measured
   // no longer describes the active input, so the parent must drop it
   onInputReset?: () => void;
-  // rendered between the video frame and the live joint tiles
-  beforeStats?: ReactNode;
+  footer?: ReactNode;
 }
 
 type Mode = "live" | "upload";
@@ -185,7 +177,7 @@ export default function WebcamFeed({
   onMetrics,
   onProcessingChange,
   onInputReset,
-  beforeStats,
+  footer,
 }: Props) {
   const [mode, setMode] = useState<Mode>("live");
   const [error, setError] = useState<string | null>(null);
@@ -195,7 +187,6 @@ export default function WebcamFeed({
   const [bodyOutOfFrame, setBodyOutOfFrame] = useState(false);
   const framingRef = useRef({ out: false, streak: 0 });
   const [retryNonce, setRetryNonce] = useState(0);
-  const [liveGait, setLiveGait] = useState<LiveGaitMetrics | null>(null);
   const [embedded, setEmbedded] = useState(false);
   const [legLengthM, setLegLengthM] = useState<number | null>(null);
   const [calibrationCount, setCalibrationCount] = useState(0);
@@ -224,10 +215,6 @@ export default function WebcamFeed({
   const timesRef = useRef<number[]>([]);
   const sendingRef = useRef(false);
   const generationRef = useRef(0);
-  const gaitEmaRef = useRef<LiveGaitMetrics | null>(null);
-  const lastGaitUpdateRef = useRef(0);
-  const prevWorldRef = useRef<NormalizedLandmark[] | null>(null);
-  const prevTimeRef = useRef(0);
   const calibrationRef = useRef<number[]>([]);
   const legLengthRef = useRef<number | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
@@ -286,15 +273,10 @@ export default function WebcamFeed({
     bufferRef.current = [];
     timesRef.current = [];
     sendingRef.current = false;
-    gaitEmaRef.current = null;
-    lastGaitUpdateRef.current = 0;
-    prevWorldRef.current = null;
-    prevTimeRef.current = 0;
     calibrationRef.current = [];
     legLengthRef.current = null;
     setLegLengthM(null);
     setCalibrationCount(0);
-    setLiveGait(null);
   }, [setBusy]);
 
   // live startup/inference failures stay in live mode: the blocked panel
@@ -378,13 +360,6 @@ export default function WebcamFeed({
       const world = results.poseWorldLandmarks;
       if (!world || world.length < 29) return;
 
-      const nowMs = performance.now();
-      const dt =
-        prevTimeRef.current > 0 ? (nowMs - prevTimeRef.current) / 1000 : 0;
-      const raw = computeLiveGait(world, prevWorldRef.current, dt);
-      prevWorldRef.current = world;
-      prevTimeRef.current = nowMs;
-
       // calibration: collect leg length over the first 60 world frames
       if (legLengthRef.current === null) {
         const len = legLengthFrom(world);
@@ -398,24 +373,6 @@ export default function WebcamFeed({
             legLengthRef.current = median;
             setLegLengthM(median);
           }
-        }
-      }
-
-      if (raw) {
-        const ema = gaitEmaRef.current;
-        const alpha = 0.2;
-        gaitEmaRef.current = ema
-          ? (Object.fromEntries(
-              Object.entries(raw).map(([k, v]) => [
-                k,
-                (ema as unknown as Record<string, number>)[k] +
-                  alpha * (v - (ema as unknown as Record<string, number>)[k]),
-              ])
-            ) as unknown as LiveGaitMetrics)
-          : raw;
-        if (nowMs - lastGaitUpdateRef.current >= 250) {
-          lastGaitUpdateRef.current = nowMs;
-          setLiveGait({ ...gaitEmaRef.current });
         }
       }
 
@@ -1096,48 +1053,7 @@ export default function WebcamFeed({
         </div>
       </div>
 
-      {beforeStats && <div className="mt-3">{beforeStats}</div>}
-
-      {mode === "live" && (
-        <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Knee flex L/R °
-            </p>
-            <p className="text-xl font-semibold text-foreground">
-              {liveGait
-                ? `${liveGait.leftKneeFlexion.toFixed(0)}/${liveGait.rightKneeFlexion.toFixed(0)}`
-                : "—"}
-            </p>
-          </div>
-          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Knee asym %
-            </p>
-            <p className="text-xl font-semibold text-foreground">
-              {liveGait ? liveGait.kneeAsymmetryPct.toFixed(1) : "—"}
-            </p>
-          </div>
-          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Stride angle °
-            </p>
-            <p className="text-xl font-semibold text-foreground">
-              {liveGait ? liveGait.strideAngleDeg.toFixed(1) : "—"}
-            </p>
-          </div>
-          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Ankle speed L/R m/s
-            </p>
-            <p className="text-xl font-semibold text-foreground">
-              {liveGait
-                ? `${liveGait.leftAnkleSpeed.toFixed(1)}/${liveGait.rightAnkleSpeed.toFixed(1)}`
-                : "—"}
-            </p>
-          </div>
-        </div>
-      )}
+      {footer && <div className="mt-3">{footer}</div>}
     </div>
   );
 }
