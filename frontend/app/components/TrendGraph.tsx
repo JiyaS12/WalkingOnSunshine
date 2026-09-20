@@ -23,7 +23,7 @@ interface Props {
 
 const SERIES = [
   { key: "asymmetry", label: "Asymmetry %", color: "var(--chart-1)", active: "bg-pastel-purple text-foreground" },
-  { key: "fallRisk", label: "Fall Risk ×100", color: "var(--chart-2)", active: "bg-pastel-bluedeep text-foreground" },
+  { key: "fallRisk", label: "Fall Risk ×100", color: "var(--chart-2)", active: "bg-pastel-sagedeep text-foreground" },
 ] as const;
 
 type SeriesKey = (typeof SERIES)[number]["key"];

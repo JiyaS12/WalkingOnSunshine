@@ -96,8 +96,8 @@ export default function Home() {
       </header>
 
       <div className="mx-auto max-w-xl">
-        <div className="overflow-hidden rounded-[1.75rem] bg-card shadow-pillow">
-          <div className="rounded-t-[1.75rem] bg-pastel-green px-6 py-3">
+        <div className="overflow-hidden rounded-[2.25rem] bg-card shadow-pillow">
+          <div className="rounded-t-[2.25rem] bg-gradient-to-r from-pastel-sage via-pastel-green to-pastel-peach/70 px-6 py-3">
             <h2 className="text-sm font-medium text-foreground">
               Patient screening
             </h2>
@@ -113,7 +113,7 @@ export default function Home() {
               void go("RGN-0417");
             }}
             disabled={creating}
-            className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border-0 bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+            className="mb-3 flex w-full items-center justify-center gap-2 rounded-full border-0 bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
             Load Demo Patient RGN-0417
@@ -131,7 +131,7 @@ export default function Home() {
             <button
               onClick={() => void go()}
               disabled={!idInput.trim() || creating}
-              className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
             >
               {creating ? "Opening…" : "Go"} <ArrowRight className="h-4 w-4" />
             </button>

@@ -271,7 +271,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                 )
                 .finally(() => setDemoBusy(false));
             }}
-            className="mt-4 block w-full rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+            className="mt-4 block w-full rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
           >
             {demoBusy ? "Creating…" : `Create demo profile for ${patientId}`}
           </button>
@@ -301,14 +301,14 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
   if (authRequired) {
     return (
       <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
-        <div className="w-full max-w-sm rounded-[1.75rem] bg-card p-6 text-center shadow-pillow">
+        <div className="w-full max-w-sm rounded-[2.25rem] bg-card p-6 text-center shadow-pillow">
           <p className="text-sm">
             Patient records are protected. Sign in as a clinician to open this
             screening.
           </p>
           <Link
             href={`/doctor?next=${encodeURIComponent(`/patient/${patientId}`)}`}
-            className="mt-4 inline-block rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-bluedeep"
+            className="mt-4 inline-block rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep"
           >
             Clinician sign-in
           </Link>
@@ -414,7 +414,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               <button
                 onClick={() => void saveSession("live")}
                 disabled={saving || !metrics.gait_detected}
-                className="rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+                className="rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
               >
                 {saving ? "Saving…" : "Save this walk"}
               </button>
@@ -446,7 +446,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             <button
               onClick={handleSummary}
               disabled={summaryLoading || !hasSessions}
-              className="flex items-center gap-2 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+              className="flex items-center gap-2 rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               {summaryLoading ? "Generating…" : "Generate Patient Summary"}
@@ -469,7 +469,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                     {summary.source}
                   </span>
                   {summary.cached && (
-                    <span className="rounded-full border-0 bg-pastel-blue px-2 py-0.5 uppercase text-foreground">
+                    <span className="rounded-full border-0 bg-pastel-sage px-2 py-0.5 uppercase text-foreground">
                       served from cache
                     </span>
                   )}

@@ -30,6 +30,14 @@ export default function RootLayout({
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+        >
+          <div className="absolute -left-40 -top-32 h-[32rem] w-[32rem] rounded-full bg-pastel-sage/45 blur-3xl" />
+          <div className="absolute -right-48 top-1/3 h-[28rem] w-[28rem] rounded-full bg-pastel-blue/40 blur-3xl" />
+          <div className="absolute -bottom-40 left-1/3 h-[26rem] w-[26rem] rounded-full bg-pastel-peach/40 blur-3xl" />
+        </div>
         {children}
       </body>
     </html>

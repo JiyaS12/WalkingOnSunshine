@@ -360,7 +360,7 @@ export default function DoctorPortal() {
   if (authState !== "signed-in") {
     return (
       <main className="flex min-h-screen items-center justify-center p-6 text-foreground">
-        <div className="w-full max-w-sm rounded-[1.75rem] border-0 bg-card p-6 shadow-pillow">
+        <div className="w-full max-w-sm rounded-[2.25rem] border-0 bg-card p-6 shadow-pillow">
           <div className="mb-5 flex items-center gap-3">
             <Image src="/sana-mark.png" alt="Sana" width={44} height={44} priority className="h-11 w-11 drop-shadow-sm" />
             <div>
@@ -382,7 +382,7 @@ export default function DoctorPortal() {
                 autoComplete="username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-blue"
+                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-sage"
               />
             </label>
             <label className="block text-xs text-muted-foreground">
@@ -392,7 +392,7 @@ export default function DoctorPortal() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-blue"
+                className="mt-1 w-full rounded-2xl border-0 bg-muted px-3 py-2 text-sm text-foreground shadow-pillow-inset outline-none focus:ring-2 focus:ring-pastel-sage"
               />
             </label>
             {authError && authState !== "expired" && (
@@ -403,7 +403,7 @@ export default function DoctorPortal() {
             <button
               type="submit"
               disabled={signingIn || !username || !password}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-pastel-blue px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-bluedeep disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-pastel-sage px-4 py-2 text-sm font-medium text-foreground shadow-pillow-sm hover:bg-pastel-sagedeep disabled:opacity-50"
             >
               {signingIn && <Loader2 className="h-4 w-4 animate-spin" />}
               {signingIn ? "Signing in…" : "Sign in"}
@@ -451,7 +451,7 @@ export default function DoctorPortal() {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="rounded-[1.75rem] border-0 bg-card p-5 shadow-pillow">
+        <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
           <div className="mb-3 flex items-center gap-2 rounded-2xl border-0 bg-muted px-2 py-1.5 shadow-pillow-inset">
             <Search className="h-4 w-4 text-muted-foreground" />
             <input
@@ -475,7 +475,7 @@ export default function DoctorPortal() {
                 onClick={() => setRiskFilter(k)}
                 className={`rounded-full border-0 px-2 py-0.5 ${
                   riskFilter === k
-                    ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                    ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                     : "bg-card text-muted-foreground shadow-pillow-inset"
                 }`}
               >
@@ -486,7 +486,7 @@ export default function DoctorPortal() {
               onClick={() => setDizzyOnly((v) => !v)}
               className={`rounded-full border-0 px-2 py-0.5 ${
                 dizzyOnly
-                  ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                  ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                   : "bg-card text-muted-foreground shadow-pillow-inset"
               }`}
             >
@@ -496,7 +496,7 @@ export default function DoctorPortal() {
               onClick={() => setFallsOnly((v) => !v)}
               className={`rounded-full border-0 px-2 py-0.5 ${
                 fallsOnly
-                  ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                  ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                   : "bg-card text-muted-foreground shadow-pillow-inset"
               }`}
             >
@@ -522,7 +522,7 @@ export default function DoctorPortal() {
                   onClick={() => setSelectedId(p.patient_id)}
                   className={`w-full rounded-2xl border-0 p-2.5 text-left transition-colors ${
                     selectedId === p.patient_id
-                      ? "bg-pastel-blue/60 shadow-pillow"
+                      ? "bg-pastel-sage/50 shadow-pillow"
                       : "bg-muted shadow-pillow-inset hover:bg-pastel-sand"
                   }`}
                 >
@@ -559,8 +559,8 @@ export default function DoctorPortal() {
           </ul>
         </div>
 
-        <div className="overflow-hidden rounded-[1.75rem] border-0 bg-card shadow-pillow">
-          <div className="rounded-t-[1.75rem] bg-pastel-green px-6 py-3">
+        <div className="overflow-hidden rounded-[2.25rem] border-0 bg-card shadow-pillow">
+          <div className="rounded-t-[2.25rem] bg-gradient-to-r from-pastel-sage via-pastel-green to-pastel-peach/70 px-6 py-3">
             <h2 className="text-sm font-medium text-foreground">
               Unified Clinical Synthesis Report
             </h2>
@@ -594,7 +594,7 @@ export default function DoctorPortal() {
             )}
             {lastSyncedAt && (
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-pastel-green" />
+                <span className="h-1.5 w-1.5 rounded-full bg-pastel-sagedeep" />
                 Live · updated{" "}
                 {lastSyncedAt.toLocaleTimeString("en-GB", { hour12: false })}
               </span>
@@ -731,7 +731,7 @@ export default function DoctorPortal() {
                 <button
                   onClick={runSynthesis}
                   disabled={synthLoading}
-                  className="flex items-center gap-2 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm disabled:opacity-50"
                 >
                   {synthLoading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -753,7 +753,7 @@ export default function DoctorPortal() {
                         {synthesis.source === "openai" ? "OpenAI" : "template"}
                       </span>
                       {synthesis.cached && (
-                        <span className="rounded-full border-0 bg-pastel-blue px-2 py-0.5 uppercase text-foreground">
+                        <span className="rounded-full border-0 bg-pastel-sage px-2 py-0.5 uppercase text-foreground">
                           cached
                         </span>
                       )}

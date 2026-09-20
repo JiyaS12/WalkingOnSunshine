@@ -847,7 +847,7 @@ export default function WebcamFeed({
 
   const statusDot =
     trackingStatus === "tracking"
-      ? "bg-pastel-green"
+      ? "bg-pastel-sagedeep"
       : trackingStatus === "no-person" || (trackingStatus === "idle" && cameraBlocked)
         ? "bg-pastel-peach"
         : "bg-slate-300";
@@ -881,7 +881,7 @@ export default function WebcamFeed({
         : "waiting for frames";
 
   return (
-    <div className="rounded-[1.75rem] border-0 bg-card p-5 shadow-pillow">
+    <div className="rounded-[2.25rem] border-0 bg-card p-5 shadow-pillow">
       <div className="mb-3">
         <div
           role="radiogroup"
@@ -898,7 +898,7 @@ export default function WebcamFeed({
             }}
             className={`flex items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "live"
-                ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                 : "bg-card text-muted-foreground shadow-pillow-inset"
             }`}
           >
@@ -914,7 +914,7 @@ export default function WebcamFeed({
             }}
             className={`flex items-center justify-center gap-2 rounded-2xl border-0 px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "upload"
-                ? "bg-pastel-blue text-foreground shadow-pillow-sm"
+                ? "bg-pastel-sage text-foreground shadow-pillow-sm"
                 : "bg-card text-muted-foreground shadow-pillow-inset"
             }`}
           >
@@ -936,7 +936,7 @@ export default function WebcamFeed({
         </div>
       )}
 
-      <div className="rounded-[2rem] bg-pastel-blue p-3 shadow-pillow">
+      <div className="rounded-[2.5rem] bg-gradient-to-br from-pastel-blue via-pastel-blue to-pastel-sage/70 p-3 shadow-pillow-lg">
         <div className="mb-2 flex items-center justify-between px-1 text-xs text-foreground">
           {mode === "live" ? (
             <>
@@ -989,7 +989,7 @@ export default function WebcamFeed({
                     onClick={() =>
                       window.open(window.location.href, "_blank", "noopener")
                     }
-                    className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
+                    className="flex items-center gap-1.5 rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     Open in new tab
@@ -1000,7 +1000,7 @@ export default function WebcamFeed({
                     setCameraBlocked(null);
                     setRetryNonce((n) => n + 1);
                   }}
-                  className="flex items-center gap-1.5 rounded-2xl bg-pastel-blue px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
+                  className="flex items-center gap-1.5 rounded-full bg-pastel-sage px-3 py-1.5 text-xs font-medium text-foreground shadow-pillow-sm"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Retry camera
@@ -1037,7 +1037,7 @@ export default function WebcamFeed({
               const f = e.dataTransfer.files?.[0];
               if (f) void analyzeVideo(f);
             }}
-            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground hover:border-pastel-blue hover:text-foreground"
+            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground hover:border-pastel-sage hover:text-foreground"
           >
             <Upload className="h-8 w-8" />
             <span className="text-sm">
@@ -1089,7 +1089,7 @@ export default function WebcamFeed({
 
       {mode === "live" && (
         <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Knee flex L/R °
             </p>
@@ -1099,7 +1099,7 @@ export default function WebcamFeed({
                 : "—"}
             </p>
           </div>
-          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Knee asym %
             </p>
@@ -1107,7 +1107,7 @@ export default function WebcamFeed({
               {liveGait ? liveGait.kneeAsymmetryPct.toFixed(1) : "—"}
             </p>
           </div>
-          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Stride angle °
             </p>
@@ -1115,7 +1115,7 @@ export default function WebcamFeed({
               {liveGait ? liveGait.strideAngleDeg.toFixed(1) : "—"}
             </p>
           </div>
-          <div className="rounded-2xl bg-pastel-blue p-4 shadow-pillow">
+          <div className="rounded-full bg-pastel-sage p-4 shadow-pillow">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Ankle speed L/R m/s
             </p>
