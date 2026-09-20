@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import agent
 import clinician_auth
+import gait_gen
 import patient_access
 import store
 from integration_models import QUESTION_IDS
@@ -802,6 +803,56 @@ def test_walking_event_dedupe_stale_and_terminal(rig):
         ).status_code
         == 409
     )
+
+
+@pytest.mark.parametrize("quality", ["missing_frames", "low_visibility", "short"])
+def test_rejected_recording_cannot_complete_attempt_but_retake_can(rig, quality):
+    client, _, _ = rig
+    call = start(client)
+    submit(client, call)
+    recording = gait_gen.recovered_session()
+    if quality == "missing_frames":
+        recording["capture_missing_pct"] = 20
+    elif quality == "low_visibility":
+        recording["visibility_frames"] = [
+            {joint: 0.2 for joint in frame} for frame in recording["frames"]
+        ]
+    else:
+        recording["frames"] = recording["frames"][:150]
+    analyzed = client.post("/api/process-frame", json=recording)
+    assert analyzed.status_code == 200
+    metrics = analyzed.json()
+    assert metrics["gait_detected"] is True
+    assert metrics["cv_fall_risk_status"] == "not_scorable"
+    payload = session(call)
+    payload["metrics"] = metrics
+    route = f"/api/patient-access/{PID}/sessions"
+    before = store.get_patient(PID)
+    response = client.post(route, json=payload, headers=patient_headers())
+    assert response.status_code == 422, response.text
+    assert store.get_patient(PID) == before
+    accepted = client.post("/api/process-frame", json=gait_gen.recovered_session()).json()
+    assert accepted["cv_fall_risk_status"] == "fallback"
+    payload["metrics"] = accepted
+    assert client.post(route, json=payload, headers=patient_headers()).status_code == 200
+    walking = store.get_call(PID, call["call_id"])["walking"]
+    assert walking["status"] == "saved"
+    assert walking["session_id"] is not None
+
+
+@pytest.mark.parametrize("status", ["scored", "fallback"])
+def test_correlated_save_requires_an_index_for_scored_results(rig, status):
+    client, _, _ = rig
+    call = start(client)
+    submit(client, call)
+    payload = session(call)
+    payload["metrics"].update(cv_fall_risk_status=status, cv_fall_risk_index=None)
+    before = store.get_patient(PID)
+    route = f"/api/patient-access/{PID}/sessions"
+    assert client.post(route, json=payload, headers=patient_headers()).status_code == 422
+    assert store.get_patient(PID) == before
+    payload["metrics"]["cv_fall_risk_index"] = 21
+    assert client.post(route, json=payload, headers=patient_headers()).status_code == 200
 
 
 def test_session_requires_detected_gait_and_atomic_persistence(rig):

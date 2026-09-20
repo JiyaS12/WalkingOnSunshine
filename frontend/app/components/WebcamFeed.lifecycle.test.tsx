@@ -48,6 +48,60 @@ beforeEach(() => {
 afterEach(() => { cleanup(); delete window.Pose; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("real webcam lifecycle wiring", () => {
+  it("keeps a rejected guided trial recoverable and completes only its valid retake", async () => {
+    const rejected = { ...metrics, cv_fall_risk_status: "not_scorable" as const, cv_fall_risk_index: null };
+    const accepted = { ...metrics, cv_fall_risk_status: "fallback" as const, cv_fall_risk_index: 21 };
+    vi.mocked(processFrames).mockResolvedValueOnce(rejected).mockResolvedValueOnce(accepted);
+    const lifecycle = vi.fn();
+    const onMetrics = vi.fn();
+    render(<WebcamFeed onMetrics={onMetrics} onLifecycle={lifecycle} />);
+    await settle();
+    Object.defineProperty(document.querySelector("video"), "readyState", { value: 4 });
+    const landmarks = Array.from({ length: 33 }, (_, i) => ({
+      x: i % 2 ? 0.1 : -0.1, y: i >= 27 ? 1 : i >= 25 ? 0.5 : 0, z: 0,
+    }));
+    cameraResult = {
+      poseWorldLandmarks: landmarks,
+      poseLandmarks: landmarks.map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 })),
+    };
+    act(() => { for (let i = 0; i < 60; i++) result(cameraResult!); });
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle).toHaveBeenCalledWith("recoverable_error", "tracking_lost");
+    expect(lifecycle).not.toHaveBeenCalledWith("capture_completed", undefined);
+    expect(onMetrics).toHaveBeenCalledWith(rejected, "live", expect.any(Array));
+    expect(screen.getByText(/retake/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start 10-second assessment" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle.mock.calls.filter(([event]) => event === "capture_started")).toHaveLength(2);
+    expect(lifecycle.mock.calls.filter(([event]) => event === "capture_completed")).toHaveLength(1);
+    expect(onMetrics).toHaveBeenLastCalledWith(accepted, "live", expect.any(Array));
+  });
+
+  it("does not complete a quality-rejected upload and accepts a replacement", async () => {
+    const rejected = { ...metrics, cv_fall_risk_status: "not_scorable" as const, cv_fall_risk_index: null };
+    const accepted = { ...metrics, cv_fall_risk_status: "scored" as const, cv_fall_risk_index: 42 };
+    const analysis = { frames: [], fps: 30, frames_processed: 300, frames_total: 300, filename: "walk.mp4" };
+    vi.mocked(processVideo).mockResolvedValueOnce({ ...analysis, metrics: rejected })
+      .mockResolvedValueOnce({ ...analysis, metrics: accepted });
+    const lifecycle = vi.fn();
+    const onMetrics = vi.fn();
+    const view = render(<WebcamFeed onMetrics={onMetrics} onLifecycle={lifecycle} />);
+    await settle();
+    fireEvent.click(screen.getByRole("radio", { name: "Upload Video" }));
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await act(async () => fireEvent.change(input, { target: { files: [new File(["fake"], "walk.mp4", { type: "video/mp4" })] } }));
+    expect(lifecycle.mock.calls.map(([event]) => event)).toEqual(["capture_started", "recoverable_error"]);
+    expect(onMetrics).toHaveBeenLastCalledWith(rejected, "upload", []);
+    expect(screen.getByText(/retake/i)).toBeInTheDocument();
+    await act(async () => fireEvent.change(input, { target: { files: [new File(["new"], "retake.mp4", { type: "video/mp4" })] } }));
+    expect(lifecycle.mock.calls.map(([event]) => event)).toEqual([
+      "capture_started", "recoverable_error", "capture_started", "capture_completed",
+    ]);
+    expect(onMetrics).toHaveBeenLastCalledWith(accepted, "upload", []);
+  });
+
   it("waits for observed landmarks and calibration before reporting ready/capture, and ignores late callbacks after pause", async () => {
     const lifecycle = vi.fn();
     const onMetrics = vi.fn();

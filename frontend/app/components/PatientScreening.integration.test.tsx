@@ -39,6 +39,40 @@ afterEach(() => {
 });
 
 describe("walking lifecycle integration", () => {
+  it.each(["live", "upload"] as const)("keeps a rejected %s assessment open until a scorable retake is saved", async (source) => {
+    render(<PatientScreening patientId="patient-1" />);
+    await screen.findByTestId("capture");
+    act(() => {
+      harness.props?.onLifecycle?.("capture_started");
+      harness.props?.onLifecycle?.("recoverable_error", "tracking_lost");
+      harness.props?.onMetrics({
+        ...metrics, cv_fall_risk_status: "not_scorable", cv_fall_risk_index: null,
+        cv_fall_risk_warnings: ["more than 10% of frames required landmark repair"],
+      }, source, []);
+    });
+    if (source === "live") {
+      const save = screen.getByRole("button", { name: "Save this walk" });
+      expect(save).toBeDisabled();
+      fireEvent.click(save);
+    }
+    expect(addPatientAccessSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId("capture")).toBeInTheDocument();
+    expect(screen.getByText("Retake needed")).toBeInTheDocument();
+    expect(screen.queryByText("Walk saved successfully.")).not.toBeInTheDocument();
+    const accepted = { ...metrics, cv_fall_risk_status: "fallback" as const, cv_fall_risk_index: 21 };
+    act(() => {
+      harness.props?.onInputReset?.();
+      harness.props?.onLifecycle?.("capture_started");
+      harness.props?.onLifecycle?.("capture_completed");
+      harness.props?.onMetrics(accepted, source, []);
+    });
+    if (source === "live") fireEvent.click(screen.getByRole("button", { name: "Save this walk" }));
+    await screen.findByText("Walk saved successfully.");
+    expect(addPatientAccessSession).toHaveBeenCalledOnce();
+    expect(vi.mocked(addPatientAccessSession).mock.calls[0][2].metrics).toEqual(accepted);
+    expect(screen.getByText(/Walking status: Saved to your care team/)).toBeInTheDocument();
+  });
+
   it.each(["live", "upload"] as const)("correlates %s capture and only confirms completion after session persistence", async (source) => {
     const saved = deferred<PatientAccessRecord>();
     vi.mocked(addPatientAccessSession).mockReturnValue(saved.promise);

@@ -24,7 +24,7 @@ import {
   VisibilityFrame,
   VideoAnalysis,
 } from "../lib/api";
-import { legLengthFrom } from "../lib/gait";
+import { isScorableWalk, legLengthFrom } from "../lib/gait";
 import { prepareTrial } from "../lib/trial";
 import type { PoseResults } from "../types/mediapipe";
 import type { WalkError, WalkEventName } from "../lib/integration";
@@ -693,8 +693,11 @@ export default function WebcamFeed({
         undefined, controller.signal, trial.missingPct
       );
       if (gen !== generationRef.current || controller.signal.aborted) return;
-      if (metrics.gait_detected) reportOnce("capture_completed");
-      else reportOnce("recoverable_error", "tracking_lost");
+      if (isScorableWalk(metrics)) reportOnce("capture_completed");
+      else {
+        reportOnce("recoverable_error", "tracking_lost");
+        setError("Retake needed — record sufficient walking with your full body visible.");
+      }
       onMetricsRef.current(metrics, "live", trial.frames);
       setLastSyncAt(new Date());
     } catch (err) {
@@ -844,7 +847,7 @@ export default function WebcamFeed({
         if (canvas && ctx) {
           playFrames(canvas, ctx, analysis.frames, analysis.fps);
         }
-        if (analysis.metrics.gait_detected) {
+        if (isScorableWalk(analysis.metrics)) {
           lifecycleRef.current?.("capture_completed");
           setUploadCaption(
             `Analyzed ${analysis.filename} · ${analysis.frames_processed} frames · fall risk ${analysis.metrics.fall_risk_score.toFixed(2)}`
@@ -852,7 +855,9 @@ export default function WebcamFeed({
         } else {
           lifecycleRef.current?.("recoverable_error", "tracking_lost");
           setUploadCaption(
-            `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
+            analysis.metrics.gait_detected
+              ? `Retake needed for ${analysis.filename} — upload a clearer clip with sufficient walking`
+              : `No walking detected in ${analysis.filename} — upload a clip of the patient walking`
           );
         }
         onMetricsRef.current(

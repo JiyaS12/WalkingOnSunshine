@@ -250,6 +250,15 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
     assert main.post(session_path, headers=bearer, json={
         **save, "attempt_id": "wrong-attempt",
     }).status_code == 409
+    assert metrics["cv_fall_risk_status"] == "not_scorable"
+    assert main.post(session_path, headers=bearer, json=save).status_code == 422
+    assert ok(main.get(walk_path, headers=bearer))["walking"] == stale["walking"]
+    metrics = ok(main.post("/api/process-frame", json={
+        "frames": frames["frames"], "fps": frames["fps"],
+    }))
+    assert metrics["cv_fall_risk_status"] == "fallback"
+    assert 1 <= metrics["cv_fall_risk_index"] <= 100
+    save["metrics"] = metrics
     saved = ok(main.post(session_path, headers=bearer, json=save))["gait_sessions"][0]
     assert ok(main.post(session_path, headers=bearer, json=save))["gait_sessions"][0]["session_id"] == saved["session_id"]
     assert main.post(session_path, headers=bearer, json={

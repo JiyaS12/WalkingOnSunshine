@@ -101,6 +101,18 @@ afterEach(() => {
 });
 
 describe("signed patient screening", () => {
+  it.each(["live", "upload"] as const)("excludes a rejected %s trial from saving and the trend", async (source) => {
+    render(<PatientScreening patientId="RGN-0417" />);
+    await screen.findByText("Demo Patient");
+    act(() => webcamProps().onMetrics({
+      ...walkingMetrics, cv_fall_risk_status: "not_scorable", cv_fall_risk_index: null,
+    }, source, []));
+    expect(screen.getByTestId("trend-graph")).toBeEmptyDOMElement();
+    expect(screen.getByText("Retake needed")).toBeInTheDocument();
+    expect(addPatientAccessSession).not.toHaveBeenCalled();
+    if (source === "live") expect(screen.getByRole("button", { name: "Save this walk" })).toBeDisabled();
+  });
+
   it("preserves historical metrics without experimental fields", async () => {
     render(<PatientScreening patientId="RGN-0417" />);
     await screen.findByText("Demo Patient");
