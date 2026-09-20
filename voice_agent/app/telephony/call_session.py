@@ -46,7 +46,7 @@ _CLAUSE_BREAK = re.compile(
 # A clause about what happened earlier is background, not the caller's state.
 _HISTORICAL = re.compile(
     r"\b(?:at first|before|earlier|initially|originally|the first time|"
-    r"(?:was|wasn'?t|were|weren'?t|had|hadn'?t) (?:able to |it |the link |the page )?"
+    r"(?:was|wasn'?t|were|weren'?t|had|hadn'?t)(?: \w+){0,3}? "
     r"(?:open(?:ed|ing)?|up|loaded|loading|working|ready))\b"
 )
 # The text is in hand but nothing says it is open yet.
@@ -313,7 +313,8 @@ def link_reply_intent(transcript: str) -> str:
     and bare agreement ("yes", "okay") only counts as a yes when nothing else
     was said. Within a clause, missing and negated readiness beat ready words,
     so "no, I didn't get it" is not a yes, and "it arrived" is not "it is
-    open", so it earns the reminder rather than the countdown.
+    open", so it earns the reminder rather than the countdown. A reply that
+    says both yes and no about right now is unclear, whatever the order.
     """
 
     text = transcript.lower()
@@ -335,6 +336,10 @@ def link_reply_intent(transcript: str) -> str:
         else:
             continue
         (background if _HISTORICAL.search(clause) else current).append(intent)
+    if "ready" in current and ({"missing", "negated"} & set(current)):
+        # The caller has said both yes and no about right now; a reminder
+        # costs a few seconds, a countdown without the page costs the check.
+        return "unclear"
     decisive = [i for i in current if i != "agreed"] or [i for i in background if i != "agreed"]
     if decisive:
         return decisive[-1] if decisive[-1] in {"missing", "ready"} else "unclear"
