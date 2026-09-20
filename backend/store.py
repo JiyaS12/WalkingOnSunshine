@@ -289,6 +289,7 @@ def _append_survey_locked(patients: dict, survey: dict) -> dict:
             raise Conflict("survey is already terminal")
         call["survey_status"] = "stored"
         call["survey_id"] = survey["survey_id"]
+        call["survey_skipped"] = list(survey["condition_survey"].get("skipped", []))
         _touch(call)
     _commit(patients, pid, new_record)
     return _public_record(new_record)
@@ -443,7 +444,7 @@ def reserve_call(pid: str, request_id: str, category: str | None, fingerprint: s
             "call_id": str(uuid4()), "patient_id": pid, "request_id": request_id,
             "attempt_id": str(uuid4()), "condition_category": category,
             "call_status": "dispatching", "survey_status": "pending", "survey_id": None,
-            "sms_status": "not_requested", "sms_attempt": 0, "sms_retries": [],
+            "survey_skipped": [], "sms_status": "not_requested", "sms_attempt": 0, "sms_retries": [],
             "provider_call_id": None, "phone_session_id": None, "message_id": None,
             "error_code": None, "version": 1, "phone_version": 0,
             "created_at": now, "updated_at": now, "_fingerprint": fingerprint,

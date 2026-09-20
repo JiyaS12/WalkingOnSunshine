@@ -220,7 +220,7 @@ export interface PatientAccessRecord {
 
 export type DatabaseCall = Pick<CallRecord,
   "call_id" | "patient_id" | "attempt_id" | "condition_category" | "call_status" |
-  "survey_status" | "survey_id" | "sms_status" | "sms_attempt" | "error_code" |
+  "survey_status" | "survey_id" | "survey_skipped" | "sms_status" | "sms_attempt" | "error_code" |
   "created_at" | "updated_at" | "walking"
 > & { destination_phone: string | null };
 

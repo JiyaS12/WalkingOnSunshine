@@ -65,6 +65,7 @@ export interface CallRecord {
   call_status: CallStatus;
   survey_status: SurveyStatus;
   survey_id: string | null;
+  survey_skipped?: string[];
   sms_status: SMSStatus;
   sms_attempt: number;
   sms_retries: { request_id: string; sms_attempt: number; created_at: string }[];

@@ -175,7 +175,7 @@ export default function ClinicianCalls({ patient, onAuthFailure }: Props) {
           return (
             <li key={call.call_id} className="space-y-2 break-words rounded-2xl bg-muted p-3 text-xs shadow-pillow-inset">
               <p>{call.created_at} · {call.condition_category} · Call {call.call_id} · Attempt {call.attempt_id}</p>
-              <p>Call: {call.call_status} · Survey: {call.survey_status} · SMS: {call.sms_status} (attempt {call.sms_attempt}) · Walk: {call.walking.status}</p>
+              <p>Call: {call.call_status} · Survey: {call.survey_status}{call.survey_skipped?.length ? ` (needs review: ${call.survey_skipped.length} unanswered)` : ""} · SMS: {call.sms_status} (attempt {call.sms_attempt}) · Walk: {call.walking.status}</p>
               {call.error_code && <p>Service reason: {call.error_code}</p>}
               <p>Survey: {call.survey_id ?? "Not stored"} · Gait session: {call.walking.session_id ?? "Not saved"}</p>
               <button className={controlClass} disabled={busy} onClick={() => void run(async (signal) => {

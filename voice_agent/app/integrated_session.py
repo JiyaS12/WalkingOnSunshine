@@ -174,7 +174,10 @@ class IntegratedSession:
             if self.engine.session.state == "complete":
                 self.submission = self._payload()
                 self.stage = "consent"
-                await self._say(policy.INTEGRATED_GAIT_INTRO)
+                intro = policy.INTEGRATED_GAIT_INTRO
+                if prompt.startswith(policy.SKIP_QUESTION):
+                    intro = f"{policy.SKIP_QUESTION} {intro}"
+                await self._say(intro)
             else:
                 await self._say(_spoken(prompt))
         elif self.stage == "consent":

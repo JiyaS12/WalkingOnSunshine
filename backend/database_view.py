@@ -14,7 +14,7 @@ def project_record(record: dict) -> dict:
     result = pick(record, "patient_id name age cohort condition_category condition_source active_call_id")
     calls = []
     for call in record.get("calls", []):
-        item = pick(call, "call_id patient_id attempt_id condition_category call_status survey_status survey_id sms_status sms_attempt error_code created_at updated_at")
+        item = pick(call, "call_id patient_id attempt_id condition_category call_status survey_status survey_id survey_skipped sms_status sms_attempt error_code created_at updated_at")
         # Deliberately available only in this clinician-authenticated projection.
         item["destination_phone"] = call.get("_destination_phone")
         walking = call.get("walking") or {}
@@ -33,7 +33,7 @@ def project_record(record: dict) -> dict:
         condition = survey.get("condition_survey")
         item["condition_survey"] = None
         if condition:
-            item["condition_survey"] = pick(condition, "instrument version condition_category")
+            item["condition_survey"] = pick(condition, "instrument version condition_category skipped")
             item["condition_survey"]["answers"] = [
                 pick(answer, "question_id normalized_value confirmed acceptance_method confirmed_at confidence clarification_attempts")
                 for answer in condition.get("answers", [])

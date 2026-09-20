@@ -404,6 +404,9 @@ def test_skipped_questions_are_stored_without_a_value(rig):
     assert result.status_code == 200, result.text
     stored = result.json()["survey"]["condition_survey"]
     assert stored["skipped"] == ["hoos_stairs"]
+    call_record = result.json()["patient"]["calls"][0]
+    assert call_record["survey_status"] == "stored"
+    assert call_record["survey_skipped"] == ["hoos_stairs"]
     assert [a["question_id"] for a in stored["answers"]] == list(QUESTION_IDS["hoos_jr"][1:])
     summary = agent._template_synthesis(result.json()["patient"])
     assert "Prototype raw item sum 5/20 over 5 of 6 items" in summary

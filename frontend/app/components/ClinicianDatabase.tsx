@@ -138,7 +138,9 @@ function PatientDetails({ patient }: { patient: DatabasePatient }) {
                   </p>
                   <div className="flex flex-wrap gap-2 text-xs">
                     {[
-                      ["Survey", call.survey_status],
+                      ["Survey", call.survey_skipped?.length
+                        ? `${call.survey_status} · needs review (${call.survey_skipped.length} unanswered)`
+                        : call.survey_status],
                       ["Text", call.sms_status],
                       ["Walking", call.walking.status],
                     ].map(([label, value]) => (
