@@ -283,7 +283,7 @@ def test_call_session_texts_the_gait_link_and_walks_through_setup(monkeypatch):
     assert session.persistence.calls["sess-2"].final_status == "complete"
 
 
-def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link(monkeypatch):
+def test_call_session_closes_honestly_when_the_caller_never_confirms_the_link(monkeypatch):
     monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
     monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
 
@@ -317,9 +317,13 @@ def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link(monkeyp
         return await session.handle_silence()
 
     assert asyncio.run(scenario()) is True
-    # A quiet caller after a finished survey is walked through it, not escalated.
+    # A quiet caller after a finished survey is neither escalated nor given
+    # camera steps they never confirmed they could follow.
     assert session.engine.session.needs_human_review is False
-    assert "Take care of yourself" in spoken[-1]
+    assert "not heard back" in spoken[-1]
+    assert not any("Live Camera" in line for line in spoken)
+    assert session.handoff is not None
+    assert "went quiet" in session.handoff.notes[-1]
 
 
 def test_call_session_owns_up_when_the_gait_text_fails(monkeypatch):
@@ -604,6 +608,10 @@ def test_place_call_reports_whether_twilio_will_send_status_callbacks(monkeypatc
         ("stop", "stop"),
         ("can we do this another time", "stop"),
         ("what was the question", "unclear"),
+        ("I'm not ready", "unclear"),
+        ("no it's not open yet", "unclear"),
+        ("I don't have it up", "unclear"),
+        ("it isn't loading", "unclear"),
         ("hello", "unclear"),
     ],
 )

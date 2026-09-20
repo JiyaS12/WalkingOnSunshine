@@ -30,6 +30,11 @@ _MISSING_WORDS = re.compile(
     r"\b(didn'?t|did not|haven'?t|have not|never|nothing|no text|no message|not yet|"
     r"not (?:got|gotten|received|come|arrived|here)|isn'?t here|hasn'?t (?:come|arrived))\b"
 )
+# "I'm not ready" / "don't have it open yet": a no dressed up in ready words.
+_NOT_READY = re.compile(
+    r"\b(not|don'?t|do not|can'?t|cannot|isn'?t|haven'?t|hasn'?t|won'?t|no)\b[^.!?]{0,25}?"
+    r"\b(ready|open(?:ed)?|up|have it|see it|set|loaded|done|work(?:ing)?)\b"
+)
 _READY_WORDS = re.compile(
     r"\b(ready|got it|open(?:ed)?|it'?s up|have it|see it|i'?m (?:set|on|there|in)|"
     r"okay|ok|yes|yeah|yep|sure|go ahead|all set|loaded|done)\b"
@@ -155,9 +160,13 @@ class PhoneCallSession:
         self._silent_reprompts += 1
         if self._awaiting_link:
             # The survey is already answered, so a quiet caller here is someone
-            # hunting for the text, not someone to escalate.
+            # hunting for the text, not someone to escalate. Nor is silence a
+            # yes: without a word from them the camera steps would go nowhere.
             if self._silent_reprompts > self.max_silent_reprompts:
-                return await self._walk_the_caller_through_it()
+                if self.handoff is not None:
+                    self.handoff.notes.append("Caller went quiet before confirming the gait link.")
+                await self._say(self.voice.link_no_reply().text)
+                return await self._complete_without_walkthrough()
             await self._say(self.voice.link_reminder().text)
             return False
         if self._silent_reprompts > self.max_silent_reprompts:
@@ -271,8 +280,9 @@ class PhoneCallSession:
 def link_reply_intent(transcript: str) -> str:
     """Classify what a caller said while we wait for them to open the text.
 
-    Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. Stop and
-    missing are checked first so "no, I didn't get it" is not read as a yes.
+    Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. Stop,
+    missing and negated readiness are checked first so "no, I didn't get it"
+    and "I'm not ready" are not read as a yes.
     """
 
     text = transcript.lower()
@@ -280,6 +290,8 @@ def link_reply_intent(transcript: str) -> str:
         return "stop"
     if _MISSING_WORDS.search(text):
         return "missing"
+    if _NOT_READY.search(text):
+        return "unclear"
     if _READY_WORDS.search(text):
         return "ready"
     return "unclear"

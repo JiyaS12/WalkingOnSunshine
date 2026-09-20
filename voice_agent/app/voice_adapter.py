@@ -12,6 +12,7 @@ from .conversation_policy import (
     LINK_FAILED,
     LINK_MISSING,
     LINK_NOT_RECEIVED,
+    LINK_NO_REPLY,
     LINK_REMINDER,
     LINK_SENT,
     PAUSE_EXPIRED,
@@ -67,6 +68,10 @@ class VoiceAdapter:
     def link_missing(self) -> VoiceTurn:
         """The caller says the text has not arrived yet; give it a moment."""
         return VoiceTurn("assistant", self.tts(LINK_MISSING))
+
+    def link_no_reply(self) -> VoiceTurn:
+        """The caller went quiet waiting on the text; close without camera steps."""
+        return VoiceTurn("assistant", self.tts(LINK_NO_REPLY))
 
     def link_not_received(self) -> VoiceTurn:
         """The text never reached the caller; close without camera steps."""

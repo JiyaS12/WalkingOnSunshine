@@ -19,7 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -609,7 +609,12 @@ def create_app(
         )
 
     @app.post(STATUS_PATH)
-    async def status(request: Request, CallSid: str = Form(""), CallStatus: str = Form("")) -> Response:
+    async def status(request: Request) -> Response:
+        form = dict(await request.form())
+        if not _signature_ok(resolved, request, form):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature.")
+        CallSid = str(form.get("CallSid", ""))
+        CallStatus = str(form.get("CallStatus", ""))
         logger.info("Call %s status %s", CallSid, CallStatus)
         record = persistence.calls.get(sessions_by_call_sid.get(CallSid, ""))
         if record is not None and CallStatus:
@@ -646,8 +651,11 @@ def create_app(
 
 
 def _signature_ok(settings: TelephonySettings, request: Request, form: dict[str, Any]) -> bool:
+    # Without the auth token there is nothing to verify against, so nothing
+    # reaching these public routes can be trusted; fail closed.
     if not settings.twilio_auth_token or not settings.public_base_url:
-        return True
+        logger.warning("Rejecting %s: Twilio signature checking is not configured", request.url.path)
+        return False
     signature = request.headers.get("X-Twilio-Signature", "")
     url = f"{settings.public_base_url.rstrip('/')}{request.url.path}"
     if request.url.query:

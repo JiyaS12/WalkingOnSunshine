@@ -629,3 +629,15 @@ def test_the_dialing_watchdog_leaves_an_answered_call_alone(monkeypatch):
 
     assert record["status"] == "in_progress"
     assert record["final_status"] is None
+
+
+def test_twilio_webhooks_fail_closed_without_signature_checking(monkeypatch):
+    unconfigured = load_settings(
+        {key: value for key, value in ENV.items() if key not in {"TWILIO_AUTH_TOKEN"}}
+    )
+    app = phone_app.create_app(unconfigured, auth=OperatorAuth(TOKEN))
+    with TestClient(app) as client:
+        voice = client.post("/twilio/voice?patient_code=RGN-0417&session_id=s1", data={"CallSid": "CA1"})
+        status = client.post("/twilio/status", data={"CallSid": "CA1", "CallStatus": "busy"})
+    assert voice.status_code == 403
+    assert status.status_code == 403

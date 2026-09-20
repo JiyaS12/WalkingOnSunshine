@@ -201,6 +201,11 @@ LINK_NOT_RECEIVED = (
     "time, and your care team will send the link separately. Thank you for your answers "
     "today. Take care, and goodbye."
 )
+LINK_NO_REPLY = (
+    "I have not heard back, so we will leave the walking check for another time, and your "
+    "care team will send the link separately. Thank you for your answers today. Take care, "
+    "and goodbye."
+)
 LINK_DECLINED = (
     "Of course, we can leave it there. Thank you for your answers today. Take care, and "
     "goodbye."
