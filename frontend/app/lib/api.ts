@@ -26,6 +26,11 @@ export interface GaitMetrics {
   experimental_cv_risk_model_version?: string;
   experimental_cv_risk_contributors?: Record<string, number>;
   experimental_cv_risk_warnings?: string[];
+  cv_fall_risk_index?: number | null;
+  cv_fall_risk_status?: "scored" | "fallback" | "not_scorable" | null;
+  cv_fall_risk_method?: "learned_fall_history" | "heuristic_fallback" | "none" | null;
+  cv_fall_risk_model_version?: string | null;
+  cv_fall_risk_warnings?: string[];
 }
 
 export type JointFrame = Record<string, number[]>;

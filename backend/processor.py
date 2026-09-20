@@ -20,6 +20,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from experimental_risk import EXTENDED_JOINTS, extract_features, score_features
+from fall_risk import score_fall_risk
 
 JOINTS = (
     "left_hip",
@@ -56,6 +57,11 @@ class GaitMetrics(BaseModel):
     experimental_cv_risk_model_version: str = "unavailable"
     experimental_cv_risk_contributors: dict[str, float] = Field(default_factory=dict)
     experimental_cv_risk_warnings: list[str] = Field(default_factory=list)
+    cv_fall_risk_index: int | None = Field(default=None, ge=1, le=100)
+    cv_fall_risk_status: Literal["scored", "fallback", "not_scorable"] | None = None
+    cv_fall_risk_method: Literal["learned_fall_history", "heuristic_fallback", "none"] | None = None
+    cv_fall_risk_model_version: str | None = None
+    cv_fall_risk_warnings: list[str] = Field(default_factory=list)
 
 
 def validate_frames(frames: list[dict[str, list[float]]]) -> None:
@@ -351,6 +357,14 @@ class GaitProcessor:
 
         experimental_features = self.experimental_feature_result()
         experimental = score_features(experimental_features)
+        common_features = extract_features(
+            {joint: self._joints[joint] for joint in JOINTS},
+            fps=self.fps,
+            leg_length_m=self.leg_length_m,
+            dropped_frame_pct=self.dropped_frame_pct,
+            visibility_frames=self.visibility_frames,
+        )
+        fall_risk = score_fall_risk(common_features, score, gait_detected)
 
         return GaitMetrics(
             stride_length_m=round(float(stride), 4),
@@ -370,4 +384,9 @@ class GaitProcessor:
             experimental_cv_risk_model_version=experimental.model_version,
             experimental_cv_risk_contributors=experimental.contributors,
             experimental_cv_risk_warnings=experimental.warnings,
+            cv_fall_risk_index=fall_risk.index,
+            cv_fall_risk_status=fall_risk.status,
+            cv_fall_risk_method=fall_risk.method,
+            cv_fall_risk_model_version=fall_risk.model_version,
+            cv_fall_risk_warnings=fall_risk.warnings,
         )

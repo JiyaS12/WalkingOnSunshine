@@ -694,11 +694,12 @@ export default function WebcamFeed({
       );
       if (gen !== generationRef.current || controller.signal.aborted) return;
       if (metrics.gait_detected) reportOnce("capture_completed");
+      else reportOnce("recoverable_error", "tracking_lost");
       onMetricsRef.current(metrics, "live", trial.frames);
       setLastSyncAt(new Date());
     } catch (err) {
       if (gen !== generationRef.current || controller.signal.aborted) return;
-      reportOnce("recoverable_error", err instanceof ApiError ? "network_error" : "tracking_lost");
+      reportOnce("recoverable_error", err instanceof ApiError || err instanceof TypeError ? "network_error" : "tracking_lost");
       setError(err instanceof Error ? err.message : "Trial could not be scored.");
     } finally {
       if (gen === generationRef.current) {
@@ -711,6 +712,7 @@ export default function WebcamFeed({
 
   const startTrial = useCallback(() => {
     if (trialPhaseRef.current !== "idle") return;
+    reportedRef.current.clear();
     onInputResetRef.current?.();
     setError(null);
     setLastSyncAt(null);

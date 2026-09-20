@@ -18,6 +18,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
+import FallRiskIndexCard from "./FallRiskIndexCard";
 import {
   Card,
   CardAction,
@@ -679,7 +680,8 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         <div className="mt-3">{captureFeedback}</div>
       </section>
 
-        <section className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 lg:grid-cols-5">
+        <FallRiskIndexCard metrics={metrics} />
+        <section className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 lg:grid-cols-3">
             <MetricCard
               title="Stride Length"
               value={metrics ? `${metrics.stride_length_m.toFixed(2)} m` : "—"}

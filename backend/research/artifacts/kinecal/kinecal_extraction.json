@@ -1,0 +1,992 @@
+[
+  {
+    "participant_id": "SPPB3",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB40",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/40/40_3m-walk-Front-View/skel/",
+        "sha256": "bc49e65a7cae154ea59a5710b873b9738eb811ad6a8f7b8fb08de5f93d260fb6",
+        "raw_frames": 223,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 39.666666666666664
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB41",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/41/41_3m-walk-Front-View/skel/",
+        "sha256": "bc811be4b3b74abe943b88a7b2b3cf51696c6c817272ffde7cf17f3d302ae355",
+        "raw_frames": 129,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 8.532,
+        "missing_pct": 49.609375
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB42",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/42/42_3m-walk-Front-View/skel/",
+        "sha256": "b97b396fea9810f9ae60d276c4734a4b5675a08bfacb2eeb191b11e4d35d2405",
+        "raw_frames": 158,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.066,
+        "missing_pct": 41.911764705882355
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB43",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/43/43_3m-walk-Front-View/skel/",
+        "sha256": "3f06c434a90df3883c4baef9a5802a3d567db26308dbf3334f526411cad46b46",
+        "raw_frames": 147,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.301000000000002,
+        "missing_pct": 47.31182795698925
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB44",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/44/44_3m-walk-Front-View/skel/",
+        "sha256": "ff38eb50f5236d32907d5b801f93d1ddb5659b51701d7cbc72415d550c064f14",
+        "raw_frames": 216,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.167000000000002,
+        "missing_pct": 21.454545454545453
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB45",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/45/45_3m-walk-Front-View/skel/",
+        "sha256": "ffacb056b4bbcc95334814452ec08d7c3b972efc55c3b9e3adebc65807ad6451",
+        "raw_frames": 164,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.001000000000001,
+        "missing_pct": 39.25925925925926
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB46",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/46/46_3m-walk-Front-View/skel/",
+        "sha256": "1e6cfb38c6d7ed5b8d255583bacac39a82c0d13019911560875ed898264b1d29",
+        "raw_frames": 256,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 36.333333333333336
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB47",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/47/47_3m-walk-Front-View/skel/",
+        "sha256": "1db362507c5602b36f7aa4354f0a7f1db93815dbf758d063cf78d71ed88397c7",
+        "raw_frames": 211,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 40.666666666666664
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB48",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/48/48_3m-walk-Front-View/skel/",
+        "sha256": "3dafe1baed154785c93cbc2c207689d85e33e68658ea8a2fc73148b9e2e0ed67",
+        "raw_frames": 168,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 7.8340000000000005,
+        "missing_pct": 28.510638297872344
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB51",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/51/51_3m-walk-Front-View/skel/",
+        "sha256": "079554ab5a39a53b0077721273a64bd2f135a02a43f4ba956cd411e4c9c1c442",
+        "raw_frames": 257,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 8.635000000000002,
+        "missing_pct": 0.7722007722007722
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB60",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/60/60_3m-walk-Front-View/skel/",
+        "sha256": "c97ce23a4c92cfcd155759f88866e6d98e9f51eb92d9c451961b2a3644396a6b",
+        "raw_frames": 189,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 44.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB61",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/61/61_3m-walk-Front-View/skel/",
+        "sha256": "fd97af5fd7c0c4438ab35a5d04bdeac16af74126f0611ec7390d63631cb765ca",
+        "raw_frames": 305,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 20.666666666666668
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB64",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/64/64_3m-walk-Front-View/skel/",
+        "sha256": "98acab29764e35699aa3e8b9fb0cc5d31f21fcecc19926c079ecb348dcc3d8fc",
+        "raw_frames": 344,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "detected steps did not alternate consistently"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB67",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/67/67_3m-walk-Front-View/skel/",
+        "sha256": "67b184ac851fbc6268ad678ba448638cba2b245f4885091dcd37055c011a60ff",
+        "raw_frames": 288,
+        "features": {
+          "median_step_time_s": 0.4666666666666667,
+          "step_time_cv_pct": 10.589999999999996,
+          "stance_time_asymmetry_pct": 43.478260869565226,
+          "mean_knee_rom_deg": 44.311612176771575,
+          "knee_rom_asymmetry_pct": 8.543915476354272,
+          "normalized_foot_clearance": 0.15826147994389209
+        },
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.600000000000001,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB68",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/68/68_3m-walk-Front-View/skel/",
+        "sha256": "85b43a2b58b00819859510d280d8caf6833ba831ccca2cc428c88462142a62ee",
+        "raw_frames": 301,
+        "features": null,
+        "warnings": [
+          "lower-body landmark visibility is too low"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB71",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/71/71_3m-walk-Front-View/skel/",
+        "sha256": "71b6a5644725a4e5486f49effb8ea1b35b68bb9214440f3d50013d4e1feecab9",
+        "raw_frames": 270,
+        "features": null,
+        "warnings": [
+          "lower-body landmark visibility is too low"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB73",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/73/73_3m-walk-Front-View/skel/",
+        "sha256": "92429a833532cfa619c28d3ec317a2de7a0cc31aa9c28a07cd67764c2263e4f0",
+        "raw_frames": 305,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "detected steps did not alternate consistently"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.33333333333333337
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB80",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB81",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB84",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/84/84_3m-walk-Front-View/skel/",
+        "sha256": "5a2eaa9c5dff53bb7eec4370052a2b7bcd5e35884f5dd98e2e25e2b4af3cff53",
+        "raw_frames": 272,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.067,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB87",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/87/87_3m-walk-Front-View/skel/",
+        "sha256": "57b64883d3778feca61953005c7c5a4140fdc06b950c7be3cdb2e0b084ea236b",
+        "raw_frames": 418,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB92",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/92/92_3m-walk-Front-View/skel/",
+        "sha256": "aa548fc8a14fc787cf0d9dbcb7e6694574e1ea22485a15ef8f604bb0f7c379f9",
+        "raw_frames": 289,
+        "features": null,
+        "warnings": [
+          "estimated leg length varied by more than 10%"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.629999999999999,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB96",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/96/96_3m-walk-Front-View/skel/",
+        "sha256": "788174d42cf9092678a657e7ec5c8e56a4fab2517c674f36d981a69878806645",
+        "raw_frames": 349,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "fewer than two complete strides were detected per side"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB100",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/100/100_3m-walk-Front-View/skel/",
+        "sha256": "e971a36e46663f77c53d6ea180d555ab66d1eb5d34d30695306147b7db73f81e",
+        "raw_frames": 256,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 8.535,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB201",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/201/201_3m-walk-Front-View/skel/",
+        "sha256": "b714a4fedf3f6ea7456bf45cd733c04c50b2701e336b97ea33f4099fd2bb696c",
+        "raw_frames": 390,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 36.333333333333336
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB304",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/304/304_3m-walk-Front-View/skel/",
+        "sha256": "13c80ca18da45983015c835fbe199b269127b357d04b3a3daeabcec7ee2d7e3f",
+        "raw_frames": 364,
+        "features": {
+          "median_step_time_s": 0.6333333333333333,
+          "step_time_cv_pct": 31.21263157894736,
+          "stance_time_asymmetry_pct": 17.14285714285714,
+          "mean_knee_rom_deg": 41.97705056953665,
+          "knee_rom_asymmetry_pct": 1.8528146394079115,
+          "normalized_foot_clearance": 0.13350244048124216
+        },
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB305",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/305/305_3m-walk-Front-View/skel/",
+        "sha256": "cf97dfddfbe953ffd956a3493a550a9fbaa273204e2eafd696cd7dd002048f9a",
+        "raw_frames": 184,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 8.198,
+        "missing_pct": 25.203252032520325
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB307",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/307/307_3m-walk-Front-View/skel/",
+        "sha256": "be87e2bbcf238e8cf3e480c11529aa0e7f62f86da912ac89e7d272908909c53b",
+        "raw_frames": 209,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 29.85074626865664,
+        "duration_s": 10.0,
+        "missing_pct": 60.200668896321076
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB309",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/309/309_3m-walk-Front-View/skel/",
+        "sha256": "54e1c87ed96a229fb52f6be89bea73898e05935d5f7d36847e3546277696cce9",
+        "raw_frames": 376,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 1.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB310",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/310/310_3m-walk-Front-View/skel/",
+        "sha256": "7c9df6edb785528ed7c74a445308104e3a1be99fe40f4d6e30cf3f4b8e17174b",
+        "raw_frames": 279,
+        "features": {
+          "median_step_time_s": 0.5333333333333333,
+          "step_time_cv_pct": 18.532499999999995,
+          "stance_time_asymmetry_pct": 26.66666666666666,
+          "mean_knee_rom_deg": 42.07573107642369,
+          "knee_rom_asymmetry_pct": 9.151183817325544,
+          "normalized_foot_clearance": 0.1606527298712603
+        },
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.368000000000002,
+        "missing_pct": 0.7117437722419928
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB311",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/311/311_3m-walk-Front-View/skel/",
+        "sha256": "89b958b434e62c10ad6d6a4397e5e96dd28fb1708b96db2ec51afb929e5b5eee",
+        "raw_frames": 317,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 69.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB312",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/312/312_3m-walk-Front-View/skel/",
+        "sha256": "a3095ec03e211835d67853a150801a3851c4747ec87ef7b6749381574ff9131c",
+        "raw_frames": 118,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 8.168,
+        "missing_pct": 51.83673469387755
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB313",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/313/313_3m-walk-Front-View/skel/",
+        "sha256": "dd6a1d8fc88a23e9cf5474f85ce71028025d586072db439b2b73613e18b3bf8a",
+        "raw_frames": 272,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.629000000000001,
+        "missing_pct": 5.88235294117647
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB314",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/314/314_3m-walk-Front-View/skel/",
+        "sha256": "093f4533f074a3c1b84c544ab42415c31ded2abf3bb85f5702f1dd67fb57dfc6",
+        "raw_frames": 363,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.6666666666666667
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB315",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/315/315_3m-walk-Front-View/skel/",
+        "sha256": "342b7ede225e025dbe46dc1a5d6ec703e78d1a858eae342b98dba5eee1dd4730",
+        "raw_frames": 317,
+        "features": {
+          "median_step_time_s": 0.6666666666666666,
+          "step_time_cv_pct": 22.239000000000022,
+          "stance_time_asymmetry_pct": 48.88888888888889,
+          "mean_knee_rom_deg": 49.74699654520532,
+          "knee_rom_asymmetry_pct": 16.38049061695938,
+          "normalized_foot_clearance": 0.12346214642149136
+        },
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 1.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB401",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/401/401_3m-walk-Front-View/skel/",
+        "sha256": "e11a814f1c4e2d4f21e582931abd0cf5dd70d18070067b84f185d70dcbabe3c0",
+        "raw_frames": 354,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB402",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/402/402_3m-walk-Front-View/skel/",
+        "sha256": "da07ac52c8b2dbfcd20cce1724a4c8adb1cb572024d8183ee49294f2b3a1ac63",
+        "raw_frames": 205,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 6.835,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB403",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB404",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB405",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/405/405_3m-walk-Front-View/skel/",
+        "sha256": "7531a40450f0975a3a86c2a922f8e3acb08886562aeb4853bc2def84d0a78e21",
+        "raw_frames": 394,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 0.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB406",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/406/406_3m-walk-Front-View/skel/",
+        "sha256": "de7cca520c1362189dc2a0e1cf15d7e13277284bd289cf0c1799f529648e8e79",
+        "raw_frames": 281,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "detected steps did not alternate consistently"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.401,
+        "missing_pct": 0.3546099290780142
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB407",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/407/407_3m-walk-Front-View/skel/",
+        "sha256": "82d8db6e29bb3fe14a289a60e38906197e243c7b92b253e89fdbe85cdfd78113",
+        "raw_frames": 235,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 44.666666666666664
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB501",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB502",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": []
+  },
+  {
+    "participant_id": "SPPB700",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/700/700_3m-walk-Front-View/skel/",
+        "sha256": "c372c682cc2c9ccfb77c1e8a0677a702c860cbd369ccb0950c204fe1c0ca18aa",
+        "raw_frames": 205,
+        "features": null,
+        "warnings": [
+          "more than 10% of frames required landmark repair"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.798,
+        "missing_pct": 30.272108843537417
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB701",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/701/701_3m-walk-Front-View/skel/",
+        "sha256": "56468bcba5cffeecf9346b4ae49682070b45540f070def75e3535c3bd08bb6e0",
+        "raw_frames": 294,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "detected steps did not alternate consistently"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.926000000000002,
+        "missing_pct": 1.342281879194631
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB703",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/703/703_3m-walk-Front-View/skel/",
+        "sha256": "92d4ab8584ba4867a94dd426c032dc985aa12fe670678581a73449b5c7272f77",
+        "raw_frames": 200,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "fewer than two complete strides were detected per side"
+        ],
+        "fps": 30.0,
+        "duration_s": 6.7,
+        "missing_pct": 0.4975124378109453
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB704",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/704/704_3m-walk-Front-View/skel/",
+        "sha256": "b89c60fcaf16178cfe3b8f4cfafb13269b6d021e48ab4c221e3bc94fec61d2a7",
+        "raw_frames": 240,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 8.233,
+        "missing_pct": 2.834008097165992
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB705",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/705/705_3m-walk-Front-View/skel/",
+        "sha256": "1ca9d96fabe572a3aefe4b3cbd0b54fc9b30a9d86706899b36e39edabd933b8c",
+        "raw_frames": 301,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "detected steps did not alternate consistently"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 1.3333333333333335
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB706",
+    "label": 1,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/706/706_3m-walk-Front-View/skel/",
+        "sha256": "1c15b641e0c7ddcae7bc74df6496778720696e01ee13cbef3407a3e6684df5cc",
+        "raw_frames": 273,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 9.163,
+        "missing_pct": 0.7272727272727273
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB707",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/707/707_3m-walk-Front-View/skel/",
+        "sha256": "81c6a219380d61428e3789b50753d2ebaca59af030f2e942fb1d2e4b00e8367e",
+        "raw_frames": 353,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "detected steps did not alternate consistently"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 1.0
+      }
+    ]
+  },
+  {
+    "participant_id": "SPPB708",
+    "label": 0,
+    "protocol": "ankle-six-features-v1",
+    "recordings": [
+      {
+        "url": "https://physionet.org/files/kinecal/1.0.3/kinecal/708/708_3m-walk-Front-View/skel/",
+        "sha256": "1895ce61fcdd896cb530718b8dd91985d2fa1b88a2256c3b5a8ca4484d98deba",
+        "raw_frames": 322,
+        "features": null,
+        "warnings": [
+          "left heel landmark unavailable; ankle used as proxy",
+          "right heel landmark unavailable; ankle used as proxy",
+          "left and right foot events were implausibly simultaneous"
+        ],
+        "fps": 30.0,
+        "duration_s": 10.0,
+        "missing_pct": 1.6666666666666667
+      }
+    ]
+  }
+]

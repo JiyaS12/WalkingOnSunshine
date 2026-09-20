@@ -93,6 +93,30 @@ describe("real webcam lifecycle wiring", () => {
     expect(gum).toHaveBeenCalledTimes(2);
   });
 
+  it("reports a failed request and a fresh lifecycle when retrying a guided trial", async () => {
+    const lifecycle = vi.fn();
+    vi.mocked(processFrames).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<WebcamFeed onMetrics={vi.fn()} onLifecycle={lifecycle} />);
+    await settle();
+    Object.defineProperty(document.querySelector("video"), "readyState", { value: 4 });
+    const landmarks = Array.from({ length: 33 }, (_, i) => ({
+      x: i % 2 ? 0.1 : -0.1, y: i >= 27 ? 1 : i >= 25 ? 0.5 : 0, z: 0,
+    }));
+    cameraResult = {
+      poseWorldLandmarks: landmarks,
+      poseLandmarks: landmarks.map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 })),
+    };
+    act(() => { for (let i = 0; i < 60; i++) result(cameraResult!); });
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle).toHaveBeenCalledWith("recoverable_error", "network_error");
+    expect(lifecycle).not.toHaveBeenCalledWith("capture_completed", undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Start 10-second assessment" }));
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(lifecycle.mock.calls.filter(([event]) => event === "capture_started")).toHaveLength(2);
+    expect(lifecycle).toHaveBeenCalledWith("capture_completed", undefined);
+  });
+
   it("supports upload while camera permission is pending and suppresses the old camera error", async () => {
     const permission = deferred<MediaStream>();
     gum.mockReturnValue(permission.promise);

@@ -21,6 +21,7 @@ import SkeletonReplay from "../components/SkeletonReplay";
 import TrendGraph, { TrendSession } from "../components/TrendGraph";
 import ClinicianCalls from "../components/ClinicianCalls";
 import SurveyDetails from "../components/SurveyDetails";
+import FallRiskIndexCard from "../components/FallRiskIndexCard";
 import {
   ApiError,
   ClinicianSession,
@@ -640,6 +641,7 @@ export default function DoctorPortal() {
                 </h3>
                 {latestSession ? (
                   <div className="flex flex-col gap-2">
+                    <FallRiskIndexCard metrics={latestSession.metrics} />
                     <div className="grid grid-cols-2 gap-2">
                       {stat(
                         "Original fall risk — heuristic",

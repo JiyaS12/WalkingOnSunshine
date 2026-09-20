@@ -19,7 +19,16 @@ discarded, so one missing frame cannot zero out a genuine high-risk score;
 `dropped_frame_pct` reports how much of a session was repaired, and a clip
 missing more than half its frames is rejected outright.
 
-The experimental branch also exposes a separate **Experimental CV Risk Index
+The patient and clinician views show a **1–100 fall-risk index** for scorable
+recordings, with explicit method and model-version fields. The learned
+KINECAL fall-history candidate failed the usable-cohort gate (4 of 53 eligible
+participants); webcam transfer is also unvalidated. The app currently displays
+the original heuristic scaled to 1–100, labeled **Heuristic fallback**.
+This does not improve predictive accuracy and is not a probability of falling.
+Poor-quality recordings require a retake instead of receiving a fallback.
+See [research methods and measured results](backend/research/README.md).
+
+The experimental branch also retains a separate Toronto **Experimental CV Risk Index
 (0–100)**. It uses a guided three-second countdown and ten-second walk toward
 or away from a fixed camera. The index is percentile-like relative to the
 Toronto Older Adults Gait Archive; it is not a fall probability and has no
