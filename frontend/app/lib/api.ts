@@ -100,13 +100,33 @@ export async function fetchSummaryCacheStats(): Promise<SummaryCacheStats> {
   return request<SummaryCacheStats>("/api/summary-cache-stats");
 }
 
+export interface PatientProcessingAccess {
+  patientId: string;
+  token: string;
+}
+
+function processingRequest<T>(
+  operation: "process-frame" | "process-video",
+  init: RequestInit,
+  access?: PatientProcessingAccess
+): Promise<T> {
+  return access
+    ? patientAccessRequest<T>(
+        `/api/patient-access/${encodeURIComponent(access.patientId)}/${operation}`,
+        access.token,
+        init
+      )
+    : request<T>(`/api/${operation}`, init);
+}
+
 export async function processFrames(
   frames: JointFrame[],
   fps: number,
   legLengthM?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  access?: PatientProcessingAccess
 ): Promise<GaitMetrics> {
-  return request<GaitMetrics>("/api/process-frame", {
+  return processingRequest<GaitMetrics>("process-frame", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -115,7 +135,7 @@ export async function processFrames(
       ...(legLengthM !== undefined ? { leg_length_m: legLengthM } : {}),
     }),
     signal,
-  });
+  }, access);
 }
 
 export interface VideoAnalysis {
@@ -129,26 +149,16 @@ export interface VideoAnalysis {
 
 export async function processVideo(
   file: File,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  access?: PatientProcessingAccess
 ): Promise<VideoAnalysis> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_URL}/api/process-video`, {
+  return processingRequest<VideoAnalysis>("process-video", {
     method: "POST",
     body: form,
     signal,
-  });
-  if (!res.ok) {
-    let detail = `API /api/process-video failed: ${res.status}`;
-    try {
-      const body = (await res.json()) as { detail?: string };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      /* keep generic detail */
-    }
-    throw new ApiError(detail, res.status);
-  }
-  return res.json() as Promise<VideoAnalysis>;
+  }, access);
 }
 
 export interface Survey {

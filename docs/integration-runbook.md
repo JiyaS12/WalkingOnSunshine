@@ -138,6 +138,24 @@ The integration-specific frontend fixtures mock walking status explicitly.
 
 ## Recovery, retries and reconciliation
 
+### Processing authorization and resource abuse
+
+Live frames and uploaded video from the patient page use
+`/api/patient-access/{pid}/process-frame` and `process-video`, carrying the signed
+credential in the bearer header. The unscoped `/api/process-frame` and
+`/api/process-video` routes require a clinician session. All four routes reject
+missing/invalid authorization before parsing JSON or spooling multipart bodies.
+There is no public compute fallback. Patient credentials cannot read the cohort
+or use clinician processing. Invalid/expired links require a fresh care-team link.
+
+This closes anonymous compute/upload access; it does not prevent a valid account
+or leaked unexpired link from consuming capacity. The video handler caps the file
+at 100 MiB and pose extraction at 300 sampled frames, but the file cap is checked
+after multipart parsing. Internet deployments still need proxy request-size,
+request-rate, concurrency and timeout limits, plus monitored disk/CPU capacity.
+Keep signed URLs out of proxy/access logs and rotate a compromised signing key.
+No deployment-level limits or production load capacity have been verified here.
+
 | Symptom | Interpretation and next action |
 | --- | --- |
 | Call start returns `unknown` | Main cannot prove whether provider dispatch occurred. Refresh the existing call; do not auto-redial or mint a new request ID. |

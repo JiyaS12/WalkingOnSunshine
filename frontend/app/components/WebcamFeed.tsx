@@ -22,6 +22,7 @@ import {
   processVideo,
   JointFrame,
   VideoAnalysis,
+  type PatientProcessingAccess,
 } from "../lib/api";
 import { legLengthFrom } from "../lib/gait";
 import type { PoseResults } from "../types/mediapipe";
@@ -161,6 +162,7 @@ type TrackingStatus =
   | "no-person";
 
 interface Props {
+  patientAccess?: PatientProcessingAccess;
   onMetrics: (
     metrics: GaitMetrics,
     source: "live" | "upload",
@@ -177,6 +179,7 @@ interface Props {
 type Mode = "live" | "upload";
 
 export default function WebcamFeed({
+  patientAccess,
   onMetrics,
   onProcessingChange,
   onInputReset,
@@ -229,6 +232,8 @@ export default function WebcamFeed({
   const [uploadCaption, setUploadCaption] = useState<string | null>(null);
   const onMetricsRef = useRef(onMetrics);
   onMetricsRef.current = onMetrics;
+  const patientAccessRef = useRef(patientAccess);
+  patientAccessRef.current = patientAccess;
   const onProcessingChangeRef = useRef(onProcessingChange);
   onProcessingChangeRef.current = onProcessingChange;
   const onInputResetRef = useRef(onInputReset);
@@ -659,7 +664,8 @@ export default function WebcamFeed({
           batch,
           fps,
           legLengthRef.current ?? undefined,
-          abortRef.current?.signal
+          abortRef.current?.signal,
+          patientAccessRef.current
         )
           .then((m) => {
             if (sendGen !== generationRef.current) return;
@@ -772,7 +778,8 @@ export default function WebcamFeed({
       try {
         const analysis: VideoAnalysis = await processVideo(
           file,
-          controller.signal
+          controller.signal,
+          patientAccessRef.current
         );
         if (
           gen !== generationRef.current ||
