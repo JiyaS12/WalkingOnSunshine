@@ -15,15 +15,23 @@ NO = {"no", "nope", "not correct", "that's not correct", "that's not right",
       "no not really", "no that's not right", "no it isn't", "i disagree"}
 TERMINAL_SPEECH = {"complete": speech.COMPLETE, "escalated": speech.REVIEW, "stopped": speech.STOPPED}
 MAX_CLARIFICATIONS = 3
+# Speech recognition confidence below which a bare option label ("mild") is
+# read back for confirmation instead of accepted outright. A phone line can
+# turn "mild" into "mile"; the recognizer says how sure it was.
+DEFAULT_CONFIRM_BELOW_CONFIDENCE = 0.7
 
 
 class SafeSurveyEngine:
     """The engine owns questions, acceptance and progression; bridges are bounded."""
 
-    def __init__(self, repository, patient_code: str, interpreter: AnswerInterpreter | None = None):
+    def __init__(
+        self, repository, patient_code: str, interpreter: AnswerInterpreter | None = None,
+        confirm_below_confidence: float = DEFAULT_CONFIRM_BELOW_CONFIDENCE,
+    ):
         self.repository = repository
         self.patient = repository.lookup_patient(patient_code)
         self.interpreter = interpreter or ExactAnswerInterpreter()
+        self.confirm_below_confidence = confirm_below_confidence
         self.session = SurveySession(
             patient=self.patient,
             questions=load_question_bank(self.patient.condition_category),
@@ -111,7 +119,16 @@ class SafeSurveyEngine:
         )
         return f"{bridge} {self._question_text()}", answer
 
-    def handle_response(self, transcript: str) -> tuple[str, SurveyAnswer | None]:
+    def handle_response(
+        self, transcript: str, confidence: float | None = None,
+    ) -> tuple[str, SurveyAnswer | None]:
+        """Advance the survey with what the patient said.
+
+        ``confidence`` is the speech recognizer's confidence in ``transcript``
+        (0-1), or None when unknown. It only affects a bare option label heard
+        with low confidence, which is read back rather than accepted.
+        """
+
         if self.session.state in TERMINAL_SPEECH:
             return TERMINAL_SPEECH[self.session.state], None
         if self.session.state == "awaiting_start":
@@ -158,15 +175,20 @@ class SafeSurveyEngine:
             self.session.state = "asking"
             return self._retry(f"Thanks for correcting me. {self._clarification(question)}")
 
-        if result.intent == "select":
+        if result.intent == "select" and self._heard_clearly(confidence):
             # Naming an option is already the patient's decision, including a
             # clear correction to a pending proposal. No extra yes/no needed.
             self.session.pending_answer = SurveyAnswer(
                 question_id=question.id, question_prompt=question.prompt,
                 normalized_value=result.value, raw_response=transcript,
-                confidence=None, clarification_attempts=self.session.clarification_attempts,
+                confidence=confidence, clarification_attempts=self.session.clarification_attempts,
             )
             return self._accept_pending(result.acknowledgment, method="explicit_selection")
+        misheard = result.intent == "select"
+        if misheard:
+            # The label was recognized, but the recognizer was not sure it heard
+            # it right: propose it and let the patient confirm below.
+            result = Interpretation("answer", result.value, result.evidence, result.acknowledgment)
 
         adjustment = result.intent in {"adjust_down", "adjust_up"}
         if adjustment:
@@ -201,16 +223,21 @@ class SafeSurveyEngine:
             question_prompt=question.prompt,
             normalized_value=value,
             raw_response=transcript,
-            confidence=None,  # No fabricated probability for an LLM interpretation.
+            # Recognizer confidence only; never a fabricated LLM probability.
+            confidence=confidence if misheard else None,
             confirmed=False,
             clarification_attempts=self.session.clarification_attempts,
         )
         self.session.pending_answer = answer
         self.session.state = "awaiting_confirmation"
-        self.session.last_confirmation_prompt = speech.confirmation_text(
-            question, value, result.acknowledgment, correction=correction,
+        self.session.last_confirmation_prompt = (
+            speech.readback_text(question, value) if misheard
+            else speech.confirmation_text(question, value, result.acknowledgment, correction=correction)
         )
         return self.session.last_confirmation_prompt, answer
+
+    def _heard_clearly(self, confidence: float | None) -> bool:
+        return confidence is None or confidence >= self.confirm_below_confidence
 
     def snapshot(self) -> dict[str, object]:
         pending = self.session.pending_answer
