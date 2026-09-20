@@ -26,6 +26,15 @@ the patient client, voice-agent intake, doctor's portal, the end-to-end data
 workflow, the complete endpoint reference, and which pieces are implemented
 today.
 
+## Supported runtimes
+
+- Node.js 20.19 or newer (the repository's `.nvmrc` selects 20.19).
+- npm 10 or newer.
+- Python 3.12 (the pinned MediaPipe build does not install on Python 3.13).
+
+The repository's `.python-version` selects Python 3.12 for version managers
+that support it.
+
 ```
 gaitguard-ai/
   backend/
@@ -47,7 +56,7 @@ gaitguard-ai/
 
 ```bash
 cd backend
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
@@ -73,7 +82,7 @@ Optional environment variables:
 
 ```bash
 cd frontend
-npm install
+npm ci
 cp .env.example .env.local   # sets NEXT_PUBLIC_API_URL (default http://localhost:8000)
 npm run dev
 ```
@@ -94,12 +103,32 @@ The app runs at http://localhost:3000 and expects the backend on
    see the Unified Clinical Synthesis Report (survey + gait trend +
    skeleton replay) and click **Generate synthesis**.
 
-## Test
+## Verify a clean checkout
+
+From the repository root, create a fresh Python 3.12 environment and run the
+backend suite:
 
 ```bash
-cd backend
-.venv/bin/pytest -q
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+python -m pytest -q backend/tests
 ```
+
+Then use Node 20.19+ to install exactly the locked frontend dependencies,
+audit production packages, lint, type-check, and build:
+
+```bash
+cd frontend
+npm ci
+npm audit --omit=dev --audit-level=high
+npm run lint
+npm run type-check
+npm run build
+```
+
+These checks require no repository secrets. GitHub Actions runs the same gates
+for every push and pull request with npm and pip dependency caching enabled.
 
 ## License
 
