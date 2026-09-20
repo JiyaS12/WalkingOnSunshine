@@ -9,6 +9,16 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        clinical: {
+          950: "#0F172A",
+          900: "#1E293B",
+          800: "#334155",
+          700: "#475569",
+        },
+        medgreen: {
+          500: "#10B981",
+          600: "#059669",
+        },
         background: "var(--background)",
         foreground: "var(--foreground)",
         card: "var(--card)",

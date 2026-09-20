@@ -1,15 +1,12 @@
 "use client";
 
 import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+  Area,
+  AreaChart,
+} from "@/components/charts";
+import { Grid } from "@/components/charts/grid";
+import { ChartTooltip } from "@/components/charts/tooltip/chart-tooltip";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export interface TrendSession {
   label: string;
@@ -23,52 +20,78 @@ interface Props {
 }
 
 export default function TrendGraph({ sessions }: Props) {
-  const data = sessions.map((s) => ({
+  // the chart x-axis is time-based; sessions carry only labels, so spread
+  // them one day apart from a fixed epoch and keep the label for tooltips
+  const epoch = new Date(2026, 0, 1).getTime();
+  const data = sessions.map((s, i) => ({
+    date: new Date(epoch + i * 86400000),
     label: s.label,
     "Asymmetry %": s.asymmetry_pct,
     "Fall Risk ×100": Math.round(s.fall_risk_score * 1000) / 10,
   }));
 
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-      <h2 className="mb-1 text-sm font-medium text-slate-200">
-        Session-over-session trend
-      </h2>
-      <p className="mb-2 text-xs text-slate-400">
-        Asymmetry % vs Fall Risk ×100 across sessions
-      </p>
-      <div className="h-56 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
-          <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-          <XAxis dataKey="label" stroke="#94a3b8" fontSize={12} />
-          <YAxis stroke="#94a3b8" fontSize={12} />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "#0f172a",
-              border: "1px solid #334155",
-              borderRadius: 8,
-              color: "#e2e8f0",
-            }}
+    <Card className="border-border">
+      <CardHeader className="px-4 pb-0 pt-4">
+        <CardTitle className="text-sm font-medium text-card-foreground">
+          Session-over-session trend
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 pt-2">
+        <div className="mb-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-chart-1" />
+            Asymmetry %
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-chart-2" />
+            Fall Risk ×100
+          </span>
+        </div>
+        <AreaChart
+          data={data}
+          xDataKey="date"
+          aspectRatio="2.5 / 1"
+          className="w-full"
+        >
+          <Grid stroke="var(--clinical-800)" />
+          <ChartTooltip
+            rows={(point) => [
+              {
+                color: "var(--chart-1)",
+                label: "Asymmetry %",
+                value: `${(point["Asymmetry %"] as number).toFixed(1)}%`,
+              },
+              {
+                color: "var(--chart-2)",
+                label: "Fall Risk ×100",
+                value: `${(point["Fall Risk ×100"] as number).toFixed(1)}`,
+              },
+              {
+                color: "var(--muted-foreground)",
+                label: "Session",
+                value: String(point.label ?? ""),
+              },
+            ]}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Line
-            type="monotone"
+          <Area
             dataKey="Asymmetry %"
-            stroke="#f472b6"
-            strokeWidth={2}
-            dot={{ r: 4 }}
+            fill="var(--chart-1)"
+            fillOpacity={0.25}
+            gradientToOpacity={0}
+            stroke="var(--chart-1)"
+            showMarkers={sessions.length <= 12}
           />
-          <Line
-            type="monotone"
+          <Area
             dataKey="Fall Risk ×100"
-            stroke="#60a5fa"
-            strokeWidth={2}
-            dot={{ r: 4 }}
+            fill="var(--chart-2)"
+            fillOpacity={0.25}
+            gradientToOpacity={0}
+            stroke="var(--chart-2)"
+            showMarkers={sessions.length <= 12}
           />
-        </LineChart>
-      </ResponsiveContainer>
-      </div>
-    </div>
+        </AreaChart>
+      </CardContent>
+    </Card>
   );
 }

@@ -34,11 +34,11 @@ function riskBand(score: number | null | undefined): string {
 function riskBadge(score: number | null | undefined) {
   const band = riskBand(score);
   if (band === "high")
-    return "bg-rose-600/20 text-rose-300 border-rose-500/40";
+    return "bg-rose-400/15 text-rose-300 border-rose-400/40";
   if (band === "moderate")
-    return "bg-amber-600/20 text-amber-300 border-amber-500/40";
+    return "bg-amber-400/15 text-amber-300 border-amber-400/40";
   if (band === "low")
-    return "bg-emerald-600/20 text-emerald-300 border-emerald-500/40";
+    return "bg-medgreen-500/15 text-medgreen-500 border-medgreen-500/40";
   return "border-slate-600 text-slate-400";
 }
 
@@ -195,7 +195,7 @@ export default function DoctorPortal() {
   };
 
   const stat = (label: string, value: string, d?: number | null) => (
-    <div className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5">
+    <div className="rounded-lg border border-border bg-background px-2 py-1.5">
       <p className="text-[10px] uppercase tracking-wide text-slate-500">
         {label}
       </p>
@@ -204,7 +204,7 @@ export default function DoctorPortal() {
         {d !== null && d !== undefined && (
           <span
             className={`ml-1 text-[10px] ${
-              d <= 0 ? "text-emerald-400" : "text-rose-400"
+              d <= 0 ? "text-medgreen-500" : "text-rose-400"
             }`}
           >
             {d > 0 ? "+" : ""}
@@ -219,7 +219,7 @@ export default function DoctorPortal() {
     <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Stethoscope className="h-8 w-8 text-emerald-400" />
+          <Stethoscope className="h-8 w-8 text-medgreen-500" />
           <div>
             <h1 className="text-2xl font-bold">Doctor&apos;s Portal</h1>
             <p className="text-xs text-slate-400">
@@ -261,7 +261,7 @@ export default function DoctorPortal() {
                 onClick={() => setRiskFilter(k)}
                 className={`rounded-full border px-2 py-0.5 ${
                   riskFilter === k
-                    ? "border-emerald-500 bg-emerald-600/20 text-emerald-300"
+                    ? "border-medgreen-500 bg-medgreen-500/15 text-medgreen-500"
                     : "border-slate-600 text-slate-300 hover:bg-slate-800"
                 }`}
               >
@@ -272,7 +272,7 @@ export default function DoctorPortal() {
               onClick={() => setDizzyOnly((v) => !v)}
               className={`rounded-full border px-2 py-0.5 ${
                 dizzyOnly
-                  ? "border-emerald-500 bg-emerald-600/20 text-emerald-300"
+                  ? "border-medgreen-500 bg-medgreen-500/15 text-medgreen-500"
                   : "border-slate-600 text-slate-300 hover:bg-slate-800"
               }`}
             >
@@ -282,7 +282,7 @@ export default function DoctorPortal() {
               onClick={() => setFallsOnly((v) => !v)}
               className={`rounded-full border px-2 py-0.5 ${
                 fallsOnly
-                  ? "border-emerald-500 bg-emerald-600/20 text-emerald-300"
+                  ? "border-medgreen-500 bg-medgreen-500/15 text-medgreen-500"
                   : "border-slate-600 text-slate-300 hover:bg-slate-800"
               }`}
             >
@@ -308,7 +308,7 @@ export default function DoctorPortal() {
                   onClick={() => setSelectedId(p.patient_id)}
                   className={`w-full rounded-lg border p-2.5 text-left transition-colors ${
                     selectedId === p.patient_id
-                      ? "border-emerald-500 bg-emerald-600/10"
+                      ? "border-medgreen-500 bg-medgreen-500/10"
                       : "border-slate-700 bg-slate-950 hover:bg-slate-800"
                   }`}
                 >
@@ -329,7 +329,7 @@ export default function DoctorPortal() {
                     <span>{p.patient_id}</span>
                     {p.age != null && <span>· {p.age} y/o</span>}
                     {p.pain_scale != null && (
-                      <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-1.5 py-px text-amber-300">
+                      <span className="rounded-full border border-amber-400/40 bg-amber-400/15 px-1.5 py-px text-amber-300">
                         pain {p.pain_scale}
                       </span>
                     )}
@@ -377,7 +377,7 @@ export default function DoctorPortal() {
             )}
             {lastSyncedAt && (
               <span className="flex items-center gap-1.5 text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <span className="h-1.5 w-1.5 rounded-full bg-medgreen-500" />
                 Live · updated{" "}
                 {lastSyncedAt.toLocaleTimeString("en-GB", { hour12: false })}
               </span>
@@ -514,7 +514,7 @@ export default function DoctorPortal() {
                 <button
                   onClick={runSynthesis}
                   disabled={synthLoading}
-                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-lg bg-medgreen-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-medgreen-500 disabled:opacity-50"
                 >
                   {synthLoading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -536,7 +536,7 @@ export default function DoctorPortal() {
                         {synthesis.source === "openai" ? "OpenAI" : "template"}
                       </span>
                       {synthesis.cached && (
-                        <span className="rounded-full border border-sky-500/40 bg-sky-600/20 px-2 py-0.5 uppercase text-sky-300">
+                        <span className="rounded-full border border-blue-400/40 bg-blue-500/15 px-2 py-0.5 uppercase text-blue-300">
                           cached
                         </span>
                       )}

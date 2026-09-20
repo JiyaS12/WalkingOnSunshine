@@ -685,7 +685,7 @@ export default function WebcamFeed({
           const toX = (x: number) =>
             canvas.width / 2 + (x - hipMidX) * scale;
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.strokeStyle = "#60a5fa";
+          ctx.strokeStyle = "#3B82F6";
           ctx.lineWidth = 2;
           for (const [a, b] of SIM_PAIRS) {
             const pa = f[a];
@@ -806,7 +806,7 @@ export default function WebcamFeed({
 
   const statusDot =
     trackingStatus === "tracking"
-      ? "bg-emerald-400"
+      ? "bg-medgreen-500"
       : trackingStatus === "no-person" || (trackingStatus === "idle" && cameraBlocked)
         ? "bg-amber-400"
         : "bg-slate-500";
@@ -857,7 +857,7 @@ export default function WebcamFeed({
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "live"
-                ? "border-emerald-500 bg-emerald-600 text-white"
+                ? "border-medgreen-500 bg-medgreen-600 text-white"
                 : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
@@ -873,7 +873,7 @@ export default function WebcamFeed({
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
               mode === "upload"
-                ? "border-emerald-500 bg-emerald-600 text-white"
+                ? "border-medgreen-500 bg-medgreen-600 text-white"
                 : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
@@ -925,7 +925,7 @@ export default function WebcamFeed({
                     onClick={() =>
                       window.open(window.location.href, "_blank", "noopener")
                     }
-                    className="flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+                    className="flex items-center gap-1.5 rounded-md bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-400"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     Open in new tab
@@ -936,7 +936,7 @@ export default function WebcamFeed({
                     setCameraBlocked(null);
                     setRetryNonce((n) => n + 1);
                   }}
-                  className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                  className="flex items-center gap-1.5 rounded-md bg-medgreen-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-medgreen-500"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Retry camera
@@ -973,7 +973,7 @@ export default function WebcamFeed({
               const f = e.dataTransfer.files?.[0];
               if (f) void analyzeVideo(f);
             }}
-            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-600 text-slate-400 hover:border-emerald-500 hover:text-slate-200"
+            className="absolute inset-0 flex w-full flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-600 text-slate-400 hover:border-medgreen-500 hover:text-slate-200"
           >
             <Upload className="h-8 w-8" />
             <span className="text-sm">
@@ -1002,7 +1002,7 @@ export default function WebcamFeed({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="rounded bg-slate-800/90 px-2 py-0.5 text-[10px] font-medium text-emerald-300 hover:bg-slate-700"
+              className="rounded bg-slate-800/90 px-2 py-0.5 text-[10px] font-medium text-medgreen-500 hover:bg-slate-700"
             >
               Analyze another video
             </button>
@@ -1021,11 +1021,11 @@ export default function WebcamFeed({
           }}
         />
         {mode === "upload" ? (
-          <span className="absolute right-2 top-2 rounded bg-sky-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
+          <span className="absolute right-2 top-2 rounded bg-blue-500/80 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
             UPLOAD
           </span>
         ) : (
-          <span className="absolute right-2 top-2 rounded bg-rose-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
+          <span className="absolute right-2 top-2 rounded bg-rose-400/80 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white">
             LIVE
           </span>
         )}

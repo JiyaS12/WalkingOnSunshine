@@ -53,7 +53,7 @@ export default function SkeletonReplay({
         const hipMidX = (f.left_hip[0] + f.right_hip[0]) / 2;
         const toX = (x: number) => width / 2 + (x - hipMidX) * scale;
         ctx.clearRect(0, 0, width, height);
-        ctx.strokeStyle = "#60a5fa";
+        ctx.strokeStyle = "#3B82F6";
         ctx.lineWidth = 2;
         for (const [a, b] of SIM_PAIRS) {
           const pa = f[a];

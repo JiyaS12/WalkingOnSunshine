@@ -15,6 +15,14 @@ import {
   User,
 } from "lucide-react";
 import WebcamFeed from "./WebcamFeed";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import TrendGraph, { TrendSession } from "./TrendGraph";
 import TokenEfficiency from "./TokenEfficiency";
 import {
@@ -35,10 +43,20 @@ const UNSAVED_LABEL = { live: "Live", upload: "Upload" } as const;
 
 function riskLevel(score: number): { label: string; classes: string } {
   if (score < 0.3)
-    return { label: "LOW", classes: "bg-emerald-600/20 text-emerald-300 border-emerald-500/40" };
+    return {
+      label: "LOW",
+      classes:
+        "border-medgreen-500/40 bg-medgreen-500/10 text-medgreen-500",
+    };
   if (score < 0.5)
-    return { label: "MODERATE", classes: "bg-amber-600/20 text-amber-300 border-amber-500/40" };
-  return { label: "HIGH", classes: "bg-rose-600/20 text-rose-300 border-rose-500/40" };
+    return {
+      label: "MODERATE",
+      classes: "border-amber-400/40 bg-amber-400/10 text-amber-300",
+    };
+  return {
+    label: "HIGH",
+    classes: "border-rose-400/40 bg-rose-400/10 text-rose-300",
+  };
 }
 
 interface CardProps {
@@ -51,25 +69,34 @@ interface CardProps {
 
 function MetricCard({ title, value, icon, badge, sub }: CardProps) {
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-400">
+    <Card className="border-border">
+      <CardHeader className="px-4 pb-0 pt-4">
+        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {title}
-        </span>
-        <span className="text-slate-500">{icon}</span>
-      </div>
-      <div className="mt-2 flex items-end gap-2">
-        <span className="text-2xl font-semibold text-slate-100">{value}</span>
-        {badge && (
-          <span
-            className={`mb-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.classes}`}
-          >
-            {badge.label}
+        </CardTitle>
+        <CardAction>
+          <span className="text-muted-foreground">{icon}</span>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 pt-1">
+        <div className="flex items-end gap-2">
+          <span className="text-2xl font-semibold text-card-foreground">
+            {value}
           </span>
+          {badge && (
+            <Badge
+              variant="outline"
+              className={`mb-0.5 text-[10px] font-semibold ${badge.classes}`}
+            >
+              {badge.label}
+            </Badge>
+          )}
+        </div>
+        {sub && (
+          <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
         )}
-      </div>
-      {sub && <p className="mt-1 text-[10px] text-slate-500">{sub}</p>}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -240,7 +267,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                 )
                 .finally(() => setDemoBusy(false));
             }}
-            className="mt-4 block w-full rounded-md border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10 disabled:opacity-50"
+            className="mt-4 block w-full rounded-md border border-medgreen-500/60 px-4 py-2 text-sm font-medium text-medgreen-500 hover:bg-medgreen-500/10 disabled:opacity-50"
           >
             {demoBusy ? "Creating…" : `Create demo profile for ${patientId}`}
           </button>
@@ -249,7 +276,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           )}
           <Link
             href="/"
-            className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+            className="mt-4 inline-block rounded-md bg-medgreen-600 px-4 py-2 text-sm font-medium text-white hover:bg-medgreen-500"
           >
             Back to home
           </Link>
@@ -286,7 +313,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
     <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Activity className="h-8 w-8 text-emerald-400" />
+          <Activity className="h-8 w-8 text-medgreen-500" />
           <div>
             <h1 className="text-2xl font-bold">GaitGuard AI</h1>
             <p className="text-xs text-slate-400">
@@ -315,7 +342,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
         </h2>
         {latestSurvey ? (
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
-            <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-2 py-0.5 text-amber-300">
+            <span className="rounded-full border border-amber-400/40 bg-amber-400/15 px-2 py-0.5 text-amber-300">
               pain {latestSurvey.pain_scale}/10
             </span>
             <span>
@@ -382,7 +409,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
           />
 
           {metrics && !metrics.gait_detected && (
-            <p className="rounded-lg border border-amber-500/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-300">
+            <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
               No walking detected — walk across the frame (or upload a clip
               with walking) to record a session.
             </p>
@@ -397,7 +424,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               <button
                 onClick={() => void saveSession("live")}
                 disabled={saving || !metrics.gait_detected}
-                className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                className="rounded-md bg-medgreen-600 px-3 py-1 text-xs font-medium text-white hover:bg-medgreen-500 disabled:opacity-50"
               >
                 {saving ? "Saving…" : "Save this walk"}
               </button>
@@ -408,7 +435,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
               className={`text-xs ${
                 saveNote.startsWith("Save failed")
                   ? "text-rose-300"
-                  : "text-emerald-300"
+                  : "text-medgreen-500"
               }`}
             >
               {saveNote}
@@ -429,7 +456,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
             <button
               onClick={handleSummary}
               disabled={summaryLoading || !hasSessions}
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-medgreen-600 px-4 py-2 text-sm font-medium text-white hover:bg-medgreen-500 disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               {summaryLoading ? "Generating…" : "Generate Patient Summary"}
@@ -452,7 +479,7 @@ export default function PatientScreening({ patientId }: { patientId: string }) {
                     {summary.source}
                   </span>
                   {summary.cached && (
-                    <span className="rounded-full border border-sky-500/40 bg-sky-600/20 px-2 py-0.5 uppercase text-sky-300">
+                    <span className="rounded-full border border-blue-400/40 bg-blue-500/15 px-2 py-0.5 uppercase text-blue-300">
                       served from cache
                     </span>
                   )}

@@ -23,16 +23,16 @@ function lastRequestBadge(last: SummaryResponse | null): {
   if (last.cached)
     return {
       label: "Cache hit",
-      classes: "border-sky-500/40 bg-sky-600/20 text-sky-300",
+      classes: "border-blue-400/40 bg-blue-500/15 text-blue-300",
     };
   if (last.source === "openai")
     return {
       label: "Fresh LLM call",
-      classes: "border-emerald-500/40 bg-emerald-600/20 text-emerald-300",
+      classes: "border-medgreen-500/40 bg-medgreen-500/15 text-medgreen-500",
     };
   return {
     label: "Template fallback",
-    classes: "border-amber-500/40 bg-amber-600/20 text-amber-300",
+    classes: "border-amber-400/40 bg-amber-400/15 text-amber-300",
   };
 }
 

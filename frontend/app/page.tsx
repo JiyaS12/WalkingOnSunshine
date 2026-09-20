@@ -61,7 +61,7 @@ export default function Home() {
     <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Activity className="h-8 w-8 text-emerald-400" />
+          <Activity className="h-8 w-8 text-medgreen-500" />
           <div>
             <h1 className="text-2xl font-bold">GaitGuard AI</h1>
             <p className="text-xs text-slate-400">
@@ -80,8 +80,8 @@ export default function Home() {
           <span
             className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
               backendUp
-                ? "border-emerald-500/40 bg-emerald-600/20 text-emerald-300"
-                : "border-rose-500/40 bg-rose-600/20 text-rose-300"
+                ? "border-medgreen-500/40 bg-medgreen-500/15 text-medgreen-500"
+                : "border-rose-400/40 bg-rose-400/15 text-rose-300"
             }`}
           >
             Backend: {backendUp === null ? "checking…" : backendUp ? "connected" : "offline"}
@@ -104,7 +104,7 @@ export default function Home() {
               void go("RGN-0417");
             }}
             disabled={creating}
-            className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/60 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-600/10 disabled:opacity-50"
+            className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-medgreen-500/60 px-4 py-2 text-sm font-medium text-medgreen-500 hover:bg-medgreen-500/10 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
             Load Demo Patient RGN-0417
@@ -122,7 +122,7 @@ export default function Home() {
             <button
               onClick={() => void go()}
               disabled={!idInput.trim() || creating}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-medgreen-600 px-4 py-2 text-sm font-medium text-white hover:bg-medgreen-500 disabled:opacity-50"
             >
               {creating ? "Opening…" : "Go"} <ArrowRight className="h-4 w-4" />
             </button>
