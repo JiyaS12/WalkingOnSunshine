@@ -29,7 +29,9 @@ from app.operator_auth import OperatorAuth
 from app.phone_receipts import ReceiptStore
 from app.telephony.config import load_settings
 from app.telephony.deepgram_stt import SpeechEvent
-from app.telephony.integrated_provider import FakePhoneProvider, ProviderUnknown, TwilioProvider
+from app.telephony.integrated_provider import (
+    FakePhoneProvider, ProviderRejected, ProviderUnknown, TwilioProvider,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend import store  # noqa: E402
@@ -778,6 +780,24 @@ def test_provider_adapter_uses_no_retries_and_includes_delivery_callback():
         assert len(seen) == 1
         assert b"StatusCallback=" in seen[0].content
     asyncio.run(scenario())
+
+
+def test_provider_rejection_logs_only_twilio_error_code(caplog):
+    async def scenario():
+        def respond(request):
+            return httpx.Response(400, json={
+                "code": 21211, "status": 400,
+                "message": "The 'To' number +14155550123 is not a valid phone number.",
+            })
+
+        provider = TwilioProvider(load_settings(ENV), transport=httpx.MockTransport(respond))
+        with caplog.at_level("WARNING"), pytest.raises(ProviderRejected):
+            await provider.call("+14155550123", "https://phone.example.test/voice", "https://phone.example.test/status")
+
+    asyncio.run(scenario())
+    assert "error code 21211" in caplog.text
+    assert "4155550123" not in caplog.text
+    assert "not a valid" not in caplog.text
 
 
 def test_backend_rejects_redirect_and_maps_timeout_without_retry():
