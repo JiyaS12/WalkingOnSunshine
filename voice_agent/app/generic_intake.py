@@ -28,10 +28,12 @@ _FILLER = re.compile(
     r"honestly|really|just|so|well|yeah|oh|a|an|the|out of ten|out of 10|on the scale|right now|today|"
     r"my pain is|pain is|falls?|times?|i'?ve had|i had|i have had|i fell|i'?ve fallen)\b"
 )
-_STRONG_YES = re.compile(r"\b(?:yes|yeah|yep|yup|correct|that's right)\b")
+_NEGATED_SUBJECT = re.compile(
+    r"\bi(?: am|'m| do| did| have| was)?(?: not|n't)\b"
+)
 _YES_WORDS = re.compile(r"\b(?:yes|yeah|yep|yup|i have|i did|i do|correct|that's right|i was|i am|i'm)\b")
 _NO_WORDS = re.compile(r"\b(?:no|nope|nah|never|none|not|n't|haven't|didn't|wasn't|don't|isn't|aren't)\b")
-_DECIMAL = re.compile(r"\b(?:point|decimal|half|quarter)\b|\d\s*[.,]\s*\d")
+_DECIMAL = re.compile(r"\b(?:point|decimal)\b|\band a (?:half|quarter)\b|\d\s*[.,]\s*\d")
 _NONE_TEXT = {"none", "nothing", "no", "nope", "nothing to note", "nothing really", "not really",
               "no complaints", "no notes", "nothing to add", "nothing else"}
 ACKNOWLEDGMENTS = ("Got it.", "Okay.", "Thanks.")
@@ -259,10 +261,11 @@ def lenient_parse(kind: str, text: str) -> IntakeReading:
             return IntakeReading(False)
         return IntakeReading(True, number, clear=not hedged and len(stripped.split()) <= 3)
     if kind == "boolean":
+        # "I am not" is one negative construction; a yes-phrase plus a separate
+        # negation ("I am dizzy, but not often") is mixed and must be re-asked.
+        unnegated = _NEGATED_SUBJECT.sub(" ", cleaned)
+        yes = bool(_YES_WORDS.search(unnegated))
         no = bool(_NO_WORDS.search(cleaned))
-        if no and _STRONG_YES.search(cleaned):
-            return IntakeReading(False)
-        yes = bool(_YES_WORDS.search(cleaned)) and not no
         if yes == no:
             return IntakeReading(False)
         return IntakeReading(True, yes, clear=not hedged)
@@ -301,12 +304,15 @@ class OpenAIIntakeInterpreter:
         if direct.valid and question.kind not in {"text", "complaints"}:
             return direct
         model = self._read(question, transcript)
+        if model is None:
+            return direct
         if not model.valid and direct.valid:
             # The model saw a question or an off-topic remark: re-ask instead of proposing it.
             return IntakeReading(False)
         return model
 
-    def _read(self, question: IntakeQuestion, transcript: str) -> IntakeReading:
+    def _read(self, question: IntakeQuestion, transcript: str) -> IntakeReading | None:
+        """None means the provider gave no usable verdict, as opposed to reading the reply as unclear."""
         value_schema = {
             "pain": {"type": ["integer", "null"], "minimum": 1, "maximum": 10},
             "count": {"type": ["integer", "null"], "minimum": 0, "maximum": 999999},
@@ -336,11 +342,13 @@ class OpenAIIntakeInterpreter:
             )
             choice = response.choices[0]
             if choice.finish_reason != "stop" or choice.message.refusal:
-                return IntakeReading(False)
+                return None
             payload = json.loads(choice.message.content)
         except Exception:
-            return IntakeReading(False)
-        if not isinstance(payload, dict) or payload.get("unclear") is True:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("unclear") is True:
             return IntakeReading(False)
         if payload.get("unknown") is True:
             return IntakeReading(True, None)

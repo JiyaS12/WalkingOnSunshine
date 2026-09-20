@@ -939,6 +939,30 @@ def test_fractional_ratings_are_not_rounded(text):
     assert lenient_parse("pain", text).valid is False
 
 
+def test_time_words_do_not_invalidate_counts():
+    assert lenient_parse("count", "I fell once last quarter").value == 1
+    assert lenient_parse("count", "one and a half").valid is False
+
+
+@pytest.mark.parametrize("text", ["I am dizzy, but not often", "yes and no", "I have, but not lately"])
+def test_mixed_boolean_replies_are_reasked(text):
+    assert lenient_parse("boolean", text).valid is False
+
+
+def test_provider_failure_keeps_the_deterministic_reading():
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    raise TimeoutError("provider down")
+
+    interpreter = OpenAIIntakeInterpreter(Client())
+    reading = interpreter.interpret(QUESTIONS[3], "fell on stairs")
+    assert (reading.valid, reading.value, reading.clear) == (True, "fell on stairs", False)
+    assert interpreter.interpret(QUESTIONS[0], "it's been rough").valid is False
+
+
 def test_model_mode_reasks_free_text_the_model_calls_off_topic():
     class Client:
         class chat:
