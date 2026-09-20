@@ -106,6 +106,22 @@ def test_token_expires_at_exact_expiration():
         )
 
 
+def test_token_with_fractional_issuance_gets_full_lifetime():
+    issued_at = _FIXED_NOW.replace(microsecond=900_000)
+    token, expires_at = patient_access.generate_token(
+        "RGN-0417", now=issued_at, ttl_seconds=60, secret=_UNIT_SECRET
+    )
+
+    assert expires_at > issued_at + timedelta(seconds=60)
+    assert expires_at <= issued_at + timedelta(seconds=61)
+    patient_access.verify_token(
+        token,
+        "RGN-0417",
+        now=issued_at + timedelta(seconds=60),
+        secret=_UNIT_SECRET,
+    )
+
+
 @pytest.mark.parametrize("mutation", ["payload", "signature"])
 def test_token_tampering_is_rejected(mutation):
     token, _ = patient_access.generate_token(
@@ -176,6 +192,16 @@ def test_survey_fails_closed_before_storage_without_signing_secret(
     assert not isolated_store.exists() or "RGN-NEW" not in json.loads(
         isolated_store.read_text()
     )
+
+
+def test_survey_ingestion_fails_closed_without_auth_configuration(monkeypatch):
+    monkeypatch.delenv("SURVEY_INGEST_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOW_UNAUTHENTICATED_SURVEY_INGEST", raising=False)
+
+    response = client.post("/api/submit-survey", json=_survey("RGN-NEW"))
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "survey ingestion is not configured"}
 
 
 @pytest.mark.parametrize(

@@ -20,7 +20,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 | `PATIENT_LINK_SIGNING_SECRET` | Required, minimum 32 bytes | HMAC-SHA256 signing key. The backend fails closed with `503` when it is absent or too short. Rotate it to invalidate every outstanding patient link. |
 | `PATIENT_APP_BASE_URL` | `http://localhost:3000` | Public base URL used in `patient_url`. Non-local deployments must use HTTPS. Queries and fragments are rejected. |
 | `PATIENT_LINK_TTL_SECONDS` | `900` | Link lifetime in seconds; accepted range is 60–604800 (one minute to seven days). |
-| `SURVEY_INGEST_TOKEN` | Optional for local use | When set, callers must send it in `X-Survey-Token`. Configure it in production so only the voice intake service can create links. |
+| `SURVEY_INGEST_TOKEN` | Required by default | Callers must send it in `X-Survey-Token` so only the voice intake service can create links. Missing configuration fails closed with `503`. |
+| `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` | Disabled | Local-only escape hatch for running intake without a token. Never enable it in a shared or production environment. |
 
 Provide secrets through the deployment secret manager, not `.env` files in
 source control. Tokens are credentials: redact full patient URLs and

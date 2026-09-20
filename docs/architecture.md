@@ -69,8 +69,9 @@ The core endpoints that carry the cross-domain handshake:
 
 - **`POST /api/submit-survey`** — Receives structured JSON from the voice agent
   containing patient symptoms and metadata, linking them securely to the
-  patient record. Gated by an `X-Survey-Token` header whenever the
-  `SURVEY_INGEST_TOKEN` environment variable is set. Its response includes a
+  patient record. Gated by an `X-Survey-Token` header using the required
+  `SURVEY_INGEST_TOKEN` configuration (with an explicit local-only opt-out).
+  Its response includes a
   complete, expiring `patient_url` for the voice/SMS service.
 - **`POST /api/process-video`** — Accepts multipart video file uploads,
   executes batch MediaPipe pose extraction across frames, and returns computed

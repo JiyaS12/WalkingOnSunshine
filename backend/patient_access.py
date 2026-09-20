@@ -12,6 +12,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -128,8 +129,11 @@ def generate_token(
     if lifetime <= 0 or not signing_secret:
         raise PatientAccessConfigurationError("patient token configuration is invalid")
 
+    # Tokens encode whole Unix seconds. Round the target expiration upward so
+    # callers always receive at least the configured lifetime, even when the
+    # issuance clock includes microseconds.
     expires_at = datetime.fromtimestamp(
-        int(issued_at.timestamp()) + lifetime, tz=timezone.utc
+        math.ceil(issued_at.timestamp() + lifetime), tz=timezone.utc
     )
     payload = json.dumps(
         {"exp": int(expires_at.timestamp()), "sub": patient_id, "v": _TOKEN_VERSION},

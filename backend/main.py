@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from datetime import datetime
 
@@ -191,7 +192,16 @@ class SessionPayload(BaseModel):
 
 def _check_survey_token(x_survey_token: str | None = Header(default=None)):
     token = os.getenv("SURVEY_INGEST_TOKEN")
-    if token and x_survey_token != token:
+    allow_unauthenticated = os.getenv(
+        "ALLOW_UNAUTHENTICATED_SURVEY_INGEST", ""
+    ).lower() in ("1", "true", "yes")
+    if not token:
+        if allow_unauthenticated:
+            return
+        raise HTTPException(
+            status_code=503, detail="survey ingestion is not configured"
+        )
+    if not x_survey_token or not secrets.compare_digest(x_survey_token, token):
         raise HTTPException(status_code=401, detail="invalid survey token")
 
 

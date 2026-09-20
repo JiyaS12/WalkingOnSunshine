@@ -11,3 +11,4 @@ def configured_patient_links(monkeypatch):
     )
     monkeypatch.setenv("PATIENT_APP_BASE_URL", "https://patient.example.test")
     monkeypatch.setenv("PATIENT_LINK_TTL_SECONDS", "900")
+    monkeypatch.setenv("ALLOW_UNAUTHENTICATED_SURVEY_INGEST", "true")

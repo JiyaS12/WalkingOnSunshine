@@ -74,9 +74,12 @@ Optional environment variables:
   (deterministic template fallback without it). Summaries are cached in
   `backend/.cache/summaries.json`; `GET /api/summary-cache-stats` reports
   cache stats.
-- `SURVEY_INGEST_TOKEN` — when set, `POST /api/submit-survey` requires the
-  `X-Survey-Token` header to match. It also disables `POST
+- `SURVEY_INGEST_TOKEN` — required for `POST /api/submit-survey`; callers send
+  it in `X-Survey-Token`. It also disables `POST
   /api/patients/{id}/ensure-demo` (403) unless `ALLOW_DEMO_PATIENTS` is set.
+- `ALLOW_UNAUTHENTICATED_SURVEY_INGEST` — local-only escape hatch. Set to
+  `1`/`true`/`yes` to run survey ingestion without a token. Never enable this
+  in a shared or production environment.
 - `ALLOW_DEMO_PATIENTS` — set to `1`/`true`/`yes` to keep auto-created demo
   patient profiles enabled while survey ingestion is token-protected.
 
