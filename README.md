@@ -167,7 +167,7 @@ exact origin in `CORS_ALLOWED_ORIGINS`.
 
 ## Quick local demo
 
-Quickest path (macOS/Linux, needs Python 3.10-3.12 and Node 20):
+Quickest path (macOS/Linux, needs Python 3.11 or 3.12 and Node 20):
 
 ```bash
 git clone https://github.com/JiyaS12/WalkingOnSunshine.git

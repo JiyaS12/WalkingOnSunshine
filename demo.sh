@@ -10,13 +10,13 @@ cd "$ROOT"
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
-# ---------- Python (mediapipe 0.10.14 needs 3.10 - 3.12) ----------
+# ---------- Python (backend needs 3.11+; mediapipe 0.10.14 needs <= 3.12) ----------
 PY=""
-for candidate in python3.12 python3.11 python3.10 python3; do
+for candidate in python3.12 python3.11 python3; do
   if command -v "$candidate" >/dev/null 2>&1; then
     ver="$("$candidate" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
     case "$ver" in
-      3.10|3.11|3.12) PY="$candidate"; break ;;
+      3.11|3.12) PY="$candidate"; break ;;
     esac
   fi
 done
@@ -26,7 +26,7 @@ if [ -z "$PY" ]; then
     brew install python@3.12
     PY="$(brew --prefix python@3.12)/bin/python3.12"
   else
-    die "Python 3.10-3.12 is required (3.13 cannot install MediaPipe). Install it, e.g. https://www.python.org/downloads/release/python-3120/ or 'brew install python@3.12', then re-run."
+    die "Python 3.11 or 3.12 is required (3.13 cannot install MediaPipe). Install it, e.g. https://www.python.org/downloads/release/python-3120/ or 'brew install python@3.12', then re-run."
   fi
 fi
 log "Using $($PY --version) at $(command -v "$PY" || echo "$PY")"
@@ -42,7 +42,7 @@ cd "$ROOT/backend"
 if [ -x .venv/bin/python ]; then
   venv_ver="$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo none)"
   case "$venv_ver" in
-    3.10|3.11|3.12) ;;
+    3.11|3.12) ;;
     *) log "Recreating backend/.venv (was Python $venv_ver)"; rm -rf .venv ;;
   esac
 fi
@@ -110,7 +110,7 @@ npm run dev &
 FRONTEND_PID=$!
 
 READY=false
-for _ in $(seq 1 60); do
+for _ in $(seq 1 90); do
   if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1 \
      && curl -fsS -o /dev/null http://localhost:3000/ >/dev/null 2>&1; then
     READY=true
@@ -118,7 +118,7 @@ for _ in $(seq 1 60); do
   fi
   sleep 1
 done
-[ "$READY" = true ] || die "Servers did not become ready within 60 seconds (see output above)."
+[ "$READY" = true ] || die "Servers did not become ready within 90 seconds (see output above)."
 
 # Mint a magic link for the seeded demo patient (data/mock_patients.json).
 cd "$ROOT/backend"
