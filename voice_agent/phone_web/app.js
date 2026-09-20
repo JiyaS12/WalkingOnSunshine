@@ -21,10 +21,26 @@ const BADGES = {
 let pollTimer = null;
 let renderedTranscript = "";
 
+const tokenField = document.querySelector("#token");
+tokenField.value = sessionStorage.getItem("operatorToken") || "";
+
+function operatorHeaders(extra = {}) {
+  const token = tokenField.value.trim();
+  sessionStorage.setItem("operatorToken", token);
+  return { Authorization: `Bearer ${token}`, ...extra };
+}
+
 async function loadConfig() {
   try {
     const response = await fetch("/api/config");
     const data = await response.json();
+    if (!data.operator_token_configured) {
+      configLine.textContent =
+        "Not ready — set OPERATOR_TOKEN in .env (any long random value) and restart, so only you can place calls.";
+      configLine.classList.add("warn");
+      button.disabled = true;
+      return;
+    }
     if (data.ready) {
       configLine.textContent = data.llm_configured
         ? `Ready — Twilio, Deepgram and conversational answers configured, webhooks at ${data.public_base_url}`
@@ -136,7 +152,12 @@ function pollCall(sessionId) {
   // A restarted server forgets in-memory calls; give up rather than poll forever.
   let misses = 0;
   pollTimer = setInterval(async () => {
-    const response = await fetch(`/api/calls/${sessionId}`);
+    const response = await fetch(`/api/calls/${sessionId}`, { headers: operatorHeaders() });
+    if (response.status === 401) {
+      stopPolling();
+      showError("Operator token rejected — check it and dial again.");
+      return;
+    }
     if (!response.ok) {
       if (++misses < 8) return;
       stopPolling();
@@ -164,7 +185,7 @@ dialer.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/calls", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: operatorHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         to_number: document.querySelector("#to").value.trim(),
         patient_code: document.querySelector("#patient").value,

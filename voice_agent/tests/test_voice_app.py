@@ -4,6 +4,7 @@ from app.answer_interpreter import Interpretation
 from app.persistence import InMemoryPersistence
 from fastapi.testclient import TestClient
 import voice_app
+from app.operator_auth import OperatorAuth
 import asyncio
 import pytest
 from unittest.mock import Mock
@@ -203,13 +204,20 @@ def test_voice_turns_persist_patient_id_transcript_and_survey_results(monkeypatc
     monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
     monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
     monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: "mild")
-    app = create_app(persistence=store)
+    app = create_app(persistence=store, auth=OperatorAuth("operator-secret"))
     with TestClient(app) as client:
         started = client.post("/api/sessions", params={"patient_code": "RGN-0417"}).json()
         url = f"/api/sessions/{started['session_id']}/audio"
         files = {"audio": ("answer.webm", b"synthetic-audio", "audio/webm")}
         client.post(url, files=files)
-        payload = client.get("/api/results", params={"patient_code": "RGN-0417"}).json()
+        # Transcripts and answers are operator-only.
+        assert client.get("/api/results").status_code == 401
+        assert client.get("/api/results", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        payload = client.get(
+            "/api/results",
+            params={"patient_code": "RGN-0417"},
+            headers={"Authorization": "Bearer operator-secret"},
+        ).json()
         assert client.get("/api/config").json()["conversation_store"] == "in_memory"
     row = payload["results"][0]
     assert row["patient_id"] == "RGN-0417"

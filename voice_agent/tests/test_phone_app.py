@@ -9,9 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 import phone_app
+from app.operator_auth import OperatorAuth
 from app.telephony.config import load_settings
 from app.telephony.deepgram_stt import SpeechEvent
 
+TOKEN = "operator-secret"
 ENV = {
     "DEEPGRAM_API_KEY": "dg-key",
     "TWILIO_ACCOUNT_SID": "AC123",
@@ -54,7 +56,9 @@ def client(monkeypatch):
     monkeypatch.setattr(phone_app, "DeepgramTranscriber", ScriptedTranscriber)
     monkeypatch.setattr(phone_app, "_signature_ok", lambda *args, **kwargs: True)
     ScriptedTranscriber.queue = []
-    return TestClient(phone_app.create_app(load_settings(ENV)))
+    client = TestClient(phone_app.create_app(load_settings(ENV), auth=OperatorAuth(TOKEN)))
+    client.headers["Authorization"] = f"Bearer {TOKEN}"
+    return client
 
 
 def test_config_reports_ready(client):
@@ -64,8 +68,38 @@ def test_config_reports_ready(client):
         "twilio_configured": True,
         "public_base_url": "https://tunnel.example.com",
         "llm_configured": False,
+        "operator_token_configured": True,
         "ready": True,
     }
+
+
+def test_operator_routes_require_the_token(client, monkeypatch):
+    async def fake_place_call(**kwargs):
+        return phone_app.twilio.PlacedCall(
+            call_sid="CA9", status="queued", to_number=kwargs["to_number"]
+        )
+
+    monkeypatch.setattr(phone_app.twilio, "place_call_async", fake_place_call)
+    payload = {"to_number": "+14155550123", "patient_code": "RGN-0417"}
+    session_id = client.post("/api/calls", json=payload).json()["session_id"]
+
+    anonymous = {"Authorization": ""}
+    wrong = {"Authorization": "Bearer nope"}
+    assert client.post("/api/calls", json=payload, headers=anonymous).status_code == 401
+    assert client.post("/api/calls", json=payload, headers=wrong).status_code == 401
+    assert client.get(f"/api/calls/{session_id}", headers=anonymous).status_code == 401
+    assert client.get(f"/api/calls/{session_id}").status_code == 200
+    # Twilio's webhooks are signature-checked, not token-gated.
+    assert client.post("/twilio/status", data={"CallSid": "CA9", "CallStatus": "ringing"}, headers=anonymous).status_code == 204
+
+
+def test_dialing_is_refused_until_an_operator_token_is_configured():
+    app = phone_app.create_app(load_settings(ENV), auth=OperatorAuth(None))
+    with TestClient(app) as anonymous:
+        assert anonymous.get("/api/config").json()["ready"] is False
+        response = anonymous.post("/api/calls", json={"to_number": "+14155550123"})
+    assert response.status_code == 503
+    assert "OPERATOR_TOKEN" in response.json()["detail"]
 
 
 def test_voice_webhook_returns_stream_twiml(client):

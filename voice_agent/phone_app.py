@@ -19,7 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -30,6 +30,7 @@ from app.answer_interpreter import (
     OpenAIAnswerInterpreter,
     build_answer_interpreter,
 )
+from app.operator_auth import OperatorAuth
 from app.patient_repository import InMemoryPatientRepository, PatientNotFoundError
 from app.persistence import InMemoryPersistence
 from app.survey_engine import SafeSurveyEngine
@@ -417,9 +418,12 @@ def speech_chunks(text: str, limit: int = SPEECH_CHUNK_CHARS) -> list[str]:
     return chunks or [text]
 
 
-def create_app(settings: TelephonySettings | None = None) -> FastAPI:
+def create_app(
+    settings: TelephonySettings | None = None, auth: OperatorAuth | None = None
+) -> FastAPI:
     load_dotenv(ROOT / ".env")
     resolved = settings or load_settings()
+    operator = auth or OperatorAuth.from_env()
     app = FastAPI(title="VoiceAIThing phone survey")
     repository = InMemoryPatientRepository()
     persistence = InMemoryPersistence()
@@ -444,10 +448,11 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             "twilio_configured": resolved.twilio_ready,
             "public_base_url": resolved.public_base_url,
             "llm_configured": isinstance(interpreter, OpenAIAnswerInterpreter),
-            "ready": resolved.ready,
+            "operator_token_configured": operator.configured,
+            "ready": resolved.ready and operator.configured,
         }
 
-    @app.post("/api/calls")
+    @app.post("/api/calls", dependencies=[Depends(operator)])
     async def start_call(payload: CallRequest) -> dict[str, object]:
         try:
             resolved.require_outbound()
@@ -492,7 +497,7 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             "session_id": session_id,
         }
 
-    @app.get("/api/calls/{session_id}")
+    @app.get("/api/calls/{session_id}", dependencies=[Depends(operator)])
     def call_record(session_id: str) -> dict[str, object]:
         record = persistence.calls.get(session_id)
         if record is None:

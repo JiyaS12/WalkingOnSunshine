@@ -16,12 +16,13 @@ from threading import RLock
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from app.operator_auth import OperatorAuth
 from app.patient_repository import InMemoryPatientRepository
 from app.answer_interpreter import OpenAIAnswerInterpreter, build_answer_interpreter
 from app.survey_engine import SafeSurveyEngine
@@ -34,8 +35,9 @@ ROOT = Path(__file__).resolve().parent
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
-def create_app(persistence=None) -> FastAPI:
+def create_app(persistence=None, auth: OperatorAuth | None = None) -> FastAPI:
     load_dotenv(ROOT / ".env")
+    operator = auth or OperatorAuth.from_env()
     interpreter = build_answer_interpreter()
     store = persistence if persistence is not None else build_persistence()
     app = FastAPI(title="VoiceAIThing desktop voice survey")
@@ -106,7 +108,7 @@ def create_app(persistence=None) -> FastAPI:
             "conversation_store": "supabase" if database_enabled else "in_memory",
         }
 
-    @app.get("/api/results")
+    @app.get("/api/results", dependencies=[Depends(operator)])
     def results(patient_code: str | None = None) -> dict[str, object]:
         return {"results": store.list_results(patient_code)}
 

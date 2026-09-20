@@ -171,14 +171,18 @@ speaks each prompt back into the call. Both API keys stay on the server.
 ```bash
 cp .env.example .env
 # Set DEEPGRAM_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+# Set OPERATOR_TOKEN to a long random value (openssl rand -hex 32)
 ngrok http 8000                 # in a second terminal
 # Put the https tunnel URL in PUBLIC_BASE_URL, then:
 python phone_app.py
 ```
 
 Open <http://127.0.0.1:8000>, enter the patient's number in E.164 format
-(`+14155550123`) and a patient code (`RGN-0417` orthopedic, `RGN-0500` stroke),
-then click **Call patient**. The page polls the live transcript while the call
+(`+14155550123`), the `OPERATOR_TOKEN`, and a patient code (`RGN-0417`
+orthopedic, `RGN-0500` stroke), then click **Call patient**. Every `/api/*`
+route requires `Authorization: Bearer <OPERATOR_TOKEN>` because the tunnel
+exposes them publicly; the Twilio webhooks are verified by request signature
+instead. The page polls the live transcript while the call
 runs. Twilio must reach `PUBLIC_BASE_URL` over HTTPS, so keep the tunnel up for
 the whole call.
 
@@ -262,7 +266,7 @@ by speaking, or send a real gait link.
 When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set on the server, each
 voice session stores the synthetic patient id, the conversation transcript
 text, and confirmed survey results. Raw audio is not stored. Inspect saved
-rows at `GET /api/results` or the `patient_conversation_results` view. See
+rows at `GET /api/results` (requires the `OPERATOR_TOKEN` bearer header) or the `patient_conversation_results` view. See
 [DATABASE.md](DATABASE.md).
 
 The active survey implementation is in `app/`; this checkout does not include
