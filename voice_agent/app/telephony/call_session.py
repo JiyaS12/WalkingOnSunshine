@@ -39,13 +39,17 @@ _NOT_READY = re.compile(
     r"(?:have|see|find|get|open|load)"
     r"|(?:don'?t|do not|not sure|unsure)\s+(?:think|know|believe)\b)"
 )
-# Clause boundaries: punctuation and contrast/temporal words a correction follows.
+# Clause boundaries: punctuation and the contrast words a correction follows.
+# A concession ("although…") adds background; it does not replace what came before.
 _CLAUSE_BREAK = re.compile(r"[,.;!?]+|\b(?:but|though|although|however|anyway|now)\b")
-_FILLER = re.compile(r"(?:okay|ok|yes|yeah|yep|sure|alright|right|fine)")
+_CONCESSION = re.compile(r"\b(?:although|though|even if)\b")
+# Words that assert the link is open in the caller's hand right now.
 _READY_WORDS = re.compile(
     r"\b(ready|got it|open(?:ed)?|it'?s up|have it|see it|i'?m (?:set|on|there|in)|"
-    r"okay|ok|yes|yeah|yep|sure|go ahead|all set|loaded|done)\b"
+    r"all set|loaded)\b"
 )
+# Agreement that only means yes when nothing else has been said.
+_FILLER_WORDS = re.compile(r"\b(okay|ok|yes|yeah|yep|sure|go ahead|done|fine|alright)\b")
 
 Speaker = Callable[[str], Awaitable[None]]
 SmsSender = Callable[[str, str], Awaitable[None]]
@@ -288,33 +292,54 @@ def link_reply_intent(transcript: str) -> str:
     """Classify what a caller said while we wait for them to open the text.
 
     Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. A stop
-    anywhere wins. Otherwise the caller's *last* clause that says something
-    decides, so "it wouldn't open before, but it's open now" is a yes and
-    "it opened before, but it isn't open now" is not; a trailing bare "okay"
-    does not overturn "no, I didn't get it". Within a clause, missing and
-    negated readiness are checked before ready words.
+    anywhere wins. Otherwise the caller is read clause by clause and the last
+    clause that asserts something about the link decides, with two limits:
+    bare agreement ("yes", "okay") never overturns an earlier "I didn't get
+    it" or "it isn't open", and a concession ("…although it didn't arrive at
+    first") never overturns what came before it. Within a clause, missing and
+    negated readiness beat ready words, so "no, I didn't get it" is not a yes.
     """
 
     text = transcript.lower()
     if _STOP_WORDS.search(text):
         return "stop"
     decided = "unclear"
-    for clause in _CLAUSE_BREAK.split(text):
-        clause = clause.strip()
-        if not clause:
-            continue
+    for connective, clause in _clauses(text):
         if _MISSING_WORDS.search(clause):
             intent = "missing"
         elif _NOT_READY.search(clause):
             intent = "negated"
         elif _READY_WORDS.search(clause):
-            if _FILLER.fullmatch(clause) and decided != "unclear":
+            intent = "ready"
+        elif _FILLER_WORDS.search(clause):
+            if decided != "unclear":
                 continue
             intent = "ready"
         else:
             continue
+        if decided != "unclear" and _CONCESSION.search(connective):
+            continue
         decided = intent
     return "unclear" if decided == "negated" else decided
+
+
+def _clauses(text: str) -> list[tuple[str, str]]:
+    """Split ``text`` into (connective, clause) pairs; the connective is the
+    punctuation or word that introduced the clause ("" for the first)."""
+
+    pairs: list[tuple[str, str]] = []
+    connective = ""
+    position = 0
+    for match in _CLAUSE_BREAK.finditer(text):
+        clause = text[position : match.start()].strip()
+        if clause:
+            pairs.append((connective, clause))
+        connective = match.group(0)
+        position = match.end()
+    tail = text[position:].strip()
+    if tail:
+        pairs.append((connective, tail))
+    return pairs
 
 
 def _spoken(prompt: str) -> str:
