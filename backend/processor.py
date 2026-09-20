@@ -69,9 +69,10 @@ class GaitMetrics(BaseModel):
     peak_ankle_speed_mps: float
     gait_detected: bool
     dropped_frame_pct: float = 0.0
-    com_velocity_mps: float = 0.0
-    knee_angular_velocity_dps: float = 0.0
-    knee_moment_proxy: float = 0.0
+    # None when the metrics came from a client that predates the model
+    com_velocity_mps: float | None = None
+    knee_angular_velocity_dps: float | None = None
+    knee_moment_proxy: float | None = None
 
 
 def validate_frames(frames: list[dict[str, list[float]]]) -> None:
@@ -270,13 +271,32 @@ class GaitProcessor:
             return 0.0
         return float(inertia * np.mean(accels))
 
+    def _hip_midpoint(self) -> np.ndarray:
+        return (self._joint_array("left_hip") + self._joint_array("right_hip")) / 2.0
+
+    def _hips_translate(self) -> bool:
+        """Whether the hip midpoint actually moves through space.
+
+        Hip-centred input (live MediaPipe world coordinates) keeps the midpoint
+        near the origin apart from tracker jitter. Judge by the horizontal
+        range of a ~0.5 s smoothed midpoint, which jitter cannot inflate no
+        matter how long the clip runs.
+        """
+        mid = self._hip_midpoint()
+        window = max(1, int(round(0.5 * self.fps)))
+        smoothed = (
+            pd.DataFrame(mid[:, [0, 2]])
+            .rolling(window=window, min_periods=1)
+            .mean()
+            .to_numpy()
+        )
+        extent = float(np.linalg.norm(np.ptp(smoothed, axis=0)))
+        return extent >= 0.1 * self.leg_length_m
+
     def _com_velocity(self) -> float:
         """Mean hip-midpoint speed (m/s); ankle-swing proxy for hip-centred input."""
-        left_hip = self._joint_array("left_hip")
-        right_hip = self._joint_array("right_hip")
-        mid = (left_hip + right_hip) / 2.0
-        step = np.linalg.norm(np.diff(mid, axis=0), axis=1)
-        if float(np.sum(step)) < 0.05 * self.leg_length_m:
+        step = np.linalg.norm(np.diff(self._hip_midpoint(), axis=0), axis=1)
+        if not self._hips_translate():
             # relative to the hips a foot moves backward at ~v in stance and
             # forward at ~2v in swing (plus lift), so its time-averaged speed
             # is ~2x the centre-of-mass velocity
@@ -333,16 +353,13 @@ class GaitProcessor:
         return abs(left - right) / max(mean, _EPS) * 100.0
 
     def _velocity_degradation_pct(self) -> float:
-        left_hip = self._joint_array("left_hip")
-        right_hip = self._joint_array("right_hip")
-        mid = (left_hip + right_hip) / 2.0  # (n, 3)
+        mid = self._hip_midpoint()  # (n, 3)
         dx = np.diff(mid[:, 0])
         dz = np.diff(mid[:, 2])
         speed = np.sqrt(dx**2 + dz**2) * self.fps
         # hip-centred inputs (live MediaPipe world coords) barely translate;
         # fall back to mean ankle swing speed as the velocity proxy
-        path = float(np.sum(np.linalg.norm(np.diff(mid, axis=0), axis=1)))
-        if path < 0.05 * self.leg_length_m:
+        if not self._hips_translate():
             speed = (
                 self._ankle_speed("left") + self._ankle_speed("right")
             ) / 2.0

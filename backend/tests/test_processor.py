@@ -260,4 +260,30 @@ def test_com_velocity_tracks_hip_translation():
     assert centred.com_velocity_mps == pytest.approx(translating.com_velocity_mps, rel=0.15)
 
 
+def test_hip_jitter_does_not_replace_ankle_velocity_proxy():
+    session = gait_gen.recovered_session(seed=7)
+    frames = session["frames"][:150]
+    translating = GaitProcessor(frames, fps=30.0).compute()
+    jittered = _hip_centre(frames)
+    for i, f in enumerate(jittered):
+        wobble = 0.002 if i % 2 else -0.002
+        for joint in f:
+            f[joint][0] += wobble
+    metrics = GaitProcessor(jittered, fps=30.0).compute()
+    assert metrics.com_velocity_mps == pytest.approx(translating.com_velocity_mps, rel=0.15)
+    assert metrics.fall_risk_score == pytest.approx(translating.fall_risk_score, abs=0.1)
+
+
+def test_client_metrics_without_model_inputs_stay_unset():
+    metrics = GaitMetrics(
+        stride_length_m=1.0, asymmetry_pct=2.0, velocity_degradation_pct=0.0,
+        fall_risk_score=0.1, cadence_steps_per_min=100.0, frame_count=90,
+        leg_length_m=0.9, stride_ratio=1.1, knee_flexion_rom_deg=55.0,
+        peak_ankle_speed_mps=2.0, gait_detected=True,
+    )
+    assert metrics.com_velocity_mps is None
+    assert metrics.knee_angular_velocity_dps is None
+    assert metrics.knee_moment_proxy is None
+
+
 

@@ -667,12 +667,12 @@ export default function DoctorPortal() {
                         "Session",
                         latestSession.label
                       )}
-                      {latestSession.metrics.com_velocity_mps !== undefined &&
+                      {latestSession.metrics.com_velocity_mps != null &&
                         stat(
                           "COM velocity",
                           `${latestSession.metrics.com_velocity_mps.toFixed(2)} m/s`
                         )}
-                      {latestSession.metrics.knee_angular_velocity_dps !== undefined &&
+                      {latestSession.metrics.knee_angular_velocity_dps != null &&
                         stat(
                           "Knee ω peak",
                           `${latestSession.metrics.knee_angular_velocity_dps.toFixed(0)}°/s`
