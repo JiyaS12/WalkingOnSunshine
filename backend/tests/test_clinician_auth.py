@@ -43,6 +43,7 @@ def test_protected_data_denies_unauthenticated_and_patient_credentials():
         ("post", "/api/generate-summary"),
         ("post", "/api/patients/RGN-0417/synthesis"),
         ("post", "/api/patients/RGN-0417/sessions"),
+        ("post", "/api/patients/RGN-0417/ensure-demo"),
     ]
     patient_headers = {
         "Authorization": "Bearer signed-patient-link-token",
@@ -128,11 +129,16 @@ def test_cors_allows_configured_local_frontend_only():
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization",
         },
     )
     assert allowed.status_code == 200
     assert allowed.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert allowed.headers["access-control-allow-credentials"] == "true"
+    assert (
+        "authorization"
+        in allowed.headers["access-control-allow-headers"].lower()
+    )
 
     denied = client.options(
         "/api/patients",
