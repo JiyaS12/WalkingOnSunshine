@@ -39,17 +39,29 @@ _NOT_READY = re.compile(
     r"(?:have|see|find|get|open|load)"
     r"|(?:don'?t|do not|not sure|unsure)\s+(?:think|know|believe)\b)"
 )
-# Clause boundaries: punctuation and the contrast words a correction follows.
-# A concession ("although…") adds background; it does not replace what came before.
-_CLAUSE_BREAK = re.compile(r"[,.;!?]+|\b(?:but|though|although|however|anyway|now)\b")
-_CONCESSION = re.compile(r"\b(?:although|though|even if)\b")
+# Clause boundaries: punctuation and the connectives a correction follows.
+_CLAUSE_BREAK = re.compile(
+    r"[,.;!?]+|\b(?:but|though|although|however|anyway|now|and now)\b"
+)
+# A clause about what happened earlier is background, not the caller's state.
+_HISTORICAL = re.compile(
+    r"\b(?:at first|before|earlier|initially|originally|the first time|was|wasn'?t|were|had)\b"
+)
+# The text is in hand but nothing says it is open yet.
+_ARRIVED_WORDS = re.compile(
+    r"\b(?:it (?:arrived|came(?: through)?|showed up|just came|is here|'?s here)|"
+    r"(?:got|received|have) (?:the|your|a) (?:text|message|link))\b"
+)
 # Words that assert the link is open in the caller's hand right now.
 _READY_WORDS = re.compile(
     r"\b(ready|got it|open(?:ed)?|it'?s up|have it|see it|i'?m (?:set|on|there|in)|"
     r"all set|loaded)\b"
 )
-# Agreement that only means yes when nothing else has been said.
-_FILLER_WORDS = re.compile(r"\b(okay|ok|yes|yeah|yep|sure|go ahead|done|fine|alright)\b")
+# A clause that is nothing but agreement; it means yes only on its own.
+_FILLER_CLAUSE = re.compile(
+    r"(?:(?:okay|ok|yes|yeah|yep|sure|go ahead|done|fine|alright|please|thanks|thank you)"
+    r"(?:\s+|$))+"
+)
 
 Speaker = Callable[[str], Awaitable[None]]
 SmsSender = Callable[[str, str], Awaitable[None]]
@@ -293,53 +305,46 @@ def link_reply_intent(transcript: str) -> str:
 
     Returns ``"stop"``, ``"missing"``, ``"ready"`` or ``"unclear"``. A stop
     anywhere wins. Otherwise the caller is read clause by clause and the last
-    clause that asserts something about the link decides, with two limits:
-    bare agreement ("yes", "okay") never overturns an earlier "I didn't get
-    it" or "it isn't open", and a concession ("…although it didn't arrive at
-    first") never overturns what came before it. Within a clause, missing and
-    negated readiness beat ready words, so "no, I didn't get it" is not a yes.
+    clause that says something about the link decides, with two limits: a
+    clause about earlier ("…although it didn't arrive at first", "I was able
+    to open it, though…") is background and yields to any clause about now,
+    and bare agreement ("yes", "okay") only counts as a yes when nothing else
+    was said. Within a clause, missing and negated readiness beat ready words,
+    so "no, I didn't get it" is not a yes, and "it arrived" is not "it is
+    open", so it earns the reminder rather than the countdown.
     """
 
     text = transcript.lower()
     if _STOP_WORDS.search(text):
         return "stop"
-    decided = "unclear"
-    for connective, clause in _clauses(text):
+    current: list[str] = []
+    background: list[str] = []
+    for clause in _clauses(text):
         if _MISSING_WORDS.search(clause):
             intent = "missing"
         elif _NOT_READY.search(clause):
             intent = "negated"
+        elif _ARRIVED_WORDS.search(clause):
+            intent = "arrived"
         elif _READY_WORDS.search(clause):
             intent = "ready"
-        elif _FILLER_WORDS.search(clause):
-            if decided != "unclear":
-                continue
-            intent = "ready"
+        elif _FILLER_CLAUSE.fullmatch(clause):
+            intent = "agreed"
         else:
             continue
-        if decided != "unclear" and _CONCESSION.search(connective):
-            continue
-        decided = intent
-    return "unclear" if decided == "negated" else decided
+        (background if _HISTORICAL.search(clause) else current).append(intent)
+    decisive = [i for i in current if i != "agreed"] or [i for i in background if i != "agreed"]
+    if decisive:
+        return decisive[-1] if decisive[-1] in {"missing", "ready"} else "unclear"
+    if "agreed" in current:
+        return "ready"
+    return "unclear"
 
 
-def _clauses(text: str) -> list[tuple[str, str]]:
-    """Split ``text`` into (connective, clause) pairs; the connective is the
-    punctuation or word that introduced the clause ("" for the first)."""
+def _clauses(text: str) -> list[str]:
+    """Split ``text`` at punctuation and connectives, dropping empty pieces."""
 
-    pairs: list[tuple[str, str]] = []
-    connective = ""
-    position = 0
-    for match in _CLAUSE_BREAK.finditer(text):
-        clause = text[position : match.start()].strip()
-        if clause:
-            pairs.append((connective, clause))
-        connective = match.group(0)
-        position = match.end()
-    tail = text[position:].strip()
-    if tail:
-        pairs.append((connective, tail))
-    return pairs
+    return [clause.strip() for clause in _CLAUSE_BREAK.split(text) if clause.strip()]
 
 
 def _spoken(prompt: str) -> str:
