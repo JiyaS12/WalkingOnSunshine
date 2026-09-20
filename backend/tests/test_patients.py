@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -209,3 +210,37 @@ def test_rgn0417_detail_includes_metrics():
     for s in sessions:
         assert s["metrics"]["gait_detected"] is True
         assert s["metrics"]["fall_risk_score"] > 0
+
+
+def test_new_seed_patients_merge_into_an_existing_cache(tmp_path):
+    seeds = {p["patient_id"]: p for p in json.loads(store.SEED_PATH.read_text())}
+    stale = dict(seeds)
+    stale.pop("RGN-0500")
+    stale["RGN-0417"] = {**stale["RGN-0417"], "name": "Edited Locally"}
+    cache = tmp_path / "stale.json"
+    cache.write_text(json.dumps(stale))
+    store.reset_for_tests(cache)
+
+    assert store.get_patient("RGN-0500")["patient_id"] == "RGN-0500"
+    assert store.get_patient("RGN-0417")["name"] == "Edited Locally"
+    assert "RGN-0500" not in json.loads(cache.read_text())
+    store.upsert_survey(
+        {
+            "patient_id": "RGN-0417",
+            "patient_name": "Edited Locally",
+            "pain_scale": 2,
+            "fall_history": {"falls_last_6_months": 0, "injured": False},
+            "dizziness": False,
+            "primary_complaints": [],
+        }
+    )
+    assert "RGN-0500" in json.loads(cache.read_text())
+
+
+def test_unreadable_seed_file_still_serves_a_valid_cache(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"RGN-9999": {"patient_id": "RGN-9999", "name": "Cached Only"}}))
+    monkeypatch.setattr(store, "SEED_PATH", tmp_path / "missing_seed.json")
+    store.reset_for_tests(cache)
+
+    assert store.get_patient("RGN-9999")["name"] == "Cached Only"

@@ -4,19 +4,20 @@
 
 | Process | Port | Environment | Data |
 | --- | --- | --- | --- |
-| Main FastAPI | 8000 | `backend/.venv` | Authoritative `backend/.cache/patients.json`, summary cache |
+| Main FastAPI | 8000 | `backend/.venv` | Supabase patient store or explicit local JSON demo store; summary cache |
 | Phone FastAPI | 8001 | `voice_agent/.venv` | Private SQLite status receipts; bounded in-memory live sessions |
 | Next.js | 3000 | Node 20.19.0 / npm lockfile | No server secrets in public environment |
 
-Use Python 3.12 and **one worker** per Python service. Main's JSON locking is
+Use Python 3.12 and **one worker** per Python service. Main's cache and locking are
 process-local. Phone's stream tickets, numbers and live sessions are in memory.
 Do not install both Python requirements into one environment: main pins
 `openai==3.16.1` and voice requires `openai<3`.
 
 Main owns patient IDs, explicit clinician condition metadata, surveys, call
 attempts, signed patient URLs, walking state and gait sessions. Phone executes
-the reserved call and publishes status. Supabase is an optional standalone
-demo store; do not migrate the integrated flow or copy clinical data into it.
+the reserved call and publishes status. Configure the separate integrated
+[Supabase patient store](supabase-patient-store.md) for durable linked records.
+Existing standalone voice-demo tables remain separate and unchanged.
 
 ## Install and configure
 
@@ -119,7 +120,7 @@ The integration-specific frontend fixtures mock walking status explicitly.
    metadata and allocates `call_id`/`attempt_id`.
 3. Provide an E.164 destination and start once. Keep the same request ID when
    recovering an uncertain HTTP result; a new ID is a new request.
-4. Phone collects seven generic facts, preserving refusals/unknowns as null,
+4. Phone collects three generic facts (pain, falls, dizziness), preserving refusals/unknowns as null,
    and six condition items. Explicit selections are confirmed values; inferred
    proposals require a separate yes/no confirmation. Stop/clarification limits
    terminate or escalate rather than fabricating answers.
@@ -168,7 +169,7 @@ No deployment-level limits or production load capacity have been verified here.
 | `409` on event/session | Stale call/attempt, terminal attempt or conflicting idempotency payload. Stop that capture and refresh the active context; never relabel an old result as a new attempt. |
 | Capture done but no `session_id` | Not saved. Resolve/retry the same session request with its stable key; phone must not claim success. |
 | Microphone/camera denied or recoverable event | Show bounded help/pause state. Respect stop and patient safety; no assumed permission/success. |
-| Phone restarts | Durable receipt prevents replaying dispatch. Active audio, phone numbers, tokens and clinical answers are not durable and cannot be reconstructed from the receipt. Reconcile, then involve an operator. |
+| Phone restarts | Durable receipt prevents replaying dispatch. Active audio, numbers, tokens and clinical answers cannot be reconstructed from the phone receipt. Main separately retains the private destination on the patient call record; this does not authorize automatic redispatch. Reconcile, then involve an operator. |
 | Main store unreadable | Main fails closed. Restore the authoritative store from an approved backup; do not replace it with seeded data to “fix” the session. |
 
 Main records capped event history (200 per attempt), calls (100 per patient)

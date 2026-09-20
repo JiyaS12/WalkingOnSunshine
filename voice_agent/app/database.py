@@ -168,7 +168,7 @@ class DatabaseConversationStore:
         params = {
             "select": (
                 "patient_uuid,patient_id,survey_instance_id,call_session_id,"
-                "follow_up_label,survey_status,total_score,completed_at,transcript,survey_results"
+                "follow_up_label,survey_status,total_score,started_at,completed_at,transcript,survey_results"
             ),
             "order": "completed_at.desc.nullslast",
         }
@@ -184,6 +184,7 @@ class DatabaseConversationStore:
                 "follow_up_label": row.get("follow_up_label"),
                 "status": row.get("survey_status"),
                 "total_score": row.get("total_score"),
+                "started_at": row.get("started_at"),
                 "completed_at": row.get("completed_at"),
                 "transcript": row.get("transcript") or "",
                 "survey_results": row.get("survey_results") or [],

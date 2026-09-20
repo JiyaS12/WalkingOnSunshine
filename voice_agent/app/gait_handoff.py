@@ -1,12 +1,12 @@
 """Prepare the walking-check handoff the call texts to the patient.
 
-The link points at the WalkingOnSunshine patient page and carries the same
-signed, expiring token that ``backend/patient_access.py`` issues: a canonical
-JSON payload ``{"exp", "sub", "v"}`` and an HMAC-SHA256 signature, both
-base64url encoded, joined by a dot.  The two processes share
-``PATIENT_LINK_SIGNING_SECRET`` so a token minted here verifies there.  The
-token is a credential: it goes into the SMS and nowhere else (no logs, no
-transcript).
+The WalkingOnSunshine backend owns the magic link: it signs the token with
+``PATIENT_LINK_SIGNING_SECRET`` and builds ``/patient/<code>?token=…`` from
+``PATIENT_APP_BASE_URL``. This module asks it for that URL over
+``POST /api/voice/patient-link``, authenticated with the backend's
+``SURVEY_INGEST_TOKEN``, so the voice process never holds the signing secret and
+cannot drift from the backend's token format.  The returned URL is a credential:
+it goes into the SMS and nowhere else (no logs, no transcript, no notes).
 
 Sending the SMS is owned by ``PhoneCallSession`` in ``telephony/call_session.py``
 so this module stays testable without a network.
@@ -14,44 +14,36 @@ so this module stays testable without a network.
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
-import math
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
-BASE_URL_ENV = "GAIT_CHECKER_BASE_URL"
-SIGNING_SECRET_ENV = "PATIENT_LINK_SIGNING_SECRET"
-TTL_ENV = "PATIENT_LINK_TTL_SECONDS"
-TOKEN_VERSION = 1
-DEFAULT_TTL_SECONDS = 15 * 60
-MIN_TTL_SECONDS = 60
-MAX_TTL_SECONDS = 7 * 24 * 60 * 60
-MIN_SECRET_BYTES = 32
+BACKEND_URL_ENV = "GAIT_BACKEND_URL"
+BACKEND_TOKEN_ENV = "GAIT_BACKEND_TOKEN"
+LINK_PATH = "/api/voice/patient-link"
+TOKEN_HEADER = "X-Survey-Token"
+DEFAULT_TIMEOUT_SECONDS = 5.0
+MIN_TOKEN_CHARS = 16
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+LinkFetcher = Callable[[str, str | None], Awaitable[str]]
 
 
 class GaitLinkUnavailable(RuntimeError):
-    """The signed patient link cannot be produced with the current configuration."""
+    """The signed patient link cannot be obtained with the current configuration."""
 
 
-def _encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def _configured_base_url(env: Mapping[str, str]) -> str:
-    raw = (env.get(BASE_URL_ENV) or "").strip().rstrip("/")
+def _bare_origin(raw: str, env_name: str) -> str:
+    raw = raw.strip().rstrip("/")
     if not raw:
-        raise GaitLinkUnavailable(f"{BASE_URL_ENV} is not set")
-    problem = f"{BASE_URL_ENV} must be a bare HTTPS origin such as https://example.org (HTTP only locally)"
+        raise GaitLinkUnavailable(f"{env_name} is not set")
+    problem = f"{env_name} must be a bare HTTPS origin such as https://example.org (HTTP only locally)"
     try:
         parsed = urlsplit(raw)
         port = parsed.port
@@ -76,47 +68,84 @@ def _configured_base_url(env: Mapping[str, str]) -> str:
     return origin if port is None else f"{origin}:{port}"
 
 
-def _configured_secret(env: Mapping[str, str]) -> bytes:
-    raw = env.get(SIGNING_SECRET_ENV) or ""
-    if len(raw.encode("utf-8")) < MIN_SECRET_BYTES:
-        raise GaitLinkUnavailable(f"{SIGNING_SECRET_ENV} must contain at least {MIN_SECRET_BYTES} bytes")
-    return raw.encode("utf-8")
+def configured_backend_origin(env: Mapping[str, str]) -> str:
+    return _bare_origin(env.get(BACKEND_URL_ENV) or "", BACKEND_URL_ENV)
 
 
-def _configured_ttl(env: Mapping[str, str]) -> int:
-    raw = env.get(TTL_ENV, str(DEFAULT_TTL_SECONDS))
+def configured_backend_token(env: Mapping[str, str]) -> str:
+    token = (env.get(BACKEND_TOKEN_ENV) or "").strip()
+    if len(token) < MIN_TOKEN_CHARS:
+        raise GaitLinkUnavailable(f"{BACKEND_TOKEN_ENV} must contain at least {MIN_TOKEN_CHARS} characters")
+    return token
+
+
+def validate_patient_link(link: object, patient_code: str) -> str:
+    """Accept only an HTTPS (or local HTTP) link to this patient's page."""
+
+    problem = "backend returned an unexpected patient link"
+    if not isinstance(link, str) or any(char.isspace() for char in link):
+        raise GaitLinkUnavailable(problem)
     try:
-        ttl = int(raw)
+        parsed = urlsplit(link)
     except ValueError as exc:
-        raise GaitLinkUnavailable(f"{TTL_ENV} must be an integer") from exc
-    if not MIN_TTL_SECONDS <= ttl <= MAX_TTL_SECONDS:
-        raise GaitLinkUnavailable(f"{TTL_ENV} must be between {MIN_TTL_SECONDS} and {MAX_TTL_SECONDS}")
-    return ttl
+        raise GaitLinkUnavailable(problem) from exc
+    hostname = parsed.hostname
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or (parsed.scheme != "https" and hostname not in LOCAL_HOSTS)
+        or parsed.path != f"/patient/{quote(patient_code, safe='')}"
+        or parsed.fragment
+    ):
+        raise GaitLinkUnavailable(problem)
+    tokens = parse_qs(parsed.query, keep_blank_values=True).get("token", [])
+    if len(tokens) != 1 or not tokens[0]:
+        raise GaitLinkUnavailable(problem)
+    return link
 
 
-def sign_patient_token(patient_code: str, secret: bytes, ttl_seconds: int, now: datetime | None = None) -> str:
-    issued_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    expires_at = math.ceil(issued_at.timestamp() + ttl_seconds)
-    payload = json.dumps(
-        {"exp": expires_at, "sub": patient_code, "v": TOKEN_VERSION},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    encoded = _encode(payload)
-    signature = hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).digest()
-    return f"{encoded}.{_encode(signature)}"
+class BackendLinkClient:
+    """Fetch the patient's signed link from the WalkingOnSunshine backend."""
 
+    def __init__(
+        self,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.env = env
+        self.timeout_seconds = timeout_seconds
+        self.transport = transport
 
-def signed_patient_link(
-    patient_code: str, condition_category: str, env: Mapping[str, str] | None = None
-) -> str:
-    """Build ``<base>/patient/<code>?token=<signed>``; raises when unconfigured."""
-
-    del condition_category  # not part of the URL contract
-    source = env if env is not None else os.environ
-    base = _configured_base_url(source)
-    token = sign_patient_token(patient_code, _configured_secret(source), _configured_ttl(source))
-    return f"{base}/patient/{quote(patient_code, safe='')}?{urlencode({'token': token})}"
+    async def fetch(self, patient_code: str, call_id: str | None = None) -> str:
+        env = self.env if self.env is not None else os.environ
+        origin = configured_backend_origin(env)
+        token = configured_backend_token(env)
+        body: dict[str, str] = {"patient_id": patient_code}
+        if call_id:
+            body["call_id"] = call_id
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, transport=self.transport) as client:
+                response = await client.post(
+                    f"{origin}{LINK_PATH}", json=body, headers={TOKEN_HEADER: token}
+                )
+        except httpx.HTTPError as exc:
+            raise GaitLinkUnavailable(f"backend unreachable: {type(exc).__name__}") from exc
+        if response.status_code == 404:
+            raise GaitLinkUnavailable("backend has no record for this patient")
+        if response.status_code == 401:
+            raise GaitLinkUnavailable(f"backend rejected {BACKEND_TOKEN_ENV}")
+        if response.status_code != 200:
+            raise GaitLinkUnavailable(f"backend answered HTTP {response.status_code}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise GaitLinkUnavailable("backend returned a non-JSON body") from exc
+        if not isinstance(payload, dict):
+            raise GaitLinkUnavailable("backend returned an unexpected body")
+        return validate_patient_link(payload.get("patient_url"), patient_code)
 
 
 @dataclass
@@ -130,24 +159,26 @@ class GaitHandoff:
 
 
 class GaitHandoffService:
-    """Prepare the handoff payload with a signed link when configured.
+    """Prepare the handoff payload with a backend-issued link when configured.
 
-    Without ``GAIT_CHECKER_BASE_URL`` and a shared ``PATIENT_LINK_SIGNING_SECRET``
-    the handoff is marked ``unavailable`` with no link, so nothing unsigned or
-    placeholder is ever texted to a real patient.
+    Without ``GAIT_BACKEND_URL`` and ``GAIT_BACKEND_TOKEN``, or when the backend
+    declines, the handoff is marked ``unavailable`` with no link, so nothing
+    unsigned or placeholder is ever texted to a real patient.
     """
 
-    def __init__(self, link_generator=None):
-        self.link_generator = link_generator or signed_patient_link
+    def __init__(self, link_fetcher: LinkFetcher | None = None):
+        self.link_fetcher: LinkFetcher = link_fetcher or BackendLinkClient().fetch
 
-    def prepare(self, patient_code: str, condition_category: str) -> GaitHandoff:
+    async def prepare(
+        self, patient_code: str, condition_category: str, call_id: str | None = None
+    ) -> GaitHandoff:
         handoff = GaitHandoff(patient_code=patient_code, condition_category=condition_category)
         try:
-            handoff.link = self.link_generator(patient_code, condition_category)
+            handoff.link = await self.link_fetcher(patient_code, call_id)
         except GaitLinkUnavailable as exc:
             handoff.status = "unavailable"
             handoff.notes.append(f"Gait link not sent: {exc}")
             logger.warning("Gait-checker link unavailable for %s: %s", patient_code, exc)
             return handoff
-        handoff.notes.append("Handoff prepared for gait-checker integration.")
+        handoff.notes.append("Handoff prepared with a backend-issued patient link.")
         return handoff

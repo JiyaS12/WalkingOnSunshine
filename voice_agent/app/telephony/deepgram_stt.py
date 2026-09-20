@@ -48,6 +48,7 @@ class SpeechEvent:
     kind: str
     text: str = ""
     is_final: bool = False
+    confidence: float | None = None
 
 
 def listen_url(
@@ -94,13 +95,17 @@ def parse_message(raw: str | bytes) -> SpeechEvent | None:
     if message_type != "Results":
         return None
     try:
-        transcript = payload["channel"]["alternatives"][0]["transcript"]
+        alternative = payload["channel"]["alternatives"][0]
+        transcript = alternative["transcript"]
     except (KeyError, IndexError, TypeError):
         return None
     transcript = transcript.strip()
     if not transcript:
         return None
-    return SpeechEvent("transcript", transcript, bool(payload.get("is_final")))
+    confidence = alternative.get("confidence") if isinstance(alternative, dict) else None
+    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+        confidence = None
+    return SpeechEvent("transcript", transcript, bool(payload.get("is_final")), confidence)
 
 
 class DeepgramTranscriber:

@@ -16,7 +16,11 @@ from fastapi.testclient import TestClient
 from starlette.datastructures import FormData
 
 import phone_app
-from app.generic_intake import GenericIntake, parse_value
+from app import conversation_policy as policy
+from app import generic_intake
+from app.generic_intake import (
+    QUESTIONS, GenericIntake, IntakeQuestion, IntakeReading, OpenAIIntakeInterpreter, lenient_parse, parse_value,
+)
 from app.integrated_service import IntegratedService
 from app.integrated_session import IntegratedSession
 from app.integration_contract import CallStart, SMSRetry
@@ -25,7 +29,9 @@ from app.operator_auth import OperatorAuth
 from app.phone_receipts import ReceiptStore
 from app.telephony.config import load_settings
 from app.telephony.deepgram_stt import SpeechEvent
-from app.telephony.integrated_provider import FakePhoneProvider, ProviderUnknown, TwilioProvider
+from app.telephony.integrated_provider import (
+    FakePhoneProvider, ProviderRejected, ProviderUnknown, TwilioProvider,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend import store  # noqa: E402
@@ -140,9 +146,9 @@ async def say(session, text):
 
 
 async def answer_survey(session, *, unknown=False):
-    for text in (["unknown"] * 7 if unknown else ["7", "2", "yes", "fell on stairs", "no", "none", "hip pain; trouble walking"]):
+    answers = ["unknown"] * 3 if unknown else ["7", "2", "no"]
+    for text in answers:
         await say(session, text)
-        await say(session, "yes")
     for _ in range(6):
         await say(session, "mild")
 
@@ -155,13 +161,16 @@ def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness)
         payload = harness.submissions[0]
         assert payload["pain_scale"] == 7
         assert payload["fall_history"] == {
-            "falls_last_6_months": 2, "injured": True, "last_fall_description": "fell on stairs",
+            "falls_last_6_months": 2, "injured": None, "last_fall_description": None,
         }
         assert payload["dizziness"] is False
-        assert payload["primary_complaints"] == ["hip pain", "trouble walking"]
+        assert payload["dizziness_notes"] is None
+        assert payload["primary_complaints"] is None
         assert len(payload["condition_survey"]["answers"]) == 6
         assert {answer["normalized_value"] for answer in payload["condition_survey"]["answers"]} == {"mild"}
         assert harness.url in harness.provider.last_body
+        assert harness.provider.last_sms_destination == harness.payload.to_number
+        assert harness.provider.last_call_destination == harness.payload.to_number
         assert harness.service.receipt(session.call.call_id).snapshot.survey_status == "stored"
         assert harness.url not in harness.path.read_bytes().decode(errors="ignore")
         assert "MAIN-CANONICAL-TOKEN" not in json.dumps([r.model_dump() for r in harness.service.store.all()])
@@ -219,7 +228,7 @@ def test_stroke_call_uses_captured_condition_and_stroke_ids(harness):
 def test_stop_during_unconfirmed_intake_never_submits(harness):
     async def scenario():
         session = await harness.session()
-        await say(session, "7")
+        await say(session, "maybe a 7")
         await say(session, "stop")
         assert session.finished
         assert not session.generic.values
@@ -239,7 +248,7 @@ def test_generic_intake_validation(kind, text):
 
 def test_generic_intake_confirmation_pause_and_bounded_rejections():
     intake = GenericIntake()
-    intake.handle("7")
+    intake.handle("maybe a 7")
     assert intake.values == {}
     assert "Paused" in intake.handle("pause")
     intake.handle("yes")
@@ -247,12 +256,58 @@ def test_generic_intake_confirmation_pause_and_bounded_rejections():
     assert '"7"' in intake.handle("resume")
     assert '"7"' in intake.handle("repeat")
     intake.handle("no")
-    intake.handle("8")
+    intake.handle("probably 8")
     intake.handle("no")
-    intake.handle("9")
+    intake.handle("i think 9")
     intake.handle("no")
     assert intake.state == "needs_review"
     assert intake.values == {}
+
+
+@pytest.mark.parametrize("kind,text,value", [
+    ("pain", "about a five", 5), ("pain", "I'd say it's like a 6 out of 10", 6), ("pain", "seven", 7),
+    ("count", "no falls", 0), ("count", "I haven't fallen", 0), ("count", "once", 1), ("count", "I fell twice", 2),
+    ("boolean", "yes I have", True), ("boolean", "no I haven't", False), ("boolean", "not really", False),
+    ("pain", "I'm not sure", None), ("count", "no idea", None),
+    ("text", "nothing really", None), ("complaints", "no complaints", []),
+])
+def test_generic_intake_reads_plain_speech_without_confirmation(kind, text, value):
+    reading = lenient_parse(kind, text)
+    assert (reading.valid, reading.value, reading.clear) == (True, value, True)
+
+
+@pytest.mark.parametrize("kind,text", [
+    ("pain", "five or six"), ("pain", "pretty bad"), ("count", "a couple"), ("boolean", "yes and no"),
+    ("boolean", "what do you mean"), ("pain", "11"),
+])
+def test_generic_intake_does_not_guess(kind, text):
+    assert lenient_parse(kind, text).valid is False
+
+
+def test_free_text_is_split_but_proposed_for_confirmation():
+    reading = lenient_parse("complaints", "my knee and my back")
+    assert (reading.valid, reading.value, reading.clear) == (True, ["my knee", "my back"], False)
+
+
+def test_hedged_intake_answers_are_proposed_not_accepted():
+    intake = GenericIntake()
+    assert 'I heard "7"' in intake.handle("maybe like a seven")
+    assert intake.values == {}
+    intake.handle("yes")
+    assert intake.values["pain_scale"] == 7
+
+
+def test_model_read_intake_answers_still_require_confirmation():
+    class Model:
+        def interpret(self, question, transcript):
+            direct = lenient_parse(question.kind, transcript)
+            return direct if direct.valid else IntakeReading(True, 4)
+
+    intake = GenericIntake(Model())
+    assert 'I heard "4"' in intake.handle("it's been rough but manageable")
+    assert intake.values == {}
+    assert intake.handle("yes").startswith(("Got it.", "Okay.", "Thanks."))
+    assert intake.values["pain_scale"] == 4
 
 
 def test_concurrent_start_is_reserved_and_reconciles_after_restart(harness):
@@ -372,7 +427,8 @@ def test_409_submission_conflict_produces_no_link_or_retry(harness):
         assert session.finished
         assert harness.provider.messages == 0
         assert len(harness.submissions) == 1
-        assert "could not confirm saving" in harness.spoken[-1]
+        assert "wasn’t able to save your answers" in harness.spoken[-1]
+        assert policy.INTEGRATED_LINK_SENT not in harness.spoken
     asyncio.run(scenario())
 
 
@@ -391,10 +447,117 @@ def test_readiness_capture_errors_and_save_require_backend_events(harness):
         await answer_survey(session)
         await session._background
         assert session.finished
-        assert any("permission was denied" in text for text in harness.spoken)
-        assert any("reports a problem" in text for text in harness.spoken)
+        assert any("couldn’t get to your camera" in text for text in harness.spoken)
+        assert any("ran into a problem" in text for text in harness.spoken)
         assert any("confirms calibration is ready" in text for text in harness.spoken)
         assert "backend confirms your walking test is saved" in harness.spoken[-1]
+        assert "help your care team follow your recovery" in harness.spoken[-1]
+    asyncio.run(scenario())
+
+
+def test_warm_gait_handoff_waits_for_ready_before_camera_setup(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        intro = next(text for text in harness.spoken if "Thank you for those answers" in text)
+        assert "short video of you walking" in intro
+        assert "text you a secure link" in intro
+        assert harness.spoken[-1] == policy.INTEGRATED_LINK_SENT
+        assert not any("Use camera" in text for text in harness.spoken)
+        # Quiet while they look for the text gets a gentle nudge, never an escalation.
+        for _ in range(4):
+            await session.handle_silence()
+        assert harness.spoken.count(policy.INTEGRATED_LINK_REMINDER) == 2
+        assert not session.finished
+        await say(session, "I never got the text")
+        assert "can take a minute to arrive" in harness.spoken[-1]
+        assert not session.link_open
+        await say(session, "okay, I have it open")
+        assert session.link_open
+        assert "Use camera" in harness.spoken[-1]
+        assert not any("One. Two. Three." in text for text in harness.spoken)
+        await say(session, "what do I do now")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_countdown_only_after_page_reports_calibration_ready(harness):
+    async def scenario():
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await say(session, "ready")
+        assert "Use camera" in harness.spoken[-1]
+        harness.walks = [
+            harness.view("ready", 3, "calibration_completed"),
+            harness.view("capturing", 4, "capture_started"),
+            harness.view("captured", 5, "capture_completed"),
+            harness.view("saved", 6, session_id="gait-session"),
+        ]
+        await session._background
+        spoken = harness.spoken
+        ready = next(i for i, text in enumerate(spoken) if "One. Two. Three." in text)
+        assert "fifteen seconds" in spoken[ready]
+        assert spoken.index(policy.INTEGRATED_CAMERA_SETUP) < ready
+        assert any("camera is recording" in text for text in spoken[ready:])
+        assert any("your walk was recorded" in text for text in spoken[ready:])
+        assert spoken[-1] == policy.INTEGRATED_SAVED
+    asyncio.run(scenario())
+
+
+def test_page_activity_counts_as_link_open_and_ready_reply_does_not_repeat_setup(harness):
+    async def scenario():
+        harness.walks = [harness.view("calibrating", 2, "calibration_started")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        await session.handle_silence()
+        assert policy.INTEGRATED_LINK_REMINDER not in harness.spoken
+        await say(session, "ready")
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_SEEN
+        await say(session, "I did not get the text")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_page_ready_event_opens_link_and_gives_camera_setup_once(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 2, "page_ready")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_OPENED
+        await session.handle_silence()
+        assert policy.INTEGRATED_LINK_REMINDER not in harness.spoken
+        await say(session, "ready")
+        assert harness.spoken[-1] == policy.INTEGRATED_PAGE_SEEN
+        assert policy.INTEGRATED_CAMERA_SETUP not in harness.spoken
+        assert harness.spoken.count(policy.INTEGRATED_PAGE_OPENED) == 1
+        assert not any("One. Two. Three." in text for text in harness.spoken)
+        await say(session, "I did not get the text")
+        assert harness.spoken[-1] == policy.INTEGRATED_WAITING
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
+def test_camera_error_on_freshly_opened_page_is_not_hidden(harness):
+    async def scenario():
+        harness.walks = [harness.view("page_ready", 3, "permission_denied")]
+        session = await harness.session()
+        await answer_survey(session)
+        await harness.walk_requested.wait()
+        await asyncio.sleep(0.01)
+        assert session.link_open
+        assert harness.spoken[-1] == policy.INTEGRATED_PERMISSION_DENIED
+        assert policy.INTEGRATED_PAGE_OPENED not in harness.spoken
+        await session.disconnect()
     asyncio.run(scenario())
 
 
@@ -598,7 +761,7 @@ def test_signature_covers_repeated_form_values():
 
 
 def test_default_app_needs_no_secrets_and_never_uses_demo_identity():
-    with patch.dict("os.environ", {}, clear=True):
+    with patch.dict("os.environ", {}, clear=True), patch.object(phone_app, "load_dotenv"):
         app = phone_app.create_app()
         with TestClient(app) as client:
             assert client.get("/api/config").json() == {"mode": "integrated", "ready": False}
@@ -621,6 +784,24 @@ def test_provider_adapter_uses_no_retries_and_includes_delivery_callback():
     asyncio.run(scenario())
 
 
+def test_provider_rejection_logs_only_twilio_error_code(caplog):
+    async def scenario():
+        def respond(request):
+            return httpx.Response(400, json={
+                "code": 21211, "status": 400,
+                "message": "The 'To' number +14155550123 is not a valid phone number.",
+            })
+
+        provider = TwilioProvider(load_settings(ENV), transport=httpx.MockTransport(respond))
+        with caplog.at_level("WARNING"), pytest.raises(ProviderRejected):
+            await provider.call("+14155550123", "https://phone.example.test/voice", "https://phone.example.test/status")
+
+    asyncio.run(scenario())
+    assert "error code 21211" in caplog.text
+    assert "4155550123" not in caplog.text
+    assert "not a valid" not in caplog.text
+
+
 def test_backend_rejects_redirect_and_maps_timeout_without_retry():
     async def scenario():
         requests = []
@@ -640,9 +821,8 @@ def test_backend_rejects_redirect_and_maps_timeout_without_retry():
 def test_integrated_media_preserves_hesitations_until_continuation_or_timeout(harness, continued):
     async def scenario():
         session = await harness.session()
-        for _ in range(7):
+        for _ in range(len(QUESTIONS)):
             await say(session, "unknown")
-            await say(session, "yes")
         assert session.stage == "condition"
         harness.spoken.clear()
 
@@ -732,32 +912,127 @@ def test_carrier_completion_before_confirmation_still_requires_review(harness):
     asyncio.run(scenario())
 
 
+TEXT_QUESTION = IntakeQuestion("last_fall_description", "Tell me about your most recent fall.", "text")
+# The spoken intake is deliberately short; the free-text guardrails are kept
+# tested against this longer bank so they stay safe if a question is re-added.
+LONG_QUESTIONS = (
+    *QUESTIONS[:2],
+    IntakeQuestion("injured", "Were you hurt?", "boolean"),
+    TEXT_QUESTION,
+    QUESTIONS[2],
+    IntakeQuestion("dizziness_notes", "Anything about the dizziness?", "text"),
+    IntakeQuestion("primary_complaints", "What bothers you most?", "complaints"),
+)
+
+
+def test_spoken_intake_is_three_short_questions_then_the_survey():
+    assert [question.key for question in QUESTIONS] == ["pain_scale", "falls_last_6_months", "dizziness"]
+    assert all(len(question.prompt.split()) <= 12 for question in QUESTIONS)
+    intake = GenericIntake()
+    assert "scale of one to ten" in intake.prompt()
+    intake.handle("about a five")
+    intake.handle("none")
+    assert intake.handle("no") == "Thanks."
+    assert intake.complete
+    assert intake.payload() == {
+        "pain_scale": 5,
+        "fall_history": {"falls_last_6_months": 0, "injured": None, "last_fall_description": None},
+        "dizziness": False,
+        "dizziness_notes": None,
+        "primary_complaints": None,
+    }
+
+
 @pytest.mark.parametrize("answer,notes,complaints,readback", [
     (" NONE. ", None, [], "none reported"),
     ("unknown", None, None, "unknown"),
     ("none since surgery", "none since surgery", ["none since surgery"], "none since surgery"),
 ])
-def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, complaints, readback):
+def test_generic_intake_distinguishes_no_content_from_unknown(monkeypatch, answer, notes, complaints, readback):
+    monkeypatch.setattr(generic_intake, "QUESTIONS", LONG_QUESTIONS)
     intake = GenericIntake()
     for index, response in enumerate(["7", "0", "no", answer, "no", answer, answer]):
         prompt = intake.handle(response)
-        if index in {3, 5, 6}:
+        if index in {3, 5, 6} and notes is not None:
             assert f'I heard "{readback}".' in prompt
             assert intake.index == index
-        intake.handle("yes")
-    payload = intake.payload()
-    assert payload["fall_history"]["last_fall_description"] == notes
-    assert payload["dizziness_notes"] == notes
-    assert payload["primary_complaints"] == complaints
+            intake.handle("yes")
+    assert intake.complete
+    assert intake.values["last_fall_description"] == notes
+    assert intake.values["dizziness_notes"] == notes
+    assert intake.values["primary_complaints"] == complaints
 
 
-def test_absent_notes_can_be_corrected_before_confirmation():
+def test_absent_notes_are_stored_without_confirmation_but_free_text_is_read_back(monkeypatch):
+    monkeypatch.setattr(generic_intake, "QUESTIONS", LONG_QUESTIONS)
     intake = GenericIntake()
     for answer in ["7", "0", "no"]:
         intake.handle(answer)
-        intake.handle("yes")
-    assert '"none reported"' in intake.handle("none")
-    assert '"fell on stairs"' in intake.handle("fell on stairs")
-    assert "last_fall_description" not in intake.values
+    intake.handle("none")
+    assert intake.values["last_fall_description"] is None
+    intake.handle("no")
+    assert 'I heard "Why do you need to know?"' in intake.handle("Why do you need to know?")
+    assert "dizziness_notes" not in intake.values
+    intake.handle("no")
+    intake.handle("fell on stairs")
     intake.handle("yes")
-    assert intake.values["last_fall_description"] == "fell on stairs"
+    assert intake.values["dizziness_notes"] == "fell on stairs"
+
+
+@pytest.mark.parametrize("text,value", [
+    ("I am not dizzy", False), ("I'm not dizzy", False), ("I do not think so", False), ("no I haven't", False),
+    ("I don't get dizzy", False), ("yes I am", True), ("I have been", True),
+    ("I am definitely not dizzy", False), ("I have never fallen", False), ("I'm really not", False),
+])
+def test_negated_boolean_replies_are_not_affirmative(text, value):
+    reading = lenient_parse("boolean", text)
+    assert (reading.valid, reading.value) == (True, value)
+
+
+@pytest.mark.parametrize("text", ["5.5", "five point five", "seven and a half", "5,5"])
+def test_fractional_ratings_are_not_rounded(text):
+    assert lenient_parse("pain", text).valid is False
+
+
+def test_time_words_do_not_invalidate_counts():
+    assert lenient_parse("count", "I fell once last quarter").value == 1
+    assert lenient_parse("count", "one and a half").valid is False
+    for text in ("one half", "a half", "one quarter", "three quarters"):
+        assert lenient_parse("pain", text).valid is False, text
+
+
+@pytest.mark.parametrize("text", ["I am dizzy, but not often", "yes and no", "I have, but not lately"])
+def test_mixed_boolean_replies_are_reasked(text):
+    assert lenient_parse("boolean", text).valid is False
+
+
+def test_provider_failure_keeps_the_deterministic_reading():
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    raise TimeoutError("provider down")
+
+    interpreter = OpenAIIntakeInterpreter(Client())
+    reading = interpreter.interpret(TEXT_QUESTION, "fell on stairs")
+    assert (reading.valid, reading.value, reading.clear) == (True, "fell on stairs", False)
+    assert interpreter.interpret(QUESTIONS[0], "it's been rough").valid is False
+
+
+def test_model_mode_reasks_free_text_the_model_calls_off_topic():
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    class Choice:
+                        finish_reason = "stop"
+                        message = type("M", (), {"refusal": None, "content": json.dumps(
+                            {"value": None, "unknown": False, "unclear": True}
+                        )})()
+                    return type("R", (), {"choices": [Choice()]})()
+
+    interpreter = OpenAIIntakeInterpreter(Client())
+    assert interpreter.interpret(TEXT_QUESTION, "Why do you need to know?").valid is False
+    assert interpreter.interpret(QUESTIONS[0], "about a five").value == 5

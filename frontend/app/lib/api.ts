@@ -356,6 +356,20 @@ export async function fetchPatient(id: string): Promise<PatientRecord> {
   return request<PatientRecord>(`/api/patients/${encodeURIComponent(id)}`);
 }
 
+export interface PatientLink {
+  patient_id: string;
+  patient_url: string;
+  patient_access_expires_at: string;
+}
+
+/** Mint the signed magic link a clinician can hand to the patient. */
+export async function createPatientLink(id: string): Promise<PatientLink> {
+  return request<PatientLink>(
+    `/api/patients/${encodeURIComponent(id)}/link`,
+    { method: "POST" }
+  );
+}
+
 /** The patient-scoped view returned by the signed-link / magic-link APIs. */
 export interface PatientView {
   patient_id: string;

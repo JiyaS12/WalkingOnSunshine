@@ -239,6 +239,108 @@ WALKTHROUGH_CLOSING = (
 )
 STOPPED = "Of course. We’ll stop here. Thank you for your time."
 PAUSED = "Of course. Take your time. Say ‘resume’ when you’re ready, or ‘stop’ to finish."
+
+# Integrated flow: the same handoff conversation, but the walking guidance is
+# driven by the status the walking page reports to the main backend rather
+# than by a timer, so nothing below claims a step happened until the page says so.
+INTEGRATED_INTRO = (
+    "Hi, this is the automated check-in from your doctor’s office, calling to see how you’re doing. "
+    "It only takes a few minutes, and there are no wrong answers. "
+    "Just answer in your own words, and you can ask me to repeat, pause, or stop at any time."
+)
+INTEGRATED_GAIT_INTRO = (
+    "Thank you for those answers. There is one more thing your care team would like, "
+    "and then we are done."
+    f"{PARAGRAPH}"
+    "They would like a short video of you walking. It shows them how steady you are on "
+    "your feet, which is hard to tell from answers alone, and it takes about a minute. "
+    "Let me save your answers and text you a secure link to the camera page."
+)
+INTEGRATED_SAVING = "One moment while I save your answers and send the text."
+INTEGRATED_PAGE_OPENED = (
+    "I can see the link is open on your end, great. Tap “Use camera”, then prop your "
+    "phone against something steady where your whole body is in view, and step back a few paces. "
+    "The page will let me know once the camera is set."
+)
+INTEGRATED_PAGE_SEEN = (
+    "Great, I can see the page is up on your end. Keep following along with it, and I’ll guide "
+    "you as it goes."
+)
+INTEGRATED_SUBMIT_FAILED = (
+    "I’m sorry, I wasn’t able to save your answers just now, so I can’t send the link today. "
+    "Your care team will follow up with you separately. Thank you for your time. Take care, and goodbye."
+)
+INTEGRATED_SMS_FAILED = (
+    "Your answers are saved, but the text did not go through on my end, so we will leave the "
+    "walking check for another time. Your care team will send you the link separately. "
+    "Thank you for your answers today. Take care, and goodbye."
+)
+INTEGRATED_LINK_SENT = (
+    "Your answers are saved, and I’ve asked for the text to go out to you. It can take a minute "
+    "to arrive. When it does, open the link on your phone and tell me when you have it up."
+)
+INTEGRATED_LINK_REMINDER = "No rush at all. Just say ‘ready’ once you have the link open."
+INTEGRATED_LINK_MISSING = (
+    "No problem, it can take a minute to arrive. I can’t send a second one from here, so tell me "
+    "once it shows up, or say ‘stop’ if you would rather leave it for today."
+)
+INTEGRATED_CAMERA_SETUP = (
+    "Great. Tap “Use camera”, then prop your phone against something steady "
+    "where your whole body is in view, and step back a few paces. The page will let me know "
+    "once the camera is set."
+)
+INTEGRATED_WAITING = (
+    "I’m still waiting on the camera page. Take your time getting set up, and say ‘stop’ if "
+    "you would rather finish another day."
+)
+INTEGRATED_PERMISSION_DENIED = (
+    "It looks like the page couldn’t get to your camera. Allow camera access and try again on "
+    "the page, or say ‘stop’ if you would rather leave it for today."
+)
+INTEGRATED_PAGE_ERROR = (
+    "The page ran into a problem. Follow its retry instructions and we’ll pick right back up, "
+    "or say ‘stop’ to finish for today."
+)
+INTEGRATED_READY = (
+    "Perfect, the page confirms calibration is ready, and the live capture starts automatically. "
+    "When I reach three, walk back and forth in front of the camera at your normal pace for about "
+    "fifteen seconds, and only if it feels safe. When you finish, choose Save this walk."
+    f"{PARAGRAPH}"
+    "One. Two. Three. Go ahead."
+)
+INTEGRATED_CAPTURING = (
+    "You’re doing great, the camera is recording. Keep walking back and forth at your normal pace, "
+    "and stop if you feel unsteady. When you finish, choose Save this walk."
+)
+INTEGRATED_CAPTURED = (
+    "Nice work, your walk was recorded. Choose Save this walk so your care team gets it. "
+    "I’ll stay on the line until it saves."
+)
+INTEGRATED_SAVED = (
+    "That is everything. The backend confirms your walking test is saved. Thank you, this really "
+    "does help your care team follow your recovery. Take care of yourself, and goodbye."
+)
+INTEGRATED_PAGE_STOPPED = (
+    "The walking page has stopped the test, so we’ll leave it there for today. Thank you for your "
+    "answers. Take care, and goodbye."
+)
+INTEGRATED_TIMED_OUT = (
+    "I haven’t heard back from the camera page, so I cannot confirm that a walking test was saved. "
+    "You can still finish it on the page, and your care team will see it there. Thank you for your "
+    "time today. Take care, and goodbye."
+)
+INTEGRATED_CALL_LIMIT = (
+    "We’ve reached the time limit for this call, so I cannot confirm a saved walking test. "
+    "You can still finish it on the page. Thank you for your time. Take care, and goodbye."
+)
+INTEGRATED_SCOPE_MISMATCH = (
+    "The walking page status does not match this call, so I’ll stop the guidance here. "
+    "Your care team will follow up. Thank you, and goodbye."
+)
+INTEGRATED_NO_RESPONSE = (
+    "I did not hear a confirmed response, so we will stop without saving an incomplete survey. "
+    "A clinician will follow up with you. Goodbye."
+)
 REVIEW = (
     "I’m sorry I haven’t understood clearly. I don’t want to record the wrong answer. "
     "We’ll stop here. This survey needs human review."
@@ -294,6 +396,12 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
         f"{bridge} It sounds like your {question.topic} may be {value}. "
         "Would you agree, or would you describe it differently?"
     )
+
+
+def readback_text(question, value: str) -> str:
+    """Check a label the recognizer was unsure it heard, without re-reading the scale."""
+
+    return f"I think I heard {value} for your {question.topic}. Is that right?"
 
 
 def clarification_text(

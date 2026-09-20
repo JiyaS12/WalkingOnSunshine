@@ -274,5 +274,53 @@
         "frames": null
       }
     ]
+  },
+  {
+    "patient_id": "RGN-0500",
+    "name": "Walter Brennan",
+    "age": 69,
+    "cohort": "Regeneron Clinical Trial \u2014 Stroke Recovery Arm",
+    "surveys": [
+      {
+        "patient_id": "RGN-0500",
+        "patient_name": "Walter Brennan",
+        "pain_scale": 3,
+        "fall_history": {
+          "falls_last_6_months": 1,
+          "injured": false,
+          "last_fall_description": "Lost balance turning in the hallway, caught the rail."
+        },
+        "dizziness": true,
+        "dizziness_notes": "Occasional light-headedness after physio",
+        "primary_complaints": [
+          "right-side weakness",
+          "slow walking"
+        ],
+        "call_id": "CALL-2210",
+        "recorded_at": "2026-09-14T15:05:00+00:00"
+      }
+    ],
+    "gait_sessions": [
+      {
+        "label": "Baseline",
+        "recorded_at": "2026-09-14T15:30:00+00:00",
+        "source": "live",
+        "metrics": {
+          "stride_length_m": 0.71,
+          "asymmetry_pct": 27.4,
+          "velocity_degradation_pct": 12.8,
+          "fall_risk_score": 0.61,
+          "cadence_steps_per_min": 88.0,
+          "frame_count": 300,
+          "leg_length_m": 0.92,
+          "stride_ratio": 0.77,
+          "knee_flexion_rom_deg": 31.5,
+          "peak_ankle_speed_mps": 1.21,
+          "gait_detected": true,
+          "dropped_frame_pct": 0.0
+        },
+        "frames": null
+      }
+    ]
   }
 ]

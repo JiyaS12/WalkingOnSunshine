@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import clinician_auth
 import patient_access
 import store
 from main import app
@@ -521,3 +522,100 @@ def test_magic_link_session_can_generate_patient_summary(monkeypatch):
     assert client.post(
         "/api/patient-access/RGN-7002/summary", headers=origin
     ).status_code == 401
+
+
+def _voice_link(pid: str, headers: dict | None = None):
+    return client.post(
+        "/api/voice/patient-link",
+        json={"patient_id": pid, "call_id": "CA123"},
+        headers=headers or {},
+    )
+
+
+def test_voice_patient_link_returns_verifiable_magic_link(monkeypatch):
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    _create(_NEW_PID)
+
+    response = _voice_link(_NEW_PID)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["patient_id"] == _NEW_PID
+    parsed = urlsplit(body["patient_url"])
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "patient.example.test"
+    assert parsed.path == f"/patient/{_NEW_PID}"
+    token = parse_qs(parsed.query)["token"][0]
+    assert body["patient_access_expires_at"].endswith("+00:00")
+
+    verified = _verify(_NEW_PID, token)
+    assert verified.status_code == 200
+    assert "sana_patient_session=" in verified.headers["set-cookie"]
+
+
+def test_voice_patient_link_requires_existing_patient():
+    response = _voice_link("RGN-NOPE")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "patient record not found"}
+
+
+def test_voice_patient_link_requires_service_token(monkeypatch):
+    _create(_NEW_PID)
+    monkeypatch.setenv("SURVEY_INGEST_TOKEN", "voice-service-token")
+    monkeypatch.delenv("ALLOW_UNAUTHENTICATED_SURVEY_INGEST")
+
+    assert _voice_link(_NEW_PID).status_code == 401
+    assert _voice_link(_NEW_PID, {"X-Survey-Token": "wrong"}).status_code == 401
+    assert (
+        _voice_link(_NEW_PID, {"X-Survey-Token": "voice-service-token"}).status_code
+        == 200
+    )
+
+
+def test_voice_patient_link_fails_closed_without_signing_secret(monkeypatch):
+    _create(_NEW_PID)
+    monkeypatch.delenv("PATIENT_LINK_SIGNING_SECRET")
+
+    response = _voice_link(_NEW_PID)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "patient access is not configured"}
+
+
+@pytest.mark.parametrize("pid", ["", "bad id", "x" * 33, "../RGN-0417"])
+def test_voice_patient_link_validates_patient_id(pid):
+    assert _voice_link(pid).status_code == 422
+
+
+def _sign_in_clinician(monkeypatch) -> None:
+    monkeypatch.setenv("CLINICIAN_USERNAME", "test-clinician")
+    monkeypatch.setenv("CLINICIAN_PASSWORD", "test-password")
+    monkeypatch.setenv("CLINICIAN_SESSION_SECRET", "s" * 32)
+    monkeypatch.setenv("CLINICIAN_COOKIE_SECURE", "false")
+    clinician_auth.reset_login_rate_limits()
+    login = client.post(
+        "/api/clinician/session",
+        json={"username": "test-clinician", "password": "test-password"},
+    )
+    assert login.status_code == 200
+
+
+def test_clinician_can_copy_the_same_magic_link(monkeypatch):
+    _create(_NEW_PID)
+    try:
+        _sign_in_clinician(monkeypatch)
+        response = client.post(f"/api/patients/{_NEW_PID}/link")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        body = response.json()
+        parts = urlsplit(body["patient_url"])
+        assert parts.path == f"/patient/{_NEW_PID}"
+        patient_access.verify_token(parse_qs(parts.query)["token"][0], _NEW_PID)
+
+        assert client.post("/api/patients/RGN-NOPE/link").status_code == 404
+        client.cookies.clear()
+        assert client.post(f"/api/patients/{_NEW_PID}/link").status_code == 401
+    finally:
+        client.cookies.clear()

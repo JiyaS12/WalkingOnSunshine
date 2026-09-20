@@ -5,6 +5,7 @@ https://www.twilio.com/docs/messaging/api/message-resource
 """
 
 import asyncio
+import logging
 from typing import Protocol
 
 import httpx
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .config import TelephonySettings
 from .twilio import TWILIO_API_ROOT
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderRejected(RuntimeError):
@@ -51,6 +54,10 @@ class TwilioProvider:
                         data=fields,
                     )
                     if 400 <= response.status_code < 500 and response.status_code != 408:
+                        logger.warning(
+                            "Twilio rejected %s dispatch (%d): error code %s",
+                            resource, response.status_code, _rejection_code(response),
+                        )
                         raise ProviderRejected("Provider rejected dispatch.")
                     if response.status_code not in {200, 201}:
                         raise ProviderUnknown("Provider outcome unknown.")
@@ -73,6 +80,17 @@ class TwilioProvider:
         })
 
 
+def _rejection_code(response: httpx.Response) -> str:
+    """Twilio's numeric error code only; the message may echo the destination number."""
+
+    try:
+        body = response.json()
+    except ValueError:
+        return "unknown"
+    code = body.get("code") if isinstance(body, dict) else None
+    return str(code) if isinstance(code, int) else "unknown"
+
+
 class FakePhoneProvider:
     """Injection-only offline provider; never selected by environment variables."""
 
@@ -80,14 +98,18 @@ class FakePhoneProvider:
         self.calls = 0
         self.messages = 0
         self.last_body: str | None = None
+        self.last_call_destination: str | None = None
+        self.last_sms_destination: str | None = None
         self.sms_outcome = "sent"
 
     async def call(self, to_number: str, voice_url: str, status_url: str) -> ProviderResult:
         self.calls += 1
+        self.last_call_destination = to_number
         return ProviderResult(sid=f"CAfake{self.calls}", status="queued")
 
     async def sms(self, to_number: str, body: str, status_url: str) -> ProviderResult:
         self.messages += 1
+        self.last_sms_destination = to_number
         self.last_body = body
         if self.sms_outcome == "rejected":
             raise ProviderRejected()

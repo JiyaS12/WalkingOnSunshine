@@ -13,7 +13,7 @@ The supported runtime is the safe core under `app/`:
 - `app/persistence.py` stores call metadata and conversation transcripts in memory, and writes through to Supabase when server credentials are set
 - `app/database.py` is the server-side Supabase REST adapter (service-role key never goes to the browser)
 - `app/voice_adapter.py` defines the voice interaction contract
-- `app/gait_handoff.py` prepares the downstream handoff payload without real delivery
+- `app/gait_handoff.py` fetches the backend-signed patient magic link for the handoff (SMS delivery stays in the call session)
 - `app/telephony/` carries the survey over a real phone call: Twilio transport, Deepgram streaming speech-to-text and speech synthesis, and `PhoneCallSession`, which runs the turn loop without knowing either provider
 - `phone_app.py` serves the operator dialer, the Twilio webhooks, and the media-stream websocket
 

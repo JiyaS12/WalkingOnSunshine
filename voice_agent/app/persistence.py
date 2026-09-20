@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Protocol
 
 from .models import PatientRecord, SurveyAnswer
@@ -38,6 +39,8 @@ class CallRecord:
     carrier_status: str | None = None
     patient_record_id: str | None = None
     turns: list[TranscriptTurn] = field(default_factory=list)
+    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    completed_at: str | None = None
 
 
 class ConversationPersistence(Protocol):
@@ -86,6 +89,8 @@ class InMemoryPersistence:
         # ``status`` is the call lifecycle; ``final_status`` is the outcome.
         record.status = "completed"
         record.final_status = final_status
+        if final_status == "completed" and record.completed_at is None:
+            record.completed_at = datetime.now(timezone.utc).isoformat()
         return record
 
     def persist_session_start(self, session_id: str, patient: PatientRecord, assistant_prompt: str) -> None:
@@ -119,7 +124,7 @@ class InMemoryPersistence:
             self.complete_call(session_id, TERMINAL_STATUS[engine_state])
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
-        records = self.calls.values()
+        records = list(self.calls.values())
         if patient_code:
             wanted = patient_code.strip()
             records = [record for record in records if record.patient_code == wanted]
@@ -148,6 +153,8 @@ class InMemoryPersistence:
                 "patient_id": record.patient_code,
                 "patient_uuid": record.patient_record_id,
                 "session_id": record.session_id,
+                "started_at": record.started_at,
+                "completed_at": record.completed_at,
                 "status": record.final_status or record.status,
                 "total_score": str(score.total) if completed and score and score.complete else None,
                 "transcript": "\n".join(f"{turn.speaker}: {turn.text}" for turn in record.turns),
@@ -204,19 +211,33 @@ class CompositePersistence:
             logger.exception("Database persistence failed for session %s", session_id)
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
+        return self.results_snapshot(patient_code)["results"]
+
+    def results_snapshot(self, patient_code: str | None = None) -> dict[str, object]:
+        """Keep the existing recovery merge, while making local fallback explicit."""
         local = self.memory.list_results(patient_code)
         try:
             rows = self.database.list_results(patient_code)
         except Exception:
             logger.exception("Database result read failed; returning in-memory transcript results.")
-            return local
+            return {"results": local, "source": "in_memory",
+                    "warning": "Supabase is unavailable. These temporary local results disappear when the app restarts."}
 
         def session_of(row: dict[str, object]) -> str:
             return str(row.get("follow_up_label") or "").removeprefix("live:")
 
         trusted = [row for row in rows if session_of(row) not in self.degraded]
         stored = {session_of(row) for row in trusted}
-        return trusted + [row for row in local if row["session_id"] not in stored]
+        recovered = [row for row in local if row["session_id"] not in stored]
+        return {
+            "results": [{**row, "storage_source": "supabase"} for row in trusted]
+                + [{**row, "storage_source": "in_memory"} for row in recovered],
+            "source": "mixed" if recovered else "supabase",
+            "warning": (
+                "Some results are recovered from temporary local memory, not Supabase. These local copies disappear when the app restarts."
+                if recovered else None
+            ),
+        }
 
 
 def build_persistence() -> ConversationPersistence:

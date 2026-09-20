@@ -88,6 +88,37 @@ its confirmed payload and durably reserves SMS before dispatch; repeating
 ingestion never implies another SMS. Responses
 that contain the link or patient-scoped data include `Cache-Control: no-store`.
 
+## 1a. Re-issue a link for an existing patient (voice agent)
+
+The phone survey runs in a separate process that must not hold the signing
+secret. After the last answer it asks for the link with the same ingest token:
+
+```http
+POST /api/voice/patient-link HTTP/1.1
+Content-Type: application/json
+X-Survey-Token: <configured-ingest-token>
+
+{ "patient_id": "RGN-0417", "call_id": "CAxxxxxxxx" }
+```
+
+```json
+{
+  "patient_id": "RGN-0417",
+  "patient_url": "https://patient.example/patient/RGN-0417?token=<signed-token>",
+  "patient_access_expires_at": "2026-09-19T17:15:00+00:00"
+}
+```
+
+`404` when the patient record does not exist (the endpoint never creates
+records), `401` for a missing or wrong ingest token, `503` when signing is not
+configured. The caller texts `patient_url` verbatim and otherwise treats it like
+the `submit-survey` link above.
+
+A signed-in clinician can mint the same link from the doctor portal ("Copy
+patient link") via `POST /api/patients/{pid}/link`, authenticated by the
+clinician session cookie instead of the ingest token; the response shape and
+error codes are identical.
+
 ## 1b. Optional patient-session exchange
 
 The backend also supports exchanging a signed link for a short-lived HttpOnly
@@ -207,7 +238,7 @@ clinician surface or reveal which condition occurred.
 
 The examples above also support legacy/local survey ingestion. Integrated calls
 must use the reserved main patient ID and `call_id`; no phone-demo patient IDs
-are substituted. Main owns the patient JSON store and all signed URLs.
+are substituted. Main owns the configured patient store and all signed URLs.
 
 ### Authentication and endpoints
 
@@ -239,7 +270,10 @@ The response is `{"call": CallRecord}`. Main allocates `call_id` and
 and sends phone `{patient_id, call_id, attempt_id, request_id, to_number, condition_category}`.
 Repeating the same request returns its call; changing a reused request or
 starting another unresolved call returns `409`. Numbers are not public call
-fields or durable phone receipts.
+fields or durable phone receipts. Main privately persists the destination on
+the call record so database review can associate results with the dialed number.
+Patient ID is the permanent identity; call ID and attempt ID distinguish visits.
+See [Supabase setup and privacy boundaries](supabase-patient-store.md).
 
 Integrated survey fields:
 

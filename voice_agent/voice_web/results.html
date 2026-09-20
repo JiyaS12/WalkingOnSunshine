@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voice survey results · WalkingOnSunshine</title>
+  <link rel="stylesheet" href="/static/results.css?v=1">
+  <script src="/static/results.js?v=1" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">s.</span>WalkingOnSunshine</a>
+    <span class="demo-tag">DEMO WORKSPACE</span>
+    <a class="survey-link" href="/" target="_blank" rel="noopener">Open voice survey <span aria-hidden="true">↗</span></a>
+  </header>
+  <main>
+    <section class="page-heading">
+      <div><p class="eyebrow">CONVERSATIONS → STRUCTURED ANSWERS</p><h1>Survey results</h1><p class="subtitle">See what was said, what was understood, and what was recorded.</p></div>
+      <div class="connection"><span id="source" class="source">Checking data source…</span><span id="updated">Waiting for first update</span></div>
+    </section>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section class="access-panel" aria-label="Operator access">
+      <form id="access-form">
+        <label for="operator-token">Operator token</label>
+        <div class="access-row"><input id="operator-token" type="password" autocomplete="current-password" placeholder="OPERATOR_TOKEN from the server environment" required><button type="submit">Unlock results</button></div>
+      </form>
+      <button id="lock" type="button" hidden>Lock results</button>
+      <p class="access-note">Standalone voice-demo records only. Integrated phone calls and gait results are reviewed in the clinician portal. Tokens stay in this tab’s session storage, never in URLs.</p>
+    </section>
+    <section class="metrics" aria-label="All survey session totals">
+      <div><span>Survey sessions</span><strong id="total">—</strong></div>
+      <div><span>Completed</span><strong id="completed">—</strong></div>
+      <div><span>In progress</span><strong id="active">—</strong></div>
+      <div><span>Needs review</span><strong id="review">—</strong></div>
+    </section>
+    <section class="workspace" aria-label="Survey review">
+      <aside class="session-panel">
+        <div class="panel-heading"><h2>Conversations</h2><button id="refresh" type="button">Refresh</button></div>
+        <label class="sr-only" for="search">Search by patient code</label>
+        <input id="search" type="search" placeholder="Search patient code…" autocomplete="off">
+        <div class="filter-row"><label class="sr-only" for="filter">Survey status</label><select id="filter"><option value="all">All statuses</option><option value="completed">Completed</option><option value="in_progress">In progress</option><option value="needs_review">Needs review</option><option value="scheduled">Scheduled</option><option value="failed">Failed</option></select><span id="count"></span></div>
+        <div id="sessions" class="session-list" aria-label="Survey sessions"><p class="empty">Loading conversations…</p></div>
+        <p class="refresh-note">Updates every 10 seconds while this page is visible.</p>
+      </aside>
+      <article id="detail" class="detail-panel" aria-label="Selected survey"><div class="empty detail-empty"><span class="empty-icon" aria-hidden="true">↗</span><h2>Your conversations, in context</h2><p>Select a survey to see its answers and transcript.</p></div></article>
+    </section>
+    <footer><span class="footer-dot" aria-hidden="true"></span>Synthetic demo data only · Not for clinical use · No audio recordings stored</footer>
+  </main>
+</body>
+</html>

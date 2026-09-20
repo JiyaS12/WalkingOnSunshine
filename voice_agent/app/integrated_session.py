@@ -3,17 +3,24 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from . import conversation_policy as policy
 from .answer_interpreter import AnswerInterpreter, clean_utterance, control_intent
-from .generic_intake import GenericIntake
+from .generic_intake import GenericIntake, build_intake_interpreter
 from .integrated_service import IntegratedService
 from .integration_contract import CallStatus, PhoneError, RegisteredCall
 from .main_backend import BackendError
 from .models import ConditionCategory, PatientRecord
 from .patient_repository import InMemoryPatientRepository
 from .survey_engine import SafeSurveyEngine
-from .telephony.call_session import _TRAILING_FILLER, _spoken, link_reply_intent
+from .telephony.call_session import _TRAILING_FILLER, _spoken, link_reply_intent, lowest_confidence
 
 Speaker = Callable[[str], Awaitable[None]]
+
+# Page states that mean the patient has the link open, even if they never said so;
+# _CAMERA_STATUSES additionally mean they are already past the Live Camera setup.
+_CAMERA_STATUSES = {"calibrating", "ready", "capturing", "captured"}
+_PAGE_OPEN_STATUSES = _CAMERA_STATUSES | {"page_ready"}
+MAX_LINK_REMINDERS = 2
 
 
 class IntegratedSession:
@@ -26,7 +33,7 @@ class IntegratedSession:
         self.engine = SafeSurveyEngine(
             InMemoryPatientRepository({patient.patient_code: patient}), patient.patient_code, interpreter,
         )
-        self.generic = GenericIntake()
+        self.generic = GenericIntake(build_intake_interpreter())
         self.service = service
         self.call = call
         self.session_id = service.receipt(call.call_id).snapshot.phone_session_id or call.call_id
@@ -38,9 +45,13 @@ class IntegratedSession:
         self.finished = False
         self.paused = False
         self.stage = "generic"
+        self.link_open = False
+        self._page_active = False
         self._buffer: list[str] = []
+        self._confidence: float | None = None
         self._last_prompt = ""
         self._silences = 0
+        self._link_reminders = 0
         self._background: asyncio.Task[None] | None = None
         self._deadline: asyncio.Task[None] | None = None
         self._speech_lock = asyncio.Lock()
@@ -50,40 +61,40 @@ class IntegratedSession:
     def pending_transcript(self) -> str:
         return " ".join(self._buffer).strip()
 
-    def add_transcript(self, text: str) -> None:
+    def add_transcript(self, text: str, confidence: float | None = None) -> None:
         if len(self.pending_transcript) < 12000:
             self._buffer.append(text[:12000])
+            self._confidence = lowest_confidence(self._confidence, confidence)
 
     def discard_pending(self) -> None:
         self._buffer.clear()
+        self._confidence = None
 
     def trailing_off(self) -> bool:
         return bool(_TRAILING_FILLER.search(self.pending_transcript.lower()))
 
     async def begin(self) -> None:
         self._deadline = asyncio.create_task(self._expire())
-        await self._say(
-            "I am an automated survey helper. I will ask general intake questions, then your condition survey. "
-            "You can say repeat, pause, resume, or stop. " + self.generic.prompt()
-        )
+        await self._say(policy.INTEGRATED_INTRO + policy.PARAGRAPH + self.generic.prompt())
 
     async def _expire(self) -> None:
         await asyncio.sleep(self.max_call_seconds)
-        await self.finish("completed", "The call time limit has been reached. I cannot confirm a saved walking test.", "timeout")
+        await self.finish("completed", policy.INTEGRATED_CALL_LIMIT, "timeout")
 
     async def flush_utterance(self) -> bool:
         text = self.pending_transcript
+        confidence = self._confidence
         self.discard_pending()
         if self.finished or not text:
             return self.finished
         self._silences = 0
         command = control_intent(text)
         if command == "stop" or (self.stage in {"submitting", "walking"} and link_reply_intent(text) == "stop"):
-            await self.finish("stopped", "We will stop here. Thank you for your time.", "stopped")
+            await self.finish("stopped", policy.STOPPED, "stopped")
             return True
         if command == "pause":
             self.paused = True
-            await self._say("Paused. Say resume or stop.")
+            await self._say(policy.PAUSED, force=True)
             return False
         if self.paused:
             if command != "resume":
@@ -95,7 +106,7 @@ class IntegratedSession:
             await self._say(self._current_prompt())
             return False
         if self.stage == "generic":
-            prompt = self.generic.handle(text)
+            prompt = await asyncio.to_thread(self.generic.handle, text)
             if self.generic.state in {"stopped", "needs_review"}:
                 await self.finish("stopped" if self.generic.state == "stopped" else "completed", prompt, "needs_review")
                 return True
@@ -104,24 +115,31 @@ class IntegratedSession:
                 prompt = _spoken(self.engine.start())
             await self._say(prompt)
         elif self.stage == "condition":
-            prompt, _ = await asyncio.to_thread(self.engine.handle_response, text)
+            prompt, _ = await asyncio.to_thread(self.engine.handle_response, text, confidence)
             if self.engine.session.state in {"stopped", "escalated"}:
                 await self.finish("stopped" if self.engine.session.state == "stopped" else "completed", _spoken(prompt), "needs_review")
                 return True
             if self.engine.session.state == "complete":
                 self.submission = self._payload()
                 self.stage = "submitting"
-                await self._say("Your answers are confirmed. I am checking that they are saved before requesting a text.")
+                await self._say(policy.INTEGRATED_GAIT_INTRO)
                 self._background = asyncio.create_task(self._submit_and_wait())
             else:
                 await self._say(_spoken(prompt))
+        elif self.stage == "submitting":
+            await self._say(policy.INTEGRATED_SAVING)
         else:
-            if link_reply_intent(text) == "missing":
-                await self._say("I cannot confirm the text reached you. I will not automatically send another. You can stop or continue waiting.")
-            elif link_reply_intent(text) == "ready" or clean_utterance(text) == "retry":
-                await self._say("Follow the page's camera and calibration steps. I will wait for its readiness confirmation.")
+            intent = link_reply_intent(text)
+            if intent == "missing" and not self.link_open:
+                await self._say(policy.INTEGRATED_LINK_MISSING)
+            elif intent == "ready" or clean_utterance(text) == "retry":
+                self.link_open = True
+                if self._page_active:
+                    await self._say(policy.INTEGRATED_PAGE_SEEN)
+                else:
+                    await self._say(policy.INTEGRATED_CAMERA_SETUP)
             else:
-                await self._say("I am waiting for the page's status. You can say pause, repeat, or stop.")
+                await self._say(self._current_prompt())
         return self.finished
 
     def _current_prompt(self) -> str:
@@ -129,7 +147,11 @@ class IntegratedSession:
             return self.generic.prompt()
         if self.stage == "condition":
             return _spoken(self.engine.start())
-        return "I am waiting for confirmation from the walking page. Say stop to end."
+        if self.stage == "submitting":
+            return policy.INTEGRATED_SAVING
+        if not self.link_open:
+            return policy.INTEGRATED_LINK_SENT
+        return policy.INTEGRATED_WAITING
 
     def _payload(self) -> dict[str, object]:
         answers = self.engine.session.answers
@@ -155,18 +177,15 @@ class IntegratedSession:
         try:
             snapshot = await self.service.submit(self.call.call_id, self.submission)
         except BackendError:
-            await self.finish("completed", "I could not confirm saving the intake and requesting its link. No walking test has been confirmed saved.", "provider_unavailable")
+            await self.finish("completed", policy.INTEGRATED_SUBMIT_FAILED, "provider_unavailable")
             return
         if self.finished:
             return
         if snapshot.sms_status == "failed":
-            await self.finish("completed", "Your intake is saved, but the text failed. Please contact your care team if you need help with the link.", snapshot.error_code)
+            await self.finish("completed", policy.INTEGRATED_SMS_FAILED, snapshot.error_code)
             return
         self.stage = "walking"
-        await self._say(
-            "Your intake is saved. The text request is recorded, but delivery may still be pending. "
-            "When the link arrives, open it and follow the camera setup. I will wait for calibration."
-        )
+        await self._say(policy.INTEGRATED_LINK_SENT)
         await self._poll_walk()
 
     async def _poll_walk(self) -> None:
@@ -182,39 +201,54 @@ class IntegratedSession:
                     return
                 if view is not None:
                     if view.call_id != self.call.call_id or view.attempt_id != self.call.attempt_id:
-                        await self.finish("completed", "The walking page status does not match this call. I will stop guidance.", "needs_review")
+                        await self.finish("completed", policy.INTEGRATED_SCOPE_MISMATCH, "needs_review")
                         return
                     if self.paused:
                         continue
                     key = (view.status, view.last_sequence)
                     if view.status == "saved" and view.session_id:
-                        await self.finish("completed", "The backend confirms your walking test is saved. Thank you. Goodbye.")
+                        await self.finish("completed", policy.INTEGRATED_SAVED)
                         return
                     if view.status == "stopped":
-                        await self.finish("stopped", "The walking page has stopped the test. We will stop here.", "stopped")
+                        await self.finish("stopped", policy.INTEGRATED_PAGE_STOPPED, "stopped")
                         return
+                    was_open = self.link_open
+                    if view.status in _PAGE_OPEN_STATUSES or view.last_event == "permission_denied":
+                        self.link_open = True
+                    if view.status in _CAMERA_STATUSES or view.last_event == "permission_denied":
+                        self._page_active = True
                     if key != seen:
                         seen = key
                         if view.last_event == "permission_denied":
-                            await self._say("The page reports camera permission was denied. You can allow camera access and retry on the page, or say stop.")
+                            await self._say(policy.INTEGRATED_PERMISSION_DENIED)
                         elif view.last_event == "recoverable_error":
-                            await self._say("The page reports a problem. Please follow its retry instructions, or say stop. A saved test is not confirmed.")
+                            await self._say(policy.INTEGRATED_PAGE_ERROR)
+                        elif view.status == "page_ready" and not was_open:
+                            self._page_active = True
+                            await self._say(policy.INTEGRATED_PAGE_OPENED)
                         elif view.status == "ready":
-                            await self._say("The page confirms calibration is ready. Live capture starts automatically. Walk in view of the camera only if safe, then choose Save this walk. About 15 seconds is a guide; I will wait for the saved result.")
+                            await self._say(policy.INTEGRATED_READY)
                         elif view.status == "capturing":
-                            await self._say("The page reports capture is running. Stop if you feel unsafe. When you have a walking result, choose Save this walk. I will wait for the saved result.")
+                            await self._say(policy.INTEGRATED_CAPTURING)
                         elif view.status == "captured":
-                            await self._say("A walking result is available. For live capture, choose Save this walk. Uploaded results save automatically. I am waiting for confirmation that the result is saved.")
+                            await self._say(policy.INTEGRATED_CAPTURED)
             await asyncio.sleep(self.poll_seconds)
         if not self.finished:
-            await self.finish("completed", "The waiting time has ended. I cannot confirm that a walking test was saved. You may check the page.")
+            await self.finish("completed", policy.INTEGRATED_TIMED_OUT)
 
     async def handle_silence(self) -> bool:
-        if self.stage in {"submitting", "walking"}:
+        if self.stage == "submitting" or self.paused and self.stage == "walking":
+            return self.finished
+        if self.stage == "walking":
+            # Quiet while they hunt for the text is not an unanswered question;
+            # the page's status (or the poll deadline) decides how this ends.
+            if not self.link_open and self._link_reminders < MAX_LINK_REMINDERS:
+                self._link_reminders += 1
+                await self._say(policy.INTEGRATED_LINK_REMINDER)
             return self.finished
         self._silences += 1
         if self._silences >= (12 if self.paused else 3):
-            await self.finish("completed", "I did not hear a confirmed response. We will stop without submitting an incomplete intake.", "needs_review")
+            await self.finish("completed", policy.INTEGRATED_NO_RESPONSE, "needs_review")
         elif not self.paused:
             await self._say(self._current_prompt())
         return self.finished
@@ -240,9 +274,9 @@ class IntegratedSession:
                     task.cancel()
             await self.service.end(self.call.call_id, "completed", "disconnected")
 
-    async def _say(self, text: str, *, closing: bool = False) -> None:
+    async def _say(self, text: str, *, closing: bool = False, force: bool = False) -> None:
         async with self._speech_lock:
-            if (self.finished or self.paused) and not closing and not text.startswith("Paused"):
+            if (self.finished or self.paused) and not closing and not force:
                 return
             self._last_prompt = text
             await self.speak(text)

@@ -35,8 +35,22 @@ def wait_ready(client: httpx.Client, path: str, process: subprocess.Popen) -> No
     pytest.fail("Fixture process did not become ready")
 
 
+@pytest.fixture(scope="session")
+def matplotlib_cache(tmp_path_factory):
+    # MediaPipe imports Matplotlib. On a fresh macOS cache its font scan can
+    # exceed the HTTP startup deadline. Warm one isolated, non-patient cache
+    # before starting services, then share it across the fixture processes.
+    cache = tmp_path_factory.mktemp("matplotlib")
+    subprocess.run(
+        [str(ROOT / "backend/.venv/bin/python"), "-c", "import matplotlib.font_manager"],
+        env={"PATH": os.environ["PATH"], "MPLCONFIGDIR": str(cache)},
+        check=True, timeout=120, capture_output=True,
+    )
+    return cache
+
+
 @pytest.fixture
-def services(tmp_path):
+def services(tmp_path, matplotlib_cache):
     main_socket, phone_socket = socket.socket(), socket.socket()
     for listener in (main_socket, phone_socket):
         listener.bind(("127.0.0.1", 0))
@@ -51,6 +65,7 @@ def services(tmp_path):
         "PATH": os.environ["PATH"],
         "HOME": str(tmp_path),
         "PYTHONUNBUFFERED": "1",
+        "MPLCONFIGDIR": str(matplotlib_cache),
         "OPENAI_API_KEY": "",
         "SURVEY_EXTRACTOR": "exact",
         "SURVEY_INGEST_TOKEN": INGEST,
@@ -156,12 +171,9 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
         "Authorization": "Bearer invalid",
     }).status_code == 401
     ok(phone.post(f"/fixture/calls/{call_id}/begin"))
-    answers = (["unknown"] * 7 if unknown else
-               ["7", "2", "yes", "I tripped on a rug", "yes",
-                "After standing up", "hip stiffness; unstable walking"])
+    answers = ["unknown"] * 3 if unknown else ["7", "2", "yes"]
     for answer in answers:
-        for text in (answer, "yes"):
-            ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": text}))
+        ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": answer}))
     for _ in range(6):
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "mild"}))
     state = poll(phone, call_id, lambda row: row["snapshot"]["sms_status"] in {
@@ -175,15 +187,11 @@ def test_real_main_phone_handshake(services, condition, sms_outcome, unknown):
     payload = state["submission"]
     assert payload["pain_scale"] == (None if unknown else 7)
     assert payload["fall_history"]["falls_last_6_months"] == (None if unknown else 2)
-    assert payload["fall_history"]["injured"] == (None if unknown else True)
-    assert payload["fall_history"]["last_fall_description"] == (
-        None if unknown else "I tripped on a rug"
-    )
+    assert payload["fall_history"]["injured"] is None
+    assert payload["fall_history"]["last_fall_description"] is None
     assert payload["dizziness"] == (None if unknown else True)
-    assert payload["dizziness_notes"] == (None if unknown else "After standing up")
-    assert payload["primary_complaints"] == (
-        None if unknown else ["hip stiffness", "unstable walking"]
-    )
+    assert payload["dizziness_notes"] is None
+    assert payload["primary_complaints"] is None
     instrument = "hoos_jr" if condition == "orthopedic" else "stroke_mobility"
     assert payload["condition_survey"]["instrument"] == instrument
     assert len(payload["condition_survey"]["answers"]) == 6

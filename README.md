@@ -62,10 +62,25 @@ Main runs on **8000**, phone on **8001**, and the frontend on **3000**.
 Use separate Python virtualenvs: main pins `openai==3.16.1`, while voice
 requires `openai<3`. Main starts and tests without any telephony credentials.
 
+The copied voice-results dashboard is available from the optional desktop
+voice service on **8002** (keep 8000 reserved for main):
+
+```bash
+(cd voice_agent && .venv/bin/uvicorn voice_app:create_app --factory --host 127.0.0.1 --port 8002 --no-access-log)
+```
+
+Open <http://127.0.0.1:8002/results> and enter the voice service's
+`OPERATOR_TOKEN`. It shows standalone voice-demo answers, scores and transcripts
+from Supabase or explicitly labeled local fallback, with search and automatic
+refresh. It does **not** mix integrated phone/gait records into the standalone tables;
+review those in <http://localhost:3000/doctor>. Both interfaces remain protected
+by their existing authentication boundaries. Only synthetic data should be used
+for local testing. Starting these servers does not place a phone call.
+
 The authenticated clinician selects an existing patient and explicitly supplies
 `orthopedic` or `stroke` condition metadata. Main reserves the call; phone
 collects the generic intake and confirmed HOOS JR/stroke items separately.
-Main persists both in its JSON patient store and issues the signed patient
+Main persists both in its configured patient store and issues the signed patient
 URL. Phone texts that exact URL, then polls the patient's walking events.
 Only a persisted session with matching call/attempt IDs confirms completion.
 The clinician timeline and synthesis join that saved result to its survey.
@@ -77,8 +92,9 @@ The Sana screens use the shared pastel design system. Patient access still
 requires the complete signed SMS link; the public landing page does not offer
 patient-ID lookup.
 The [API/data contract](docs/patient-access-contract.md) describes all three
-authentication boundaries and the call/survey/walking payloads. Supabase remains
-an optional standalone voice-demo integration, not the integrated patient store.
+authentication boundaries and the call/survey/walking payloads. Integrated
+records can use the separate [Supabase patient store](docs/supabase-patient-store.md)
+or the explicitly configured local JSON demo store.
 
 ## Backend setup
 
