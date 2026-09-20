@@ -137,6 +137,19 @@ exact origin in `CORS_ALLOWED_ORIGINS`.
 
 ## Demo flow
 
+Quickest path (macOS/Linux, needs Python 3.10-3.12 and Node 20):
+
+```bash
+git clone https://github.com/JiyaS12/WalkingOnSunshine.git
+cd WalkingOnSunshine
+./demo.sh
+```
+
+`demo.sh` creates the virtualenv, installs both sides, writes a local
+`backend/.env` with demo clinician credentials and random secrets, starts both
+servers, and prints the clinician login plus a magic link for the seeded demo
+patient. Manual equivalent:
+
 1. `cd backend && .venv/bin/uvicorn main:app --port 8000`
 2. `cd frontend && npm run dev`
 3. Open http://localhost:3000 — pick a patient link, type a patient ID, or
