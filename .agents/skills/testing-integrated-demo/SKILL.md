@@ -1,5 +1,5 @@
 ---
-name: testing-clinician-patient-links
+name: testing-integrated-demo
 description: Run local clinician portal, signed patient-link, and integrated fake-phone browser demos with isolated stores and credentials.
 ---
 
@@ -62,8 +62,14 @@ real HTTP applications with FakePhoneProvider. Do not assume that production
 `phone_app.py` exposes fixture routes or has a fake-provider environment flag.
 
 Run main on 8000 and phone on 8001 with isolated `FIXTURE_STORE`,
-`FIXTURE_CACHE`, and `PHONE_RECEIPTS_PATH`. Copy the seed JSON into the fixture
-store. Set each subprocess's PYTHONPATH to `tests/integration` plus its own
+`FIXTURE_CACHE`, and `PHONE_RECEIPTS_PATH`. The fixture store must be a JSON
+object keyed by patient ID, not the seed array, so convert the seed first:
+
+```bash
+python -c 'import json,sys; s=json.load(open("data/mock_patients.json")); json.dump({p["patient_id"]: p for p in s}, open(sys.argv[1], "w"))' "$FIXTURE_STORE"
+```
+
+Set each subprocess's PYTHONPATH to `tests/integration` plus its own
 backend/voice_agent module directory. Launch with uvicorn `main_fixture:app`
 or `phone_fixture:app` from the respective directory.
 
