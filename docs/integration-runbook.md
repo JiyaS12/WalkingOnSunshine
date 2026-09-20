@@ -194,8 +194,18 @@ mobile camera/upload permission flows and the displayed clinician result.
 The offline harness does not validate these provider/device behaviors and does
 not certify clinical accuracy. HOOS JR/stroke raw sums remain prototype
 indicators. LLM summaries have a deterministic fallback and are decision
-support, not a diagnosis. No live call, SMS, model evaluation, deployment or
-browser test was performed as part of this integration.
+support, not a diagnosis. No live call, SMS, model evaluation or deployment
+was performed as part of this integration.
+
+The follow-up [processing authorization validation in PR #45](https://github.com/JiyaS12/WalkingOnSunshine/pull/45)
+exercised the browser flow with isolated synthetic patients and fake phone
+providers: intake, signed-link access, upload auto-save, clinician synthesis,
+invalid links/uploads, and live capture/save with synthetic camera/pose input.
+HTTP authorization, video decoding, gait computation, persistence and clinician
+reads were real; pose inference and live camera input were substituted. This
+does not validate physical cameras, MediaPipe accuracy, mobile devices or real
+telephony delivery. Use the PR's evidence for the fallback presentation, with
+these substitutions disclosed.
 
 For exact payloads and status vocabulary, see
 [the API/data contract](patient-access-contract.md).
