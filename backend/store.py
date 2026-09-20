@@ -417,22 +417,21 @@ def get_call(pid: str, call_id: str) -> dict:
     return _find_call(get_patient(pid), call_id)
 
 
-_ENDED_CALL = {"completed", "failed", "stopped"}
+_UNSTORABLE_SURVEY = {"stopped", "needs_review"}
 
 
 def walk_linked_call(record: dict) -> dict | None:
     """The active call a walk must correlate with, or None when the patient walks standalone.
 
-    A call that ended without a stored survey can never reach walking, so it
-    must not keep gating the patient page.
+    Only a terminal, unstored survey releases the patient: an ended call whose
+    survey is still pending or in progress may have an ingestion in flight, so
+    it keeps gating until the survey settles.
     """
     call_id = record.get("active_call_id")
     if not call_id:
         return None
     call = _find_call(record, call_id)
-    if call["survey_status"] != "stored" and (
-        call["survey_status"] in {"stopped", "needs_review"} or call["call_status"] in _ENDED_CALL
-    ):
+    if call["survey_status"] in _UNSTORABLE_SURVEY:
         return None
     return call
 

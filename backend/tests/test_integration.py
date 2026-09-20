@@ -1037,6 +1037,24 @@ def test_live_call_awaiting_survey_still_gates_standalone_walk(rig):
     )
 
 
+def test_ended_call_with_survey_ingesting_still_gates_standalone_walk(rig):
+    client, phone, _ = rig
+    call = start(client)
+    assert callback(client, phone, call_status="in_progress", survey_status="in_progress").status_code == 200
+    assert callback(client, phone, call_status="completed", survey_status="in_progress").status_code == 200
+    walking = f"/api/patient-access/{PID}/walking"
+    assert client.get(walking, headers=patient_headers()).json()["walking"]["call_id"] == call["call_id"]
+    payload = session(call)
+    del payload["call_id"]
+    del payload["attempt_id"]
+    assert (
+        client.post(f"/api/patient-access/{PID}/sessions", json=payload, headers=patient_headers()).status_code
+        == 409
+    )
+    submit(client, call)
+    assert client.get(walking, headers=patient_headers()).json()["walking"]["survey_status"] == "stored"
+
+
 def test_durable_call_dedupe_survives_store_reload(rig):
     client, phone, path = rig
     call = start(client)
