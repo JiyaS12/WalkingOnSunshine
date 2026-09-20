@@ -244,12 +244,9 @@ PAUSED = "Of course. Take your time. Say ‘resume’ when you’re ready, or �
 # driven by the status the walking page reports to the main backend rather
 # than by a timer, so nothing below claims a step happened until the page says so.
 INTEGRATED_INTRO = (
-    "Hi, this is the automated check-in from your doctor’s office. "
-    "I’m calling to see how you’re doing. "
-    "This is for your own recovery, so there are no wrong answers, and it only takes a few minutes. "
-    "I’ll start with a few general questions, then a short survey about your condition. "
-    "Just answer in your own words, and I’ll respond after a short pause. "
-    "You can ask me to repeat, pause, or stop at any time."
+    "Hi, this is the automated check-in from your doctor’s office, calling to see how you’re doing. "
+    "It only takes a few minutes, and there are no wrong answers. "
+    "Just answer in your own words, and you can ask me to repeat, pause, or stop at any time."
 )
 INTEGRATED_GAIT_INTRO = (
     "Thank you for those answers. There is one more thing your care team would like, "

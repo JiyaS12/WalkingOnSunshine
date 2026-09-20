@@ -17,8 +17,9 @@ from starlette.datastructures import FormData
 
 import phone_app
 from app import conversation_policy as policy
+from app import generic_intake
 from app.generic_intake import (
-    QUESTIONS, GenericIntake, IntakeReading, OpenAIIntakeInterpreter, lenient_parse, parse_value,
+    QUESTIONS, GenericIntake, IntakeQuestion, IntakeReading, OpenAIIntakeInterpreter, lenient_parse, parse_value,
 )
 from app.integrated_service import IntegratedService
 from app.integrated_session import IntegratedSession
@@ -143,11 +144,9 @@ async def say(session, text):
 
 
 async def answer_survey(session, *, unknown=False):
-    answers = ["unknown"] * 7 if unknown else ["7", "2", "yes", "fell on stairs", "no", "none", "hip pain; trouble walking"]
-    for index, text in enumerate(answers):
+    answers = ["unknown"] * 3 if unknown else ["7", "2", "no"]
+    for text in answers:
         await say(session, text)
-        if not unknown and index in {3, 6}:
-            await say(session, "yes")
     for _ in range(6):
         await say(session, "mild")
 
@@ -160,10 +159,11 @@ def test_combined_intake_and_canonical_link_are_separate_and_idempotent(harness)
         payload = harness.submissions[0]
         assert payload["pain_scale"] == 7
         assert payload["fall_history"] == {
-            "falls_last_6_months": 2, "injured": True, "last_fall_description": "fell on stairs",
+            "falls_last_6_months": 2, "injured": None, "last_fall_description": None,
         }
         assert payload["dizziness"] is False
-        assert payload["primary_complaints"] == ["hip pain", "trouble walking"]
+        assert payload["dizziness_notes"] is None
+        assert payload["primary_complaints"] is None
         assert len(payload["condition_survey"]["answers"]) == 6
         assert {answer["normalized_value"] for answer in payload["condition_survey"]["answers"]} == {"mild"}
         assert harness.url in harness.provider.last_body
@@ -799,7 +799,7 @@ def test_backend_rejects_redirect_and_maps_timeout_without_retry():
 def test_integrated_media_preserves_hesitations_until_continuation_or_timeout(harness, continued):
     async def scenario():
         session = await harness.session()
-        for _ in range(7):
+        for _ in range(len(QUESTIONS)):
             await say(session, "unknown")
         assert session.stage == "condition"
         harness.spoken.clear()
@@ -890,12 +890,44 @@ def test_carrier_completion_before_confirmation_still_requires_review(harness):
     asyncio.run(scenario())
 
 
+TEXT_QUESTION = IntakeQuestion("last_fall_description", "Tell me about your most recent fall.", "text")
+# The spoken intake is deliberately short; the free-text guardrails are kept
+# tested against this longer bank so they stay safe if a question is re-added.
+LONG_QUESTIONS = (
+    *QUESTIONS[:2],
+    IntakeQuestion("injured", "Were you hurt?", "boolean"),
+    TEXT_QUESTION,
+    QUESTIONS[2],
+    IntakeQuestion("dizziness_notes", "Anything about the dizziness?", "text"),
+    IntakeQuestion("primary_complaints", "What bothers you most?", "complaints"),
+)
+
+
+def test_spoken_intake_is_three_short_questions_then_the_survey():
+    assert [question.key for question in QUESTIONS] == ["pain_scale", "falls_last_6_months", "dizziness"]
+    assert all(len(question.prompt.split()) <= 12 for question in QUESTIONS)
+    intake = GenericIntake()
+    assert "scale of one to ten" in intake.prompt()
+    intake.handle("about a five")
+    intake.handle("none")
+    assert intake.handle("no") == "Thanks."
+    assert intake.complete
+    assert intake.payload() == {
+        "pain_scale": 5,
+        "fall_history": {"falls_last_6_months": 0, "injured": None, "last_fall_description": None},
+        "dizziness": False,
+        "dizziness_notes": None,
+        "primary_complaints": None,
+    }
+
+
 @pytest.mark.parametrize("answer,notes,complaints,readback", [
     (" NONE. ", None, [], "none reported"),
     ("unknown", None, None, "unknown"),
     ("none since surgery", "none since surgery", ["none since surgery"], "none since surgery"),
 ])
-def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, complaints, readback):
+def test_generic_intake_distinguishes_no_content_from_unknown(monkeypatch, answer, notes, complaints, readback):
+    monkeypatch.setattr(generic_intake, "QUESTIONS", LONG_QUESTIONS)
     intake = GenericIntake()
     for index, response in enumerate(["7", "0", "no", answer, "no", answer, answer]):
         prompt = intake.handle(response)
@@ -904,13 +936,13 @@ def test_generic_intake_distinguishes_no_content_from_unknown(answer, notes, com
             assert intake.index == index
             intake.handle("yes")
     assert intake.complete
-    payload = intake.payload()
-    assert payload["fall_history"]["last_fall_description"] == notes
-    assert payload["dizziness_notes"] == notes
-    assert payload["primary_complaints"] == complaints
+    assert intake.values["last_fall_description"] == notes
+    assert intake.values["dizziness_notes"] == notes
+    assert intake.values["primary_complaints"] == complaints
 
 
-def test_absent_notes_are_stored_without_confirmation_but_free_text_is_read_back():
+def test_absent_notes_are_stored_without_confirmation_but_free_text_is_read_back(monkeypatch):
+    monkeypatch.setattr(generic_intake, "QUESTIONS", LONG_QUESTIONS)
     intake = GenericIntake()
     for answer in ["7", "0", "no"]:
         intake.handle(answer)
@@ -961,7 +993,7 @@ def test_provider_failure_keeps_the_deterministic_reading():
                     raise TimeoutError("provider down")
 
     interpreter = OpenAIIntakeInterpreter(Client())
-    reading = interpreter.interpret(QUESTIONS[3], "fell on stairs")
+    reading = interpreter.interpret(TEXT_QUESTION, "fell on stairs")
     assert (reading.valid, reading.value, reading.clear) == (True, "fell on stairs", False)
     assert interpreter.interpret(QUESTIONS[0], "it's been rough").valid is False
 
@@ -980,5 +1012,5 @@ def test_model_mode_reasks_free_text_the_model_calls_off_topic():
                     return type("R", (), {"choices": [Choice()]})()
 
     interpreter = OpenAIIntakeInterpreter(Client())
-    assert interpreter.interpret(QUESTIONS[3], "Why do you need to know?").valid is False
+    assert interpreter.interpret(TEXT_QUESTION, "Why do you need to know?").valid is False
     assert interpreter.interpret(QUESTIONS[0], "about a five").value == 5
