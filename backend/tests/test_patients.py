@@ -223,6 +223,17 @@ def test_new_seed_patients_merge_into_an_existing_cache(tmp_path):
 
     assert store.get_patient("RGN-0500")["patient_id"] == "RGN-0500"
     assert store.get_patient("RGN-0417")["name"] == "Edited Locally"
+    assert "RGN-0500" not in json.loads(cache.read_text())
+    store.upsert_survey(
+        {
+            "patient_id": "RGN-0417",
+            "patient_name": "Edited Locally",
+            "pain_scale": 2,
+            "fall_history": {"falls_last_6_months": 0, "injured": False},
+            "dizziness": False,
+            "primary_complaints": [],
+        }
+    )
     assert "RGN-0500" in json.loads(cache.read_text())
 
 

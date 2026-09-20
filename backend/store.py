@@ -116,21 +116,15 @@ def _load() -> dict:
         return _patients
     except (OSError, ValueError) as exc:
         raise StoreUnavailable("patient store could not be loaded") from exc
-    # Seed patients added after the cache was written are merged in; existing
-    # records (and their surveys/sessions) are never overwritten, and a
-    # missing seed file never blocks serving a valid cache.
+    # Seed patients added after the cache was written are merged in memory on
+    # every load (the next mutation's _persist writes them through); existing
+    # records are never overwritten, and a missing seed file never blocks
+    # serving a valid cache.
     try:
         seeds = _read_seeds()
     except Exception:
         seeds = {}
-    missing = {pid: p for pid, p in seeds.items() if pid not in loaded}
-    _patients = {**loaded, **missing}
-    if missing:
-        try:
-            _persist()
-        except Exception:
-            _patients = loaded
-            raise
+    _patients = {**{pid: p for pid, p in seeds.items() if pid not in loaded}, **loaded}
     return _patients
 
 
