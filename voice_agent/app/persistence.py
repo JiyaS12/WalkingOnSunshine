@@ -176,12 +176,16 @@ class CompositePersistence:
         self.memory = memory
         self.database = database
         self.calls = memory.calls
+        # Sessions with at least one failed database write; the database copy of
+        # these is incomplete, so the in-memory copy is the one operators see.
+        self.degraded: set[str] = set()
 
     def persist_session_start(self, session_id: str, patient: PatientRecord, assistant_prompt: str) -> None:
         self.memory.persist_session_start(session_id, patient, assistant_prompt)
         try:
             self.database.persist_session_start(session_id, patient, assistant_prompt)
         except Exception:
+            self.degraded.add(session_id)
             logger.exception("Database persistence failed while starting session %s", session_id)
 
     def persist_turn(
@@ -196,6 +200,7 @@ class CompositePersistence:
         try:
             self.database.persist_turn(session_id, patient_text, assistant_prompt, answer, snapshot)
         except Exception:
+            self.degraded.add(session_id)
             logger.exception("Database persistence failed for session %s", session_id)
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
@@ -205,12 +210,13 @@ class CompositePersistence:
         except Exception:
             logger.exception("Database result read failed; returning in-memory transcript results.")
             return local
-        # A session whose write-through failed exists only in memory; keep it
-        # visible alongside the database rows (which win for duplicates).
-        stored = {
-            str(row.get("follow_up_label", "")).removeprefix("live:") for row in rows
-        }
-        return rows + [row for row in local if row["session_id"] not in stored]
+
+        def session_of(row: dict[str, object]) -> str:
+            return str(row.get("follow_up_label") or "").removeprefix("live:")
+
+        trusted = [row for row in rows if session_of(row) not in self.degraded]
+        stored = {session_of(row) for row in trusted}
+        return trusted + [row for row in local if row["session_id"] not in stored]
 
 
 def build_persistence() -> ConversationPersistence:

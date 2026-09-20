@@ -12,7 +12,9 @@ def test_voice_adapter_has_expected_conversation_scripts():
     assert "send" not in closing.text.lower()
 
 
-def test_handoff_service_prepares_payload_without_sending_link():
+def test_handoff_service_prepares_payload_without_sending_link(monkeypatch):
+    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
+    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
     service = GaitHandoffService()
     payload = service.prepare("RGN-0417", "orthopedic")
 

@@ -223,7 +223,9 @@ def test_call_session_completes_and_prepares_handoff():
     assert any("short video of you walking" in line for line in spoken)
 
 
-def test_call_session_texts_the_gait_link_and_walks_through_setup():
+def test_call_session_texts_the_gait_link_and_walks_through_setup(monkeypatch):
+    monkeypatch.setenv("GAIT_CHECKER_BASE_URL", "https://walk.example.org")
+    monkeypatch.setenv("PATIENT_LINK_SIGNING_SECRET", "s" * 32)
     sent: list[tuple[str, str]] = []
 
     async def sms_sender(to_number: str, body: str) -> None:
@@ -260,6 +262,7 @@ def test_call_session_texts_the_gait_link_and_walks_through_setup():
         ("+14155550123", sms_body(session.handoff.link or "")),
     ]
     assert session.handoff.link is not None and session.handoff.link in sent[0][1]
+    assert session.handoff.link.startswith("https://walk.example.org/patient/RGN-0417?token=")
 
     # The caller is asked to open the link and nothing else is said until they do.
     assert "short video of you walking" in spoken[-2]

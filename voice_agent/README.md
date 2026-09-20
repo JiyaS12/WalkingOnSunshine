@@ -214,6 +214,15 @@ Tuning what the patient hears and how well they are understood:
   can pick one by ear before changing it.
 - `UTTERANCE_END_MS`: how long a silence ends the patient's turn (default 1200).
 
+After the last answer the call texts the patient a link to the walking check.
+The link is `GAIT_CHECKER_BASE_URL/patient/<code>?token=…`, signed exactly the
+way `backend/patient_access.py` signs its own patient links, so set
+`PATIENT_LINK_SIGNING_SECRET` (32+ bytes) to the same value the backend uses and
+`GAIT_CHECKER_BASE_URL` to the patient app's HTTPS origin (`PATIENT_APP_BASE_URL`
+on the backend). `PATIENT_LINK_TTL_SECONDS` (default 900) bounds the link's life.
+If either is missing, no text is sent and the call record's handoff is marked
+`unavailable` rather than sending a placeholder or unsigned URL.
+
 ## Desktop voice demo with Deepgram
 
 The local voice app uses the browser microphone, sends each recording to the
