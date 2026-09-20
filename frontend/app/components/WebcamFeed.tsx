@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Camera,
   AlertTriangle,
@@ -169,6 +175,8 @@ interface Props {
   // fires when the input mode changes: whatever the previous mode measured
   // no longer describes the active input, so the parent must drop it
   onInputReset?: () => void;
+  // rendered between the video frame and the live joint tiles
+  beforeStats?: ReactNode;
 }
 
 type Mode = "live" | "upload";
@@ -177,6 +185,7 @@ export default function WebcamFeed({
   onMetrics,
   onProcessingChange,
   onInputReset,
+  beforeStats,
 }: Props) {
   const [mode, setMode] = useState<Mode>("live");
   const [error, setError] = useState<string | null>(null);
@@ -1086,6 +1095,8 @@ export default function WebcamFeed({
         />
         </div>
       </div>
+
+      {beforeStats && <div className="mt-3">{beforeStats}</div>}
 
       {mode === "live" && (
         <div className="mt-3 grid grid-cols-4 gap-2 text-center">
