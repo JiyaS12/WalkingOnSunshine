@@ -17,6 +17,10 @@ export interface GaitMetrics {
   gait_detected: boolean;
   /** share of frames where a dropped landmark had to be interpolated */
   dropped_frame_pct: number;
+  /** logistic fall-risk model inputs; absent on sessions saved before the model */
+  com_velocity_mps?: number;
+  knee_angular_velocity_dps?: number;
+  knee_moment_proxy?: number;
 }
 
 export type JointFrame = Record<string, number[]>;

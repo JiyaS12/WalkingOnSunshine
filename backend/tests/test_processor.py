@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gait_gen
-from processor import GaitMetrics, GaitProcessor
+from processor import GaitMetrics, GaitProcessor, fall_risk_logit
 
 
 def _flat_frames(n):
@@ -230,6 +230,34 @@ def test_asymmetry_scales_with_swing_deficit():
 def test_asymmetry_detects_static_foot():
     metrics = GaitProcessor(_walking_frames(right_lift=0.0)).compute()
     assert metrics.asymmetry_pct > 20.0
+
+
+def test_fall_risk_is_logistic_of_features():
+    session = gait_gen.impaired_session()
+    metrics = GaitProcessor(session["frames"], fps=30.0).compute()
+    z = fall_risk_logit(
+        v_com=metrics.com_velocity_mps,
+        theta_knee=metrics.knee_flexion_rom_deg,
+        m_knee=metrics.knee_moment_proxy,
+        omega_knee=metrics.knee_angular_velocity_dps,
+        asymmetry_pct=metrics.asymmetry_pct,
+        velocity_degradation_pct=metrics.velocity_degradation_pct,
+    )
+    assert metrics.fall_risk_score == pytest.approx(1 / (1 + math.exp(-z)), abs=0.002)
+
+
+def test_slower_com_velocity_raises_risk():
+    assert fall_risk_logit(0.6, 50.0, 0.05, 250.0) > fall_risk_logit(1.2, 50.0, 0.05, 250.0)
+    assert fall_risk_logit(1.2, 30.0, 0.05, 250.0) > fall_risk_logit(1.2, 50.0, 0.05, 250.0)
+    assert fall_risk_logit(1.2, 50.0, 0.05, 150.0) > fall_risk_logit(1.2, 50.0, 0.05, 250.0)
+
+
+def test_com_velocity_tracks_hip_translation():
+    session = gait_gen.recovered_session(seed=7)
+    translating = GaitProcessor(session["frames"][:150], fps=30.0).compute()
+    centred = GaitProcessor(_hip_centre(session["frames"][:150]), fps=30.0).compute()
+    assert translating.com_velocity_mps > 0.8
+    assert centred.com_velocity_mps == pytest.approx(translating.com_velocity_mps, rel=0.15)
 
 
 
