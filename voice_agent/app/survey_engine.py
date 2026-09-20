@@ -58,6 +58,8 @@ class SafeSurveyEngine:
         )
 
     def start(self, *, greet: bool = True) -> str:
+        if self.session.state == "complete" and self.session.needs_human_review:
+            return speech.COMPLETE_WITH_REVIEW
         if self.session.state in TERMINAL_SPEECH:
             return TERMINAL_SPEECH[self.session.state]
         if self.session.state == "paused":
@@ -75,29 +77,26 @@ class SafeSurveyEngine:
     def _retry(self, prompt: str) -> tuple[str, None]:
         self.session.clarification_attempts += 1
         if self.session.clarification_attempts >= MAX_CLARIFICATIONS:
-            return self._skip_question(), None
+            return self.skip_unresolved(), None
         return prompt, None
 
-    def _skip_question(self) -> str:
-        """Leave a question unanswered after the clarification budget, and move on.
-
-        Nothing is recorded for it, the survey is flagged for review, and the
-        caller hears the next question rather than a hang-up.
-        """
-
+    def skip_unresolved(self, reason: str = "clarification_limit") -> str:
+        """Advance without inventing an answer or terminating the survey."""
         question = self.session.current_question
-        if question is None:
-            raise RuntimeError("No active question to skip.")
-        self.session.skipped.append(question.id)
+        if question is None or self.session.state in TERMINAL_SPEECH:
+            return self.start()
         self.session.needs_human_review = True
+        self.session.unanswered_questions.append({
+            "question_id": question.id, "reason": reason,
+            "clarification_attempts": self.session.clarification_attempts,
+        })
         self._clear_pending()
         self.session.current_index += 1
         self.session.clarification_attempts = 0
-        self.session.state = "asking"
+        self.session.state = "complete" if self.session.is_complete else "asking"
         if self.session.is_complete:
-            self.session.state = "complete"
-            return f"{speech.SKIP_QUESTION} {speech.COMPLETE}"
-        return f"{speech.SKIP_QUESTION} {self._question_text()}"
+            return speech.SKIP_FOR_REVIEW + " " + speech.COMPLETE_WITH_REVIEW
+        return f"{speech.SKIP_FOR_REVIEW} Let’s move to the next question. {self._question_text()}"
 
     def _clear_pending(self) -> None:
         self.session.pending_answer = None
@@ -131,7 +130,7 @@ class SafeSurveyEngine:
         self.session.state = "asking"
         if self.session.is_complete:
             self.session.state = "complete"
-            return speech.COMPLETE, answer
+            return (speech.COMPLETE_WITH_REVIEW if self.session.needs_human_review else speech.COMPLETE), answer
         bridge = speech.validated_bridge(acknowledgment) or speech.accepted_bridge(
             answer.normalized_value, self.session.current_index
         )
@@ -148,7 +147,7 @@ class SafeSurveyEngine:
         """
 
         if self.session.state in TERMINAL_SPEECH:
-            return TERMINAL_SPEECH[self.session.state], None
+            return self.start(), None
         if self.session.state == "awaiting_start":
             return self.start(), None
 
@@ -233,7 +232,7 @@ class SafeSurveyEngine:
             self.session.state = "asking"
             self.session.clarification_attempts += 1
             if self.session.clarification_attempts >= MAX_CLARIFICATIONS:
-                return self._skip_question(), None
+                return self.skip_unresolved(), None
         answer = SurveyAnswer(
             question_id=question.id,
             question_prompt=question.prompt,
@@ -280,4 +279,5 @@ class SafeSurveyEngine:
             "question_count": len(self.session.questions),
             "clarification_attempts": self.session.clarification_attempts,
             "needs_human_review": self.session.needs_human_review,
+            "unanswered_questions": [dict(item) for item in self.session.unanswered_questions],
         }

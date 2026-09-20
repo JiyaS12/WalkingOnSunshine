@@ -141,13 +141,15 @@ def poll(phone: httpx.Client, call_id: str, predicate):
     pytest.fail("Phone state did not converge")
 
 
-@pytest.mark.parametrize(("condition", "sms_outcome"), [
-    ("orthopedic", "sent"),
-    ("stroke", "sent"),
-    ("orthopedic", "rejected"),
-    ("stroke", "unknown"),
+@pytest.mark.parametrize(("condition", "sms_outcome", "skip_first"), [
+    ("orthopedic", "sent", False),
+    ("stroke", "sent", False),
+    ("orthopedic", "rejected", False),
+    ("stroke", "unknown", False),
+    ("orthopedic", "sent", True),
+    ("stroke", "sent", True),
 ])
-def test_real_main_phone_handshake(services, condition, sms_outcome):
+def test_real_main_phone_handshake(services, condition, sms_outcome, skip_first):
     main, phone, store_path = services
     pid = "RGN-9001"
     calls_path = f"/api/patients/{pid}/calls"
@@ -171,7 +173,11 @@ def test_real_main_phone_handshake(services, condition, sms_outcome):
         "Authorization": "Bearer invalid",
     }).status_code == 401
     ok(phone.post(f"/fixture/calls/{call_id}/begin"))
-    for _ in range(6):
+    if skip_first:
+        for _ in range(3):
+            ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "banana unclear testimony"}))
+        assert not ok(phone.get(f"/fixture/calls/{call_id}"))["finished"]
+    for _ in range(5 if skip_first else 6):
         ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "mild"}))
     ok(phone.post(f"/fixture/calls/{call_id}/utterance", json={"text": "yes"}))
     state = poll(phone, call_id, lambda row: row["snapshot"]["sms_status"] in {
@@ -190,7 +196,7 @@ def test_real_main_phone_handshake(services, condition, sms_outcome):
     assert payload["primary_complaints"] is None
     instrument = "hoos_jr" if condition == "orthopedic" else "stroke_mobility"
     assert payload["condition_survey"]["instrument"] == instrument
-    assert len(payload["condition_survey"]["answers"]) == 6
+    assert len(payload["condition_survey"]["answers"]) == (5 if skip_first else 6)
     assert all(answer["confirmed"] for answer in payload["condition_survey"]["answers"])
     canonical = ok(main.post("/api/submit-survey", headers=SERVICE_HEADERS, json=payload))
     assert canonical["status"] == "stored"
@@ -279,6 +285,15 @@ def test_real_main_phone_handshake(services, condition, sms_outcome):
     durable = json.loads(store_path.read_text())[pid]
     assert durable["gait_sessions"][0]["session_id"] == saved["session_id"]
     assert durable["calls"][0]["walking"]["status"] == "saved"
+    if skip_first:
+        assert durable["calls"][0]["needs_human_review"] is True
+        condition_record = durable["surveys"][0]["condition_survey"]
+        assert condition_record["needs_human_review"] is True
+        assert len(condition_record["unanswered_questions"]) == 1
+        assert sum(turn["text"] == "banana unclear testimony" for turn in condition_record["transcript"]) == 3
+        assert "No total score" in synthesis["summary"]
+        database = ok(main.get("/api/clinician/database", params={"q": pid}))
+        assert database["patients"][0]["surveys"][0]["condition_survey"] == condition_record
     next_call = ok(main.post(calls_path, json={
         **start, "request_id": "next-call-request-0001",
     }))["call"]

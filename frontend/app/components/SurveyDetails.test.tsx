@@ -4,6 +4,20 @@ import SurveyDetails from "./SurveyDetails";
 
 afterEach(cleanup);
 
+it("shows unanswered items, review warning and transcript without assigning a value", () => {
+  render(<SurveyDetails survey={{ patient_id: "patient-review", condition_survey: {
+    instrument: "hoos_jr", version: "1", condition_category: "orthopedic", answers: [],
+    needs_human_review: true,
+    unanswered_questions: [{question_id: "hoos_stairs", reason: "clarification_limit", clarification_attempts: 3}],
+    transcript: [{speaker: "patient", question_id: "hoos_stairs", text: "Maybe, I cannot explain it", recorded_at: "2026-09-20T00:00:00Z"}],
+  }}} />);
+  expect(screen.getByText("Needs human review")).toBeInTheDocument();
+  expect(screen.getByText("Going up or down stairs: Unanswered — human review required")).toBeInTheDocument();
+  expect(screen.getByText("Maybe, I cannot explain it")).toBeInTheDocument();
+  expect(screen.getByText(/no complete survey score is available/)).toBeInTheDocument();
+  expect(screen.queryByText("Going up or down stairs: none")).not.toBeInTheDocument();
+});
+
 it("keeps unknown generic intake independent of confirmed Likert answers", () => {
   render(<SurveyDetails survey={{
     patient_id: "patient-1", call_id: "call-1", recorded_at: "2026-09-20T00:00:00Z",
@@ -27,8 +41,8 @@ it("lists skipped questions as unanswered and needing review", () => {
       skipped: ["hoos_rising"] },
   }} />);
   expect(screen.getByText("Going up or down stairs: mild")).toBeInTheDocument();
-  expect(screen.getByText("Rising from sitting: not answered")).toBeInTheDocument();
-  expect(screen.getByText(/Skipped on the call after repeated clarification/)).toBeInTheDocument();
+  expect(screen.getByText("Rising from sitting: Unanswered — human review required")).toBeInTheDocument();
+  expect(screen.getByText("Needs human review")).toBeInTheDocument();
 });
 
 it("displays explicit false/zero values and independently unknown fall injury", () => {

@@ -363,9 +363,15 @@ REVIEW = (
     "I’m sorry I haven’t understood clearly. I don’t want to record the wrong answer. "
     "We’ll stop here. This survey needs human review."
 )
-SKIP_QUESTION = (
-    "No problem, I don’t want to record the wrong answer, so let’s leave that one and move on."
+SKIP_FOR_REVIEW = (
+    "I’m sorry I haven’t understood clearly. I’ll leave this answer blank "
+    "for your care team to review."
 )
+COMPLETE_WITH_REVIEW = (
+    "Thank you for going through the questions with me. "
+    "Some answers were left blank for your care team to review."
+)
+SKIP_QUESTION = SKIP_FOR_REVIEW
 MEDICAL_BOUNDARY = (
     "I can help record your survey answers, but I can’t give medical advice. "
     "Please discuss that question with your care team."

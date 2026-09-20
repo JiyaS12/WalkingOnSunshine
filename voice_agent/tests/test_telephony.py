@@ -190,7 +190,7 @@ def test_call_session_runs_a_confirmed_answer():
     assert record.answers == [{"question_id": "hoos_stairs", "value": "moderate"}]
 
 
-def test_call_session_escalates_after_repeated_silence():
+def test_call_session_skips_question_after_repeated_silence():
     session, spoken = build_session()
 
     async def scenario() -> bool:
@@ -199,10 +199,11 @@ def test_call_session_escalates_after_repeated_silence():
         assert await session.handle_silence() is False
         return await session.handle_silence()
 
-    assert asyncio.run(scenario()) is True
+    assert asyncio.run(scenario()) is False
     assert session.engine.session.needs_human_review
-    assert "clinician follow up" in spoken[-1]
-    assert session.persistence.calls["sess-1"].final_status == "escalated"
+    assert "next question" in spoken[-1]
+    assert session.engine.session.current_index == 1
+    assert session.persistence.calls["sess-1"].final_status is None
 
 
 def test_call_session_hangs_up_when_the_patient_asks_to_stop():
