@@ -224,3 +224,12 @@ def test_new_seed_patients_merge_into_an_existing_cache(tmp_path):
     assert store.get_patient("RGN-0500")["patient_id"] == "RGN-0500"
     assert store.get_patient("RGN-0417")["name"] == "Edited Locally"
     assert "RGN-0500" in json.loads(cache.read_text())
+
+
+def test_unreadable_seed_file_still_serves_a_valid_cache(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"RGN-9999": {"patient_id": "RGN-9999", "name": "Cached Only"}}))
+    monkeypatch.setattr(store, "SEED_PATH", tmp_path / "missing_seed.json")
+    store.reset_for_tests(cache)
+
+    assert store.get_patient("RGN-9999")["name"] == "Cached Only"
