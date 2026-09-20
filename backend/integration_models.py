@@ -93,15 +93,18 @@ class ConditionSurvey(ContractModel):
     instrument: Literal["hoos_jr", "stroke_mobility"]
     version: Literal["1"]
     condition_category: ConditionCategory
-    answers: list[ConfirmedAnswer] = Field(min_length=6, max_length=6)
+    answers: list[ConfirmedAnswer] = Field(max_length=6)
+    skipped: list[Identifier] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def complete_instrument(self) -> Self:
         expected = QUESTION_IDS[self.instrument]
         if INSTRUMENT_CONDITIONS[self.instrument] != self.condition_category:
             raise ValueError("instrument does not match condition_category")
-        if sorted(answer.question_id for answer in self.answers) != sorted(expected):
+        covered = [answer.question_id for answer in self.answers] + list(self.skipped)
+        if sorted(covered) != sorted(expected):
             raise ValueError("each known instrument question must appear exactly once")
+        self.skipped.sort(key=expected.index)
         self.answers.sort(key=lambda answer: expected.index(answer.question_id))
         return self
 

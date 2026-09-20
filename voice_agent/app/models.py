@@ -52,6 +52,7 @@ class SurveySession:
     last_confirmation_prompt: str | None = None
     clarification_attempts: int = 0
     needs_human_review: bool = False
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def current_question(self) -> SurveyQuestion | None:

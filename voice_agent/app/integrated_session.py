@@ -236,6 +236,7 @@ class IntegratedSession:
                     "confirmed": a.confirmed, "acceptance_method": a.acceptance_method,
                     "confidence": a.confidence, "clarification_attempts": a.clarification_attempts,
                 } for a in answers],
+                "skipped": list(self.engine.session.skipped),
             },
         }
 

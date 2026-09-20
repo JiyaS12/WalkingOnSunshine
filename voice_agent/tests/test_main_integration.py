@@ -179,6 +179,34 @@ def test_text_waits_for_a_spoken_yes(harness):
     asyncio.run(scenario())
 
 
+def test_unclear_question_is_skipped_and_the_partial_survey_is_stored(harness):
+    async def scenario():
+        session = await harness.session()
+        await say(session, "mild")
+        for _ in range(3):
+            await say(session, "banana")
+        assert not session.finished
+        assert harness.spoken[-1].startswith(policy.SKIP_QUESTION)
+        assert "Question 3 of 6" in harness.spoken[-1]
+        for _ in range(4):
+            await say(session, "mild")
+        assert session.stage == "consent"
+        await say(session, "yes")
+        await harness.walk_requested.wait()
+        assert len(harness.submissions) == 1
+        survey = harness.submissions[0]["condition_survey"]
+        assert survey["skipped"] == ["hoos_uneven_surface"]
+        assert [a["question_id"] for a in survey["answers"]] == [
+            "hoos_stairs", "hoos_rising", "hoos_bending", "hoos_lying_bed", "hoos_sitting",
+        ]
+        stored = store.get_patient("patient1")["surveys"][-1]["condition_survey"]
+        assert stored["skipped"] == ["hoos_uneven_surface"]
+        assert len(stored["answers"]) == 5
+        assert harness.provider.messages == 1
+        await session.disconnect()
+    asyncio.run(scenario())
+
+
 def test_declining_the_text_still_stores_the_answers_and_never_texts(harness):
     async def scenario():
         session = await harness.session()

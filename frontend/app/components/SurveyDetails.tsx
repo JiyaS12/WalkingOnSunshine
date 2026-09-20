@@ -43,6 +43,12 @@ export default function SurveyDetails({ survey }: { survey: Survey }) {
                   <p className="text-muted-foreground">{answer.confirmed ? "Confirmed" : "Unconfirmed"} · {answer.acceptance_method.replaceAll("_", " ")}{answer.confirmed_at ? ` · ${answer.confirmed_at}` : ""}</p>
                 </li>
               ))}
+              {(survey.condition_survey.skipped ?? []).map((questionId) => (
+                <li key={questionId}>
+                  <p>{questionLabels[questionId] ?? questionId}: not answered</p>
+                  <p className="text-muted-foreground">Skipped on the call after repeated clarification · needs review</p>
+                </li>
+              ))}
             </ul>
             <p className="text-muted-foreground">Individual responses only. No validated HOOS JR interval score or stroke scale is calculated here.</p>
           </>

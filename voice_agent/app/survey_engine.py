@@ -75,11 +75,29 @@ class SafeSurveyEngine:
     def _retry(self, prompt: str) -> tuple[str, None]:
         self.session.clarification_attempts += 1
         if self.session.clarification_attempts >= MAX_CLARIFICATIONS:
-            self.session.needs_human_review = True
-            self.session.state = "escalated"
-            self._clear_pending()
-            return speech.REVIEW, None
+            return self._skip_question(), None
         return prompt, None
+
+    def _skip_question(self) -> str:
+        """Leave a question unanswered after the clarification budget, and move on.
+
+        Nothing is recorded for it, the survey is flagged for review, and the
+        caller hears the next question rather than a hang-up.
+        """
+
+        question = self.session.current_question
+        if question is None:
+            raise RuntimeError("No active question to skip.")
+        self.session.skipped.append(question.id)
+        self.session.needs_human_review = True
+        self._clear_pending()
+        self.session.current_index += 1
+        self.session.clarification_attempts = 0
+        self.session.state = "asking"
+        if self.session.is_complete:
+            self.session.state = "complete"
+            return f"{speech.SKIP_QUESTION} {speech.COMPLETE}"
+        return f"{speech.SKIP_QUESTION} {self._question_text()}"
 
     def _clear_pending(self) -> None:
         self.session.pending_answer = None
@@ -215,9 +233,7 @@ class SafeSurveyEngine:
             self.session.state = "asking"
             self.session.clarification_attempts += 1
             if self.session.clarification_attempts >= MAX_CLARIFICATIONS:
-                self.session.needs_human_review = True
-                self.session.state = "escalated"
-                return speech.REVIEW, None
+                return self._skip_question(), None
         answer = SurveyAnswer(
             question_id=question.id,
             question_prompt=question.prompt,
@@ -260,6 +276,7 @@ class SafeSurveyEngine:
                 "question_id": pending.question_id, "normalized_value": pending.normalized_value,
                 "confirmed": False,
             } if pending else None,
+            "skipped": list(self.session.skipped),
             "question_count": len(self.session.questions),
             "clarification_attempts": self.session.clarification_attempts,
             "needs_human_review": self.session.needs_human_review,

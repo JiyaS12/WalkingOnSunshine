@@ -393,6 +393,37 @@ def test_integrated_intake_keeps_separate_clinical_values(rig, category):
     assert submit(client, call)["survey"] == survey
 
 
+def test_skipped_questions_are_stored_without_a_value(rig):
+    client, _, _ = rig
+    call = start(client)
+    body = intake(call)
+    survey = body["condition_survey"]
+    survey["answers"] = survey["answers"][1:]
+    survey["skipped"] = ["hoos_stairs"]
+    result = client.post("/api/submit-survey", json=body, headers=SERVICE)
+    assert result.status_code == 200, result.text
+    stored = result.json()["survey"]["condition_survey"]
+    assert stored["skipped"] == ["hoos_stairs"]
+    assert [a["question_id"] for a in stored["answers"]] == list(QUESTION_IDS["hoos_jr"][1:])
+    summary = agent._template_synthesis(result.json()["patient"])
+    assert "Prototype raw item sum 5/20 over 5 of 6 items" in summary
+    assert "Unanswered after repeated clarification: hoos_stairs" in summary
+
+    # A question can be either answered or skipped, never both or neither.
+    for answers, skipped in (
+        (intake(call)["condition_survey"]["answers"], ["hoos_stairs"]),
+        (intake(call)["condition_survey"]["answers"][1:], []),
+        (intake(call)["condition_survey"]["answers"][1:], ["hoos_stairs", "hoos_stairs"]),
+    ):
+        body = intake(call)
+        body["condition_survey"]["answers"] = answers
+        body["condition_survey"]["skipped"] = skipped
+        assert (
+            client.post("/api/submit-survey", json=body, headers=SERVICE).status_code
+            == 422
+        )
+
+
 def test_missing_generic_facts_stay_unknown_and_synthesis_uses_condition(rig):
     client, _, _ = rig
     call = start(client)

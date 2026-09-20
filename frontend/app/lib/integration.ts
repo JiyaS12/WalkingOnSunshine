@@ -23,6 +23,7 @@ export interface ConditionSurvey {
   version: "1";
   condition_category: ConditionCategory;
   answers: ConfirmedAnswer[];
+  skipped?: string[];
 }
 
 export interface CallStart {
