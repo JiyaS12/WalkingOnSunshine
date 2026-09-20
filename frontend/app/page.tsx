@@ -6,23 +6,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
-  Loader2,
   Sparkles,
   Stethoscope,
-  User,
 } from "lucide-react";
 import {
   API_URL,
   ApiError,
-  PatientSummary,
   ensureDemoPatient,
-  fetchPatients,
 } from "./lib/api";
 
 export default function Home() {
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
-  const [patients, setPatients] = useState<PatientSummary[]>([]);
-  const [loading, setLoading] = useState(true);
   const [idInput, setIdInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [goError, setGoError] = useState<string | null>(null);
@@ -33,10 +27,6 @@ export default function Home() {
     fetch(`${API_URL}/api/health`)
       .then((r) => setBackendUp(r.ok))
       .catch(() => setBackendUp(false));
-    fetchPatients()
-      .then(setPatients)
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
   }, []);
 
   const go = async (override?: string) => {
@@ -136,12 +126,12 @@ export default function Home() {
               {creating ? "Opening…" : "Go"} <ArrowRight className="h-4 w-4" />
             </button>
           </div>
-          <p className="mb-4 text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             Any new ID auto-creates a demo profile (pain 3/10, no prior falls)
             so you can test right away.
           </p>
           {authRequired && (
-            <p className="mb-4 text-xs text-foreground">
+            <p className="mt-3 text-xs text-foreground">
               Patient records are protected.{" "}
               <Link
                 href={`/doctor?next=${encodeURIComponent("/")}`}
@@ -152,34 +142,8 @@ export default function Home() {
               to open or create a screening.
             </p>
           )}
-          {goError && <p className="mb-4 text-xs text-foreground">{goError}</p>}
+          {goError && <p className="text-xs text-foreground">{goError}</p>}
 
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Patient links
-          </h3>
-          {loading && (
-            <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
-            </p>
-          )}
-          {!loading && patients.length === 0 && (
-            <p className="text-xs text-muted-foreground">No patients found.</p>
-          )}
-          <ul className="flex flex-col gap-1.5">
-            {patients.map((p) => (
-              <li key={p.patient_id}>
-                <Link
-                  href={`/patient/${encodeURIComponent(p.patient_id)}`}
-                  className="flex items-center justify-between rounded-2xl border-0 bg-muted px-3 py-2 text-sm shadow-pillow-inset hover:bg-pastel-sand"
-                >
-                  <span className="text-foreground">
-                    {p.patient_id} — {p.name ?? "unknown"}
-                  </span>
-                  <User className="h-3.5 w-3.5 text-muted-foreground" />
-                </Link>
-              </li>
-            ))}
-          </ul>
           </div>
         </div>
       </div>
