@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import tempfile
@@ -29,6 +30,8 @@ import clinician_auth
 import patient_access
 import store
 from processor import GaitMetrics, GaitProcessor, validate_frames
+
+_log = logging.getLogger(__name__)
 
 # cv2/mediapipe are heavy native deps; a broken install (a non-headless
 # OpenCV without libGL, say) must not take the rest of the API down with it
@@ -336,6 +339,8 @@ async def process_video(file: UploadFile = File(...)) -> dict:
                 )
             tmp.write(chunk)
         tmp.close()
+        if size == 0:
+            raise HTTPException(status_code=422, detail="the uploaded video is empty")
 
         try:
             frames, effective_fps, total = await run_in_threadpool(
@@ -346,6 +351,13 @@ async def process_video(file: UploadFile = File(...)) -> dict:
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+        except (ZeroDivisionError, IndexError, KeyError, TypeError, RuntimeError) as e:
+            _log.exception("process-video failed for %s", name)
+            raise HTTPException(
+                status_code=422,
+                detail="the video could not be analysed — make sure the full body "
+                "is visible and the file is a valid .mp4/.mov/.webm",
+            ) from e
     finally:
         tmp.close()
         try:
