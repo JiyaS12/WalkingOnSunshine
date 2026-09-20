@@ -5,13 +5,16 @@ bridges patient-facing mobile screening with clinician-facing diagnostic
 tools. The system correlates subjective patient intake data with objective
 biomechanical telemetry to evaluate fall risk and mobility degradation.
 
-> This document describes the target architecture. Parts of the voice-agent
-> domain are not built yet; see [Implementation status](#4-implementation-status)
-> for what exists in the repository today.
+This describes the integrated implementation. Deterministic tests exercise real
+HTTP services with fake providers; live calls, speech, SMS and physical walking
+require separate operator validation.
 
 ## 1. System Components
 
-The platform consists of two primary operational domains:
+The platform runs as three processes: authoritative FastAPI main on **8000**,
+phone FastAPI on **8001**, and Next.js on **3000**. Main and phone use separate
+virtualenvs (`openai==3.16.1` versus `openai<3`). Main never imports telephony
+credentials or libraries to start. Run one worker for each Python service.
 
 ### Patient-Facing Client (`/patient/[id]`)
 
@@ -25,9 +28,15 @@ The platform consists of two primary operational domains:
 ### Automated Voice Agent (Phone Interface)
 
 - Manages outbound phone calls to conduct a structured clinical intake survey
-  (pain scores, fall history, dizziness, primary complaints).
-- Automatically generates and texts a secure, personalized web link to the
-  patient and guides them through the walking test.
+  (pain 1–10, fall count/injury/description, dizziness/notes, complaints), then
+  confirmed condition-specific HOOS JR or stroke items.
+- Requires clinician-provided condition metadata. The condition answers never
+  populate generic intake fields. Unknown facts stay null.
+- Submits idempotently to main, texts main's exact canonical signed URL, and
+  guides the patient using scoped backend walking state. Capture completion or
+  elapsed time alone never means a saved walk.
+- Keeps durable SQLite receipts containing only correlation and status metadata.
+  Phone numbers, answers, transcripts, signed URLs and audio are not receipts.
 
 ### Clinician Dashboard / Doctor's Portal (`/doctor`)
 
@@ -39,17 +48,23 @@ The platform consists of two primary operational domains:
 ## 2. End-to-End User & Data Workflow
 
 ```
-[ AI Voice Agent ]  (planned)
+[ Authenticated Clinician ]
        │
-       ├─ (1) Outbound Call & Voice Intake Survey
-       ├─ (2) Real-Time SMS Text with Personalized Link (e.g., /patient/RGN-0417)
-       └─ (3) Live Voice Guidance through Walking Test across Camera Frame
+       └─ Select canonical patient + explicit condition; request call
              │
              ▼
-[ Patient Web Client ]
+[ Main :8000 / JSON store ] ── reserve call/attempt ──► [ Phone :8001 ]
+       │
+       ◄── confirmed generic + condition surveys ────────────┘
+       ├── persist once; issue canonical signed URL ────────► SMS provider
+       └── walking state + saved session ◄──────────────────┐
+             │
+             ▼
+[ Patient Web Client :3000 ]                              │
        │
        ├─ Option A: Live Webcam (MediaPipe client-side joint mapping)
-       └─ Option B: Upload Pre-Recorded Video (.mp4 batch processing via FastAPI)
+       ├─ Option B: Upload video (.mp4 batch processing via FastAPI)
+       └─ Signed events + gait session with call_id/attempt_id ─┘
              │
              ▼
 [ FastAPI Backend Engine ]
@@ -104,6 +119,18 @@ The core endpoints that carry the cross-domain handshake:
 | `GET` | `/api/patients/{pid}` | One patient: survey + session history. |
 | `POST` | `/api/patients/{pid}/sessions` | Attach a gait session to a patient. |
 | `POST` | `/api/patients/{pid}/synthesis` | Unified subjective + objective report. |
+| `PATCH` | `/api/patients/{pid}/condition` | Persist explicit clinician condition. |
+| `GET`, `POST` | `/api/patients/{pid}/calls` | List calls or reserve/dispatch one with a stable request ID. |
+| `GET` | `/api/patients/{pid}/calls/{call_id}` | Read canonical call/survey/SMS/walking status. |
+| `POST` | `/api/patients/{pid}/calls/{call_id}/refresh` | Reconcile bounded phone snapshot. |
+| `POST` | `/api/patients/{pid}/calls/{call_id}/sms-retries` | Explicit retry after definitive SMS failure. |
+| `GET` | `/api/patient-access/{pid}/walking` | Read active call/attempt walking context (patient bearer). |
+| `POST` | `/api/patient-access/{pid}/walking/events` | Publish sequenced walking event (patient bearer). |
+| `GET` | `/api/integration/patients/{pid}` | Read canonical condition and active call (service token). |
+| `GET` | `/api/integration/patients/{pid}/calls/{call_id}` | Read reserved call (service token). |
+| `POST` | `/api/integration/patients/{pid}/calls/{call_id}/status` | Merge versioned phone snapshot (service token). |
+| `POST` | `/api/integration/patients/{pid}/calls/{call_id}/patient-link` | Issue fresh canonical link for active stored survey (service token). |
+| `GET` | `/api/integration/patients/{pid}/calls/{call_id}/walking` | Poll scoped walking state (service token). |
 
 The cohort list, patient detail, session administration, summary generation,
 synthesis, and cache-statistics routes require the signed clinician session.
@@ -114,6 +141,11 @@ are not accepted as clinician credentials. CORS uses the exact origins in
 `/api/generate-summary` and `/api/patients/{pid}/synthesis` call OpenAI
 `gpt-4o-mini` when `OPENAI_API_KEY` is set and fall back to a deterministic
 template otherwise. Summaries are cached in `backend/.cache/summaries.json`.
+For an active integrated call, synthesis requires that call's stored survey and
+its saved gait session with the same attempt ID; otherwise it returns `422`.
+Earlier sessions may inform the historical trend, but an unrelated old walk
+cannot stand in for the active call's result. Raw condition-item sums are
+explicitly labeled prototype scores, not validated clinical instrument scores.
 The signed patient-link request/response examples and configuration contract are
 defined in [`docs/patient-access-contract.md`](patient-access-contract.md).
 
@@ -128,13 +160,15 @@ defined in [`docs/patient-access-contract.md`](patient-access-contract.md).
 | Survey ingestion, signed patient links, and patient-scoped APIs | Implemented — `/api/submit-survey`, `/api/patient-access/{pid}` |
 | Doctor's portal and unified synthesis report | Implemented — `/doctor` |
 | Clinician sign-in/session boundary | Implemented — signed HttpOnly session; server-only credentials |
-| Patient client at `/patient/[id]` | Base flow implemented; signed-link frontend integration is tracked in #23. |
-| Automated voice agent (outbound calls, intake) | **Not implemented** — no telephony integration in the repository. |
-| SMS with personalized deep link | **Not implemented** — depends on both the voice agent and the `/patient/[id]` route. |
-| Live voice guidance during the walking test | **Not implemented** |
+| Patient client at `/patient/[id]` | Implemented — signed-link-only live/upload flow with route-safe loading and session writes. |
+| Automated voice agent (outbound calls, intake) | Implemented: Twilio/Deepgram adapters, separate generic/condition surveys; fake-provider tests. |
+| SMS with personalized deep link | Implemented: main-issued URL, durable dispatch receipts, explicit failed-SMS retry, ambiguity retained. |
+| Live voice guidance during the walking test | Implemented: backend event polling and persisted-session completion gate; physical flow not validated here. |
 
-Shipping the remaining voice-agent domain requires a telephony provider (call +
-SMS webhooks) and frontend consumption of the implemented signed-link contract.
+See the [operator runbook](integration-runbook.md) for provisioning, offline
+verification, provider validation and recovery limits. The JSON patient store
+is authoritative. Optional Supabase remains confined to the standalone voice
+demo; it is not a migration target for the integrated flow.
 
 ## Code map
 
@@ -143,18 +177,30 @@ gaitguard-ai/
   backend/
     main.py          FastAPI app and route definitions
     patient_access.py signed patient-token and link generation/verification
+    integration_api.py clinician call controls and service/patient adapters
+    integration_models.py strict condition/snapshot/walking contracts
+    phone_client.py   bounded authenticated phone proxy
     processor.py     GaitProcessor: frames -> GaitMetrics
     video.py         OpenCV + MediaPipe extraction for uploaded video
     store.py         patient records: surveys, sessions, synthesis
     agent.py         clinical summary (OpenAI gpt-4o-mini w/ template fallback)
   frontend/
-    app/page.tsx              landing page (patient ID lookup)
-    app/patient/[id]/page.tsx per-patient screening view
+    app/page.tsx              public secure-link instructions
+    app/patient/[id]/page.tsx signed per-patient screening view
     app/doctor/page.tsx       clinician dashboard
     app/components/           WebcamFeed, PatientScreening, SkeletonReplay,
                               TrendGraph, TokenEfficiency
     app/lib/api.ts            typed backend client
     app/lib/gait.ts           client-side pose helpers and calibration
+    app/lib/walkingReporter.ts serialized scoped walking event reporter
+  voice_agent/
+    phone_app.py              operator endpoints and Twilio webhooks/media
+    app/integrated_service.py reservations, submission and SMS reconciliation
+    app/integrated_session.py generic/condition survey and walking guidance
+    app/main_backend.py       authenticated main backend adapter
+    app/phone_receipts.py      durable private status receipts
+    app/telephony/integrated_provider.py bounded Twilio and fake providers
+  tests/integration/           separate-process offline HTTP handshake
   data/
     mock_patients.json  seed patients for the doctor's portal
 ```

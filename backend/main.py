@@ -7,6 +7,7 @@ import os
 import secrets
 import tempfile
 from datetime import datetime
+from typing import Literal, Self
 from urllib.parse import urlsplit
 
 from fastapi import (
@@ -22,14 +23,18 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, StringConstraints, ValidationError
+from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import JSONResponse
 from typing_extensions import Annotated
 
 import agent
 import clinician_auth
 import patient_access
 import store
+from integration_api import create_router, require_service_token
+from integration_models import ConditionSurvey, Identifier, utc_timestamp
+from phone_client import PhoneConfigurationError
 from processor import GaitMetrics, GaitProcessor, validate_frames
 
 _log = logging.getLogger(__name__)
@@ -45,6 +50,36 @@ else:
     _VIDEO_IMPORT_ERROR = None
 
 app = FastAPI(title="Sana")
+
+
+@app.exception_handler(store.Conflict)
+async def integration_conflict(request: Request, exc: store.Conflict) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)}, headers={"Cache-Control": "no-store"})
+
+
+@app.exception_handler(KeyError)
+async def missing_record(request: Request, exc: KeyError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "patient or call record not found"})
+
+
+@app.exception_handler(PhoneConfigurationError)
+async def missing_phone_config(request: Request, exc: PhoneConfigurationError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "phone service is not configured"})
+
+
+@app.exception_handler(patient_access.PatientAccessConfigurationError)
+async def missing_link_config(request: Request, exc: patient_access.PatientAccessConfigurationError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "patient access is not configured"})
+
+
+@app.exception_handler(OSError)
+async def persistence_failure(request: Request, exc: OSError) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"detail": "failed to persist patient record"})
+
+
+@app.exception_handler(store.StoreUnavailable)
+async def store_unavailable(request: Request, exc: store.StoreUnavailable) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "patient store is unavailable"})
 
 
 def _cors_origins(raw: str | None = None) -> list[str]:
@@ -89,7 +124,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Survey-Token"],
 )
 
@@ -381,8 +416,8 @@ async def process_video(file: UploadFile = File(...)) -> dict:
 
 
 class FallHistory(BaseModel):
-    falls_last_6_months: int = Field(ge=0)
-    injured: bool = False
+    falls_last_6_months: int | None = Field(default=None, ge=0)
+    injured: bool | None = None
     last_fall_description: str | None = Field(default=None, max_length=500)
 
 
@@ -391,21 +426,65 @@ class SurveyPayload(BaseModel):
         min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$"
     )
     patient_name: str | None = Field(default=None, max_length=500)
-    pain_scale: int = Field(ge=1, le=10)
-    fall_history: FallHistory
-    dizziness: bool
+    pain_scale: int | None = Field(default=None, ge=1, le=10)
+    fall_history: FallHistory | None = None
+    dizziness: bool | None = None
     dizziness_notes: str | None = Field(default=None, max_length=500)
-    primary_complaints: list[Annotated[str, StringConstraints(max_length=120)]] = Field(min_length=1, max_length=10)
+    primary_complaints: list[Annotated[str, StringConstraints(max_length=120)]] | None = Field(default=None, max_length=10)
     call_id: str | None = Field(default=None, max_length=64)
     recorded_at: datetime | None = None
+    submission_kind: Literal["manual", "integrated"] = "manual"
+    condition_survey: ConditionSurvey | None = None
+
+    @field_validator("recorded_at")
+    @classmethod
+    def normalize_time(cls, value: datetime | None) -> datetime | None:
+        return utc_timestamp(value)
+
+    @model_validator(mode="after")
+    def submission_contract(self) -> Self:
+        if self.submission_kind == "integrated":
+            if not self.call_id or not self.condition_survey:
+                raise ValueError("integrated surveys require call_id and a complete condition_survey")
+        else:
+            if self.pain_scale is None or self.fall_history is None or self.dizziness is None or not self.primary_complaints:
+                raise ValueError("manual surveys require pain, fall history, dizziness, and complaints")
+            if self.fall_history.falls_last_6_months is None:
+                raise ValueError("manual surveys require falls_last_6_months")
+            if self.condition_survey is not None:
+                raise ValueError("condition_survey requires submission_kind integrated")
+            if "injured" not in self.fall_history.model_fields_set:
+                self.fall_history.injured = False
+        return self
 
 
 class SessionPayload(BaseModel):
     label: str = Field(max_length=64)
     source: str = Field(max_length=32)
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=16,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
     metrics: GaitMetrics
     frames: list[dict[str, list[float]]] | None = None
     recorded_at: datetime | None = None
+    call_id: Identifier | None = None
+    attempt_id: Identifier | None = None
+
+    @field_validator("recorded_at")
+    @classmethod
+    def normalize_time(cls, value: datetime | None) -> datetime | None:
+        return utc_timestamp(value)
+
+    @model_validator(mode="after")
+    def correlation(self) -> Self:
+        if bool(self.call_id) != bool(self.attempt_id):
+            raise ValueError("call_id and attempt_id must be provided together")
+        if self.call_id and not self.idempotency_key:
+            raise ValueError("correlated walking sessions require idempotency_key")
+        return self
 
 
 def _check_survey_token(x_survey_token: str | None = Header(default=None)):
@@ -424,13 +503,23 @@ def _check_survey_token(x_survey_token: str | None = Header(default=None)):
 
 
 @app.post("/api/submit-survey", dependencies=[Depends(_check_survey_token)])
-def submit_survey(body: SurveyPayload, response: Response) -> dict:
+def submit_survey(
+    body: SurveyPayload, response: Response, x_survey_token: str | None = Header(default=None),
+) -> dict:
     response.headers["Cache-Control"] = "no-store"
     try:
+        if body.submission_kind == "integrated":
+            require_service_token(x_survey_token)
         link = patient_access.create_patient_link(body.patient_id)
+        record = store.upsert_survey(body.model_dump(mode="json"))
+        survey = next(
+            (item for item in record["surveys"] if body.call_id and item.get("call_id") == body.call_id),
+            None,
+        )
         return {
             "status": "stored",
-            "patient": store.upsert_survey(body.model_dump(mode="json")),
+            "patient": record,
+            "survey": survey,
             "patient_url": link.url,
             "patient_access_expires_at": link.expires_at.isoformat(),
         }
@@ -510,7 +599,7 @@ def get_patient(pid: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-def _store_patient_session(pid: str, body: SessionPayload) -> dict:
+def _store_patient_session(pid: str, body: SessionPayload, *, require_active_correlation: bool = False) -> dict:
     if body.frames is not None:
         if len(body.frames) > 300:
             raise HTTPException(
@@ -530,17 +619,23 @@ def _store_patient_session(pid: str, body: SessionPayload) -> dict:
             {
                 "label": body.label,
                 "source": body.source,
+                "idempotency_key": body.idempotency_key,
                 "metrics": body.metrics.model_dump(),
                 "frames": body.frames,
+                "call_id": body.call_id,
+                "attempt_id": body.attempt_id,
                 "recorded_at": (
                     body.recorded_at.isoformat()
                     if body.recorded_at
                     else None
                 ),
             },
+            require_active_correlation=require_active_correlation,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except store.Conflict:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except (OSError, TypeError) as exc:
@@ -722,7 +817,10 @@ def add_patient_session_with_access(
     _: None = Depends(_require_patient_access),
 ) -> dict:
     response.headers["Cache-Control"] = "no-store"
-    return _patient_view(_store_patient_session(pid, body))
+    return _patient_view(_store_patient_session(pid, body, require_active_correlation=True))
+
+
+app.include_router(create_router(require_clinician, _require_patient_access))
 
 
 _PID_PATH = Path(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
@@ -782,4 +880,26 @@ def patient_synthesis(pid: str) -> dict:
             status_code=422,
             detail="patient needs at least one survey and one gait session",
         )
+    if record.get("active_call_id"):
+        call = store.get_call(pid, record["active_call_id"])
+        surveys = [
+            survey for survey in record["surveys"]
+            if survey.get("call_id") == call["call_id"]
+        ]
+        session_index = next((
+            index for index, session in enumerate(record["gait_sessions"])
+            if session.get("session_id") == call["walking"]["session_id"]
+            and session.get("call_id") == call["call_id"]
+            and session.get("attempt_id") == call["attempt_id"]
+        ), None)
+        if call["walking"]["status"] != "saved" or not surveys or session_index is None:
+            raise HTTPException(
+                status_code=422,
+                detail="active call needs its confirmed survey and saved walking session",
+            )
+        record = {
+            **record,
+            "surveys": surveys,
+            "gait_sessions": record["gait_sessions"][:session_index + 1],
+        }
     return agent.generate_synthesis(record)
