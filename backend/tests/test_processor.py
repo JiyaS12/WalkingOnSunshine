@@ -1,5 +1,6 @@
 import copy
 import math
+import random
 import sys
 from pathlib import Path
 
@@ -20,19 +21,29 @@ def _flat_frames(n):
     return [dict(joint) for _ in range(n)]
 
 
-def _walking_frames(n=300, fps=30.0, left_lift=0.30, right_lift=0.30, floor=0.05):
-    """Two ankles swinging in antiphase, each clearing the floor by its lift."""
+def _walking_frames(
+    n=300, fps=30.0, left_lift=0.30, right_lift=0.30, floor=0.05, step=0.30
+):
+    """Two ankles swinging in antiphase, each clearing the floor by its lift.
+
+    The feet have to swing fore-aft as well as up: without `step` the ankles
+    stay level with each other and the clip is a pair of feet bobbing in
+    place, which is not gait and is no longer detected as such.
+    """
     frames = []
     for i in range(n):
         phase = 2 * math.pi * (i / fps)
+        left_x = step * math.sin(phase)
+        right_x = step * math.sin(phase + math.pi)
+        base = 0.01 * i
         frames.append({
-            "left_hip": [0.01 * i, 1.0, -0.09],
-            "right_hip": [0.01 * i, 1.0, 0.09],
-            "left_knee": [0.01 * i, 0.5, -0.09],
-            "right_knee": [0.01 * i, 0.5, 0.09],
-            "left_ankle": [0.01 * i,
+            "left_hip": [base, 1.0, -0.09],
+            "right_hip": [base, 1.0, 0.09],
+            "left_knee": [base + left_x / 2, 0.5, -0.09],
+            "right_knee": [base + right_x / 2, 0.5, 0.09],
+            "left_ankle": [base + left_x,
                            floor + left_lift * max(0.0, math.sin(phase)), -0.09],
-            "right_ankle": [0.01 * i,
+            "right_ankle": [base + right_x,
                             floor + right_lift * max(0.0, math.sin(phase + math.pi)),
                             0.09],
         })
@@ -81,6 +92,64 @@ def test_standing_still_not_flagged():
     metrics = GaitProcessor(_flat_frames(90)).compute()
     assert metrics.gait_detected is False
     assert metrics.fall_risk_score < 0.2
+
+
+def _noisy_standing(n=90, fps=30.0, jitter=0.0, sway=0.0, seed=0, width=0.10):
+    """Standing as a real tracker sees it: per-landmark jitter plus slow
+    postural sway, hip-centred with y up (the live camera's convention)."""
+    rng = random.Random(seed)
+    base = {
+        "left_hip": (0.0, 0.0, -0.09), "right_hip": (0.0, 0.0, 0.09),
+        "left_knee": (0.0, -0.45, -width), "right_knee": (0.0, -0.45, width),
+        "left_ankle": (0.0, -0.88, -width), "right_ankle": (0.0, -0.88, width),
+    }
+    frames = []
+    for i in range(n):
+        t = i / fps
+        sway_x = sway * math.sin(2 * math.pi * 0.3 * t)
+        sway_z = sway * math.sin(2 * math.pi * 0.23 * t + 1.0)
+        frames.append({
+            joint: [
+                x + sway_x + rng.gauss(0, jitter),
+                y + rng.gauss(0, jitter),
+                z + sway_z + rng.gauss(0, jitter),
+            ]
+            for joint, (x, y, z) in base.items()
+        })
+    return frames
+
+
+@pytest.mark.parametrize(
+    "jitter,sway",
+    [(0.003, 0.0), (0.008, 0.01), (0.02, 0.015), (0.03, 0.02), (0.04, 0.03)],
+)
+def test_noisy_standing_still_not_flagged(jitter, sway):
+    """Landmark jitter used to read as a high-risk walk.
+
+    A centimetre of ankle wobble cleared the lift threshold, noise supplied
+    the peaks, and the feet's lateral spacing stood in for stride length —
+    enough to saturate both deficits and report ~0.8 for someone holding
+    still. Detection now needs the fore-aft swing to repeat.
+    """
+    metrics = GaitProcessor(
+        _noisy_standing(jitter=jitter, sway=sway), fps=30.0, leg_length_m=0.9
+    ).compute()
+    assert metrics.gait_detected is False
+    assert metrics.fall_risk_score < 0.2
+
+
+def test_short_shuffling_step_is_still_detected():
+    """The guard against the fix overshooting: a shuffle swings the ankles
+    less far apart than standing jitter does, so amplitude cannot be what
+    separates them, and scoring a shuffler as 'not walking' would report a
+    reassuring number for a genuinely high-risk gait."""
+    session = gait_gen.generate_session(
+        step_amp=0.05, flex_amp_l=12, flex_amp_r=14,
+        lift_bias_r=0.2, speed_decay=0.1, n_frames=90, seed=3,
+    )
+    metrics = GaitProcessor(session["frames"], fps=session["fps"]).compute()
+    assert metrics.gait_detected is True
+    assert metrics.fall_risk_score > 0.5
 
 
 def test_settle_then_stand_still_not_flagged():

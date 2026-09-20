@@ -31,6 +31,24 @@ _EPS = 1e-9
 # above this share of frames missing a joint the clip is too sparse to score
 _MAX_DROPPED_PCT = 50.0
 
+# plausible stepping rates: the fore-aft ankle swing completes one cycle per
+# stride, so a 0.3-3 Hz band spans a slow shuffle to a brisk walk
+_STEP_FREQ_HZ = (0.3, 3.0)
+
+# share of the swing's power that must sit at stepping rates to count as
+# walking; over 500 simulated standing clips peaked at 0.55 and the weakest
+# walk (a 5 cm shuffle) reached 0.75, so the bar sits between them
+_MIN_RHYTHM = 0.65
+
+
+def _smooth(signal: np.ndarray, window: int = 5) -> np.ndarray:
+    return (
+        pd.Series(signal)
+        .rolling(window=window, min_periods=1, center=True)
+        .mean()
+        .to_numpy()
+    )
+
 
 class GaitMetrics(BaseModel):
     stride_length_m: float
@@ -180,10 +198,69 @@ class GaitProcessor:
         ankle = self._joint_array(f"{side}_ankle")
         return np.linalg.norm(np.diff(ankle, axis=0), axis=1) * self.fps
 
-    def _ankle_separation(self) -> np.ndarray:
-        left = self._joint_array("left_ankle")
-        right = self._joint_array("right_ankle")
-        return np.linalg.norm(left - right, axis=1)
+    def _travel_axis(self) -> np.ndarray:
+        """Per-frame unit vector along the walking direction: horizontal and
+        perpendicular to the hip line."""
+        lateral = self._joint_array("right_hip") - self._joint_array("left_hip")
+        lateral = lateral.copy()
+        lateral[:, 1] = 0.0
+        norm = np.linalg.norm(lateral, axis=1, keepdims=True)
+        axis = np.zeros_like(lateral)
+        axis[:, 0] = 1.0  # hips edge-on or lost: assume travel along x
+        usable = norm[:, 0] > _EPS
+        lateral[usable] /= norm[usable]
+        up = np.zeros_like(lateral)
+        up[:, 1] = 1.0
+        axis[usable] = np.cross(lateral, up)[usable]
+        return axis
+
+    def _ankle_gap(self) -> np.ndarray:
+        """Signed fore-aft distance between the ankles (m).
+
+        Projecting onto the travel axis drops step width and any height
+        difference between the feet. A plain 3-D distance folds both into
+        stride length and, worse, never falls to zero: two feet planted a
+        stride-width apart read as a permanent half-metre of stride, which
+        is enough on its own to saturate the stride deficit.
+        """
+        delta = self._joint_array("left_ankle") - self._joint_array("right_ankle")
+        return np.sum(delta * self._travel_axis(), axis=1)
+
+    def _rhythm(self, signal: np.ndarray) -> float:
+        """Share of the fore-aft swing's power that sits at stepping rates.
+
+        Amplitude cannot separate walking from standing: tracker jitter pushes
+        the ankles further apart than a short shuffling step does. Spectral
+        shape can. Jitter is broadband, so only the band's own share of the
+        spectrum lands inside it, whereas a walk at any speed concentrates
+        nearly all its power there. Pass the unsmoothed signal — smoothing is
+        a low-pass filter, so it moves noise power into the band and closes
+        the very gap being measured.
+        """
+        centred = signal - signal.mean()
+        if centred.std() < _EPS:
+            return 0.0
+        power = np.abs(np.fft.rfft(centred * np.hanning(len(centred)))) ** 2
+        freqs = np.fft.rfftfreq(len(centred), 1.0 / self.fps)
+        total = float(power[1:].sum())  # drop DC: only the varying part counts
+        if total <= _EPS:
+            return 0.0
+        low, high = _STEP_FREQ_HZ
+        in_band = power[1:][(freqs[1:] >= low) & (freqs[1:] <= high)]
+        return float(in_band.sum() / total)
+
+    def _rhythm_floor(self) -> float:
+        """What broadband jitter alone scores on `_rhythm` at this frame rate.
+
+        The stepping band is a fixed width, so the slower the capture the more
+        of the spectrum it covers — below roughly 12 fps noise clears the flat
+        threshold on its own and the bar has to rise with it.
+        """
+        nyquist = self.fps / 2.0
+        low, high = _STEP_FREQ_HZ
+        if nyquist <= low:
+            return 1.0
+        return (min(high, nyquist) - low) / nyquist
 
     def _find_peaks(self, signal: np.ndarray) -> np.ndarray:
         """Local maxima via neighbor comparison, min spacing ~0.3s."""
@@ -209,12 +286,17 @@ class GaitProcessor:
         foot with reduced swing height is measured against the same floor as
         the healthy foot. Thresholding each foot against its own range would
         rescale the impaired side and report zero asymmetry.
+
+        Floor and ceiling come from percentiles rather than min and max: those
+        are extremes, so tracker jitter drags them apart, moves the threshold
+        and splits the two stance fractions. That alone reported 64% asymmetry
+        for a symmetric walk at 4 cm of jitter, against 17% clean.
         """
         left_y = self._joint_array("left_ankle")[:, 1]
         right_y = self._joint_array("right_ankle")[:, 1]
         both = np.concatenate((left_y, right_y))
-        floor = float(np.min(both))
-        threshold = floor + 0.15 * (float(np.max(both)) - floor)
+        floor = float(np.percentile(both, 5))
+        threshold = floor + 0.15 * (float(np.percentile(both, 95)) - floor)
 
         left = float(np.sum(left_y <= threshold)) / len(left_y)
         right = float(np.sum(right_y <= threshold)) / len(right_y)
@@ -248,7 +330,10 @@ class GaitProcessor:
         return max(0.0, (first - second) / first * 100.0)
 
     def compute(self) -> GaitMetrics:
-        separation = self._ankle_separation()
+        raw_gap = self._ankle_gap()
+        # smoothed so tracker jitter cannot manufacture peaks, which would
+        # both inflate cadence and bias stride toward the noise maxima
+        separation = np.abs(_smooth(raw_gap))
         peaks = self._find_peaks(separation)
         if len(peaks) >= 2:
             stride = 2.0 * float(np.mean(separation[peaks]))
@@ -268,7 +353,11 @@ class GaitProcessor:
             )
         )
 
-        # gait detected: >=2 stride peaks and ankles actually lift off
+        # gait detected: the feet lift off, swing fore-aft, and keep repeating.
+        # The lift and peak-count conditions are cheap to satisfy by accident —
+        # a centimetre of landmark jitter clears both while standing still, and
+        # that alone used to saturate the stride and knee deficits and report
+        # ~0.8 risk for a stationary subject — so periodicity carries the call.
         ankle_y_range = float(
             np.mean(
                 [
@@ -278,7 +367,10 @@ class GaitProcessor:
             )
         )
         gait_detected = bool(
-            len(peaks) >= 2 and ankle_y_range > 0.03 * self.leg_length_m
+            len(peaks) >= 2
+            and ankle_y_range > 0.03 * self.leg_length_m
+            and self._rhythm(raw_gap)
+            >= max(_MIN_RHYTHM, self._rhythm_floor() + 0.15)
         )
 
         stance_asym = self._stance_asymmetry()
