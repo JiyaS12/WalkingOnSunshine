@@ -130,7 +130,7 @@ for k, v in dotenv_values(".env").items():
         os.environ.setdefault(k, v)
 import patient_access
 print(patient_access.create_patient_link("RGN-0417").url)
-' 2>/dev/null || true)"
+')" || die "Could not create the demo patient link. Check PATIENT_LINK_SIGNING_SECRET and PATIENT_APP_BASE_URL in backend/.env (delete the file to regenerate demo defaults)."
 
 cat <<EOF
 
@@ -142,7 +142,7 @@ cat <<EOF
                      username: $CLIN_USER
                      password: $CLIN_PASS
   Demo patient walk (magic link, no sign-in needed):
-    ${MAGIC_LINK:-http://localhost:3000/patient/RGN-0417  (sign in at /doctor first)}
+    $MAGIC_LINK
 
   Press Ctrl+C to stop.
 ============================================================
