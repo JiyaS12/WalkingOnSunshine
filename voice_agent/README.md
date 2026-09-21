@@ -1,7 +1,7 @@
-# WalkingOnSunshine voice service
+# Sana voice service
 
 The phone service integrates the confirmed survey runtime with the main
-WalkingOnSunshine backend. Main owns patient identity, clinician-selected
+Sana backend. Main owns patient identity, clinician-selected
 conditions, clinical storage, signed links, walking events and saved sessions.
 
 ## What is in this repo now
@@ -9,11 +9,11 @@ conditions, clinical storage, signed links, walking events and saved sessions.
 The active runtime is the `app/` package. It enforces:
 
 - authenticated main-backend lookup before dialing a registered call
-- deterministic generic intake, kept separate from the condition instrument
+- unknown/null generic intake fields, never inferred from condition answers
 - strict condition-based question selection
 - direct option selection and confirmation of inferred answers, with bounded retry limits
 - durable provider dispatch receipts and versioned status publication to main
-- SMS of the exact backend-issued patient URL after successful survey ingestion
+- SMS of the exact backend-issued patient URL after consent and successful survey ingestion
 
 The first-release scope is intentionally narrow:
 
@@ -69,8 +69,9 @@ OPENAI_MODEL=gpt-4.1-mini
 
 Without an OpenAI key, or with `SURVEY_EXTRACTOR=exact`, the app accepts exact
 answer labels and basic repeat/pause/resume/stop commands offline. It asks for a
-choice when free-form language cannot be interpreted. Generic intake is always
-deterministic, regardless of this setting. Direct Python users can
+choice when free-form language cannot be interpreted. The current integrated
+call asks only the six condition questions; generic intake fields remain null.
+Direct Python users can
 pass `interpreter=build_answer_interpreter()` (from `app.answer_interpreter`) to
 `SafeSurveyEngine`; its default remains offline.
 
@@ -130,14 +131,19 @@ from the server-composed response.
   For compatibility, `confirmed=True` means patient-authorized, either by direct
   selection or by separate agreement. `acceptance_method` on accepted answers and
   snapshots distinguishes `explicit_selection` from `confirmation`. Inferred
-  proposals keep it null. No remote database integration/schema change is made.
-- Three failed clarifications/rejections for one question stop the session and
-  set `needs_human_review`. The count resets only when an answer is confirmed.
-  Repeat and pause requests do not use up attempts. Completed, stopped, and
-  escalated sessions cannot resume accepting answers.
+  proposals keep it null. The integrated store preserves this distinction.
+- Three failed clarifications/rejections for one question leave it unanswered,
+  set `needs_human_review`, and advance to the next question. Repeated silence
+  on an active phone survey question also skips it. The retry count resets for
+  each new question; repeat and pause requests do not use up attempts. Explicit
+  stop requests and overall call limits still end the call. Completed, stopped,
+  and escalated sessions cannot resume accepting answers.
 - Medical questions receive a fixed scope boundary. The helper does not diagnose,
   prescribe, promise recovery, impersonate a doctor, or claim that a clinician
-  has been contacted. A real doctor's recording is a separate future integration.
+  has been contacted. The phone runtime can play a separate recorded doctor
+  greeting before the automated helper; the bundled clip defaults to orthopedic
+  calls. `DOCTOR_GREETING_AUDIO` selects the clip (empty disables it), and
+  `DOCTOR_GREETING_CONDITIONS` selects eligible conditions.
 
 The OpenAI adapter uses [strict structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs),
 then validates output again locally. Only the current question, options, pending
@@ -152,8 +158,12 @@ AI-proposed categories require a separate patient decision; clearly selected
 categories do not. Classification of full sentences and bridge tone remain
 model-dependent; lexical/schema checks are not a semantic correctness guarantee.
 The existing question bank was preserved, not independently validated as a
-clinical instrument. Human review is a local flag; no notification or clinic
-delivery is implemented here.
+clinical instrument. In the integrated flow, human-review metadata and the
+recognized survey transcript are submitted to the main patient store and shown
+in the clinician portal. There is no automatic clinician notification. Missing
+answers are not assigned values, and incomplete surveys receive no total score.
+The transcript is saved with survey submission, not continuously during a call;
+an interrupted call may have no persisted transcript.
 
 Offline guardrail and mocked-provider tests run with the normal suite. To evaluate
 the configured model on synthetic examples (paid API calls), explicitly opt in:
@@ -250,30 +260,28 @@ timeout, redirects disabled and no automatic transport retries:
 | `GET /api/integration/patients/{patient_id}` | Authoritative metadata and active call |
 | `GET /api/integration/patients/{patient_id}/calls/{call_id}` | Captured call context and reserved SMS retry |
 | `POST /api/integration/patients/{patient_id}/calls/{call_id}/status` | Versioned bare snapshot |
-| `POST /api/submit-survey` | Complete confirmed generic and condition survey |
+| `POST /api/submit-survey` | Condition survey with confirmed answers, unanswered items, review metadata, and transcript |
 | `GET /api/integration/patients/{patient_id}/calls/{call_id}/walking` | Patient/attempt-scoped walking state |
 
-Survey submission is frozen only after the three spoken generic questions
-(pain 1–10, falls in the last six months, dizziness) and all six condition
-questions are complete. Clear answers are accepted directly; inferred readings
-get a read-back and explicit yes; unknown/refused values are stored as null.
-The remaining generic fields below are sent as null by the phone flow.
-Three unsuccessful clarification/rejection attempts end intake without
-submitting an incomplete record. Pause/repeat/resume preserve pending answers.
-No Likert value supplies a numeric pain score, fall count or dizziness value.
+Survey submission is frozen after all six condition questions have been
+answered or marked unanswered. Clear selections are accepted directly; inferred
+readings require patient agreement. The helper then asks for SMS consent. Both
+consent and decline save the survey, but only consent sends the walking link.
+Generic fields are sent as unknown/null by the current phone flow. No Likert
+value supplies a numeric pain score, fall count or dizziness value.
 
 ```json
 {
   "patient_id": "patient1",
   "call_id": "main-issued-call-id",
   "submission_kind": "integrated",
-  "pain_scale": 7,
+  "pain_scale": null,
   "fall_history": {
-    "falls_last_6_months": 2,
+    "falls_last_6_months": null,
     "injured": null,
     "last_fall_description": null
   },
-  "dizziness": false,
+  "dizziness": null,
   "dizziness_notes": null,
   "primary_complaints": null,
   "condition_survey": {
@@ -294,8 +302,13 @@ No Likert value supplies a numeric pain score, fall count or dizziness value.
 }
 ```
 
-The example abbreviates `answers`; a valid payload contains exactly six canonical
-IDs once each: HOOS JR uses `hoos_stairs`, `hoos_uneven_surface`, `hoos_rising`,
+The example abbreviates `answers`; a valid payload accounts for all six canonical
+IDs exactly once across `answers` and `unanswered_questions`. Unanswered entries
+contain `question_id`, `reason` (`clarification_limit` or `no_response`), and
+`clarification_attempts`, never a normalized answer. They force
+`needs_human_review=true`; `skipped` retains their IDs for compatibility.
+`transcript` holds speaker, text, question ID, and timestamp for recognized
+survey turns. HOOS JR uses `hoos_stairs`, `hoos_uneven_surface`, `hoos_rising`,
 `hoos_bending`, `hoos_lying_bed`, `hoos_sitting`. Stroke uses instrument
 `stroke_mobility`, condition `stroke`, and `stroke_balance`, `stroke_weakness`,
 `stroke_stairs`, `stroke_turning`, `stroke_walking`, `stroke_recovery`.

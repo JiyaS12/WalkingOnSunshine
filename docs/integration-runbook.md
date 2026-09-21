@@ -66,7 +66,7 @@ origin and the clinician cookie is first-party.
 Run in separate terminals from the repository root:
 
 ```bash
-(cd backend && .venv/bin/uvicorn main:app --port 8000 --no-access-log)
+(cd backend && .venv/bin/uvicorn main:app --port 8000 --env-file .env --no-access-log)
 (cd voice_agent && .venv/bin/python phone_app.py)
 (cd frontend && npm run dev)
 ```
@@ -129,12 +129,17 @@ The integration-specific frontend fixtures mock walking status explicitly.
    metadata and allocates `call_id`/`attempt_id`.
 3. Provide an E.164 destination and start once. Keep the same request ID when
    recovering an uncertain HTTP result; a new ID is a new request.
-4. Phone collects three generic facts (pain, falls, dizziness), preserving refusals/unknowns as null,
-   and six condition items. Explicit selections are confirmed values; inferred
-   proposals require a separate yes/no confirmation. Stop/clarification limits
-   terminate or escalate rather than fabricating answers.
+4. Phone asks six condition items. Generic intake fields remain null in the
+   current call flow. Explicit selections are accepted directly; inferred
+   proposals require patient agreement. Three failed clarifications, or repeated
+   silence on an active question, leave that item unanswered and continue.
+   The submitted survey retains the recognized transcript and a human-review
+   flag, with no total score for missing answers. Explicit stop requests and
+   overall call limits still end the call.
 5. Main stores the integrated payload idempotently, issues the signed URL and
-   returns it to phone. Phone reserves SMS durably and sends that exact URL.
+   returns it to phone. With the patient's SMS consent, phone reserves SMS
+   durably and sends that exact URL. Declining still saves the survey but sends
+   no text.
 6. Patient opens the unexpired link. It is removed from the browser address bar
    and held in component memory. Reopening/reloading needs the original URL.
 7. Patient permits the camera and calibrates, or uploads a video. Live capture
